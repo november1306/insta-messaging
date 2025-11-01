@@ -4,7 +4,10 @@ This plan is organized to prioritize getting a working MVP deployed and tested a
 
 ## Phase 1: Minimal Viable Solution (Receive + Respond)
 
-- [ ] 1. Create minimal FastAPI webhook server
+- [x] 1. Create minimal FastAPI webhook server
+
+
+
   - Create basic FastAPI project structure (app/main.py, app/api/webhooks.py)
   - Implement GET /webhooks/instagram for webhook verification (validate verify_token, return challenge)
   - Implement POST /webhooks/instagram to receive messages (log payload, return 200)

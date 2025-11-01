@@ -1,13 +1,15 @@
 {
   "mcpServers": {
     "github": {
-      "command": "uvx",
-      "args": ["mcp-server-github"],
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
       "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "",
-        "PYTHONIOENCODING": "utf-8"
+        "GITHUB_PERSONAL_ACCESS_TOKEN": ""
       },
-      "disabled": true,
+      "disabled": false,
       "autoApprove": [
         "create_or_update_file",
         "create_branch",
