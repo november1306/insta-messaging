@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "uvx",
+      "args": ["mcp-server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "disabled": true,
+      "autoApprove": [
+        "create_or_update_file",
+        "create_branch",
+        "create_pull_request",
+        "push_files"
+      ]
+    }
+  }
+}
