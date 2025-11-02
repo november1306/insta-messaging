@@ -4,7 +4,7 @@ Instagram Messenger Automation - Main Application Entry Point
 from fastapi import FastAPI
 from app.api import webhooks
 from app.config import settings
-from app.core.database import init_db, close_db
+from app.db import init_db, close_db
 import logging
 
 # Configure logging

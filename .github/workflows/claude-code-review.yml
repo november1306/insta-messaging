@@ -29,31 +29,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for better context
-
-      - name: Setup GitHub CLI
-        run: |
-          # gh CLI is pre-installed on GitHub runners
-          gh --version
-        env:
-          GH_TOKEN: ${{ github.token }}
+          fetch-depth: 1
 
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ github.token }}
           prompt: |
-            Review this pull request (#${{ github.event.pull_request.number }}) and provide feedback.
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
 
-            Focus on:
+            Please review this pull request and provide feedback on:
             - Code quality and best practices
-            - Potential bugs or issues  
+            - Potential bugs or issues
+            - Performance considerations
             - Security concerns
-            - YAGNI principle adherence
+            - Test coverage
 
-            Use `gh pr comment ${{ github.event.pull_request.number }}` to post your review.
+            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
 
-          claude_args: '--allowed-tools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"'
+            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
 

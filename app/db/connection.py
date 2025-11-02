@@ -5,7 +5,7 @@ YAGNI: SQLite only for now. Add MySQL when deploying to production.
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
-from app.models.models import Base
+from app.db.models import Base
 import logging
 
 logger = logging.getLogger(__name__)
