@@ -91,7 +91,7 @@ def decrypt_token(encrypted_token: str, secret_key: str) -> str:
 - Never exposed in logs
 
 **Current secrets:**
-- `ANTHROPIC_API_KEY` - For Claude AI code reviews (optional)
+- None currently configured
 
 ### 5. Code Review Automation
 **Bandit Security Scanner:**

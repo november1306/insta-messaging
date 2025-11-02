@@ -3,16 +3,9 @@ name: Claude PR Review (GitHub Comments)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [main, develop]
-    paths:
-      - '**/*.py'
-      - '**/*.js'
-      - '**/*.ts'
-      - '**/*.tsx'
-      - '**/*.jsx'
-      - 'requirements.txt'
-      - 'pyproject.toml'
-      - 'package.json'
+    branches:
+      - main
+      - develop
 
 permissions:
   contents: read
@@ -21,49 +14,30 @@ permissions:
 
 jobs:
   claude-review:
-    name: AI Review with Claude
     runs-on: ubuntu-latest
-    # Only run if PR is not from a fork (secret check happens in script)
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
-    
+    name: Review PR with Claude Code
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+
+      - name: Claude Code PR Review
+        uses: anthropics/claude-code-action@v1
         with:
-          python-version: '3.12'
-          cache: 'pip'
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests anthropic
-      
-      - name: Run Claude Code Review
-        id: claude-review
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          python .github/scripts/claude-review.py --pr-number ${{ github.event.pull_request.number }}
-        continue-on-error: true
-      
-      - name: Review Summary
-        if: always()
-        run: |
-          echo "## 🤖 Claude AI Review" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ steps.claude-review.outcome }}" == "success" ]]; then
-            echo "✅ Review completed successfully and posted as a comment." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Review failed - check logs for details." >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**PR Number:** #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Changed Files:** ${{ github.event.pull_request.changed_files }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Review Status:** ${{ steps.claude-review.outcome }}" >> $GITHUB_STEP_SUMMARY
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Review this pull request and post your feedback as comments on the PR.
+
+            Analyze the code changes for:
+            - Code quality and best practices
+            - Security vulnerabilities
+            - Performance issues
+            - Python/FastAPI specific patterns
+            - Logic bugs and edge cases
+            - Missing error handling or type hints
+
+            Post your findings as comments on the PR using the GitHub API.
+          claude_args: "--max-turns 10"
