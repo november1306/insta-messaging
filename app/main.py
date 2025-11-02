@@ -31,7 +31,7 @@ async def startup_event():
     logger.info(f"📝 Environment: {settings.environment}")
     
     # Initialize database
-    await init_db(environment=settings.environment)
+    await init_db()
     
     logger.info(f"✅ Configuration loaded successfully")
     logger.info(f"🔗 Webhook endpoint: /webhooks/instagram")

@@ -1,5 +1,7 @@
 """
 Database connection management with SQLAlchemy async support.
+
+YAGNI: SQLite only for now. Add MySQL when deploying to production.
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -12,56 +14,23 @@ logger = logging.getLogger(__name__)
 engine = None
 async_session_maker = None
 
-
-def get_database_url(environment: str = "development") -> str:
-    """
-    Get database URL based on environment.
-    
-    For local development: SQLite
-    For production: MySQL (from environment variables)
-    """
-    if environment == "production":
-        # MySQL connection for production
-        # Will be configured via environment variables during deployment
-        from app.config import settings
-        return settings.database_url
-    else:
-        # SQLite for local development
-        return "sqlite+aiosqlite:///./instagram_automation.db"
+# SQLite database file
+DATABASE_URL = "sqlite+aiosqlite:///./instagram_automation.db"
 
 
-async def init_db(database_url: str = None, environment: str = "development"):
-    """
-    Initialize database connection and create tables.
-    
-    Args:
-        database_url: Optional database URL override
-        environment: Environment name (development/production)
-    """
+async def init_db():
+    """Initialize SQLite database connection and create tables."""
     global engine, async_session_maker
     
-    if database_url is None:
-        database_url = get_database_url(environment)
+    logger.info(f"Initializing database: SQLite")
     
-    logger.info(f"Initializing database: {database_url.split('://')[0]}://...")
-    
-    # Create async engine
-    # For SQLite, we need special configuration
-    if database_url.startswith("sqlite"):
-        engine = create_async_engine(
-            database_url,
-            echo=False,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-    else:
-        engine = create_async_engine(
-            database_url,
-            echo=False,
-            pool_pre_ping=True,
-            pool_size=10,
-            max_overflow=20,
-        )
+    # Create async engine for SQLite
+    engine = create_async_engine(
+        DATABASE_URL,
+        echo=False,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     
     # Create session factory
     async_session_maker = async_sessionmaker(
