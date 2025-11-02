@@ -18,16 +18,10 @@ jobs:
     name: Review PR with Claude Code
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Claude Code PR Review
-        uses: anthropics/anthropic-quickstarts@claude-code-review-github-action-v1
+        uses: anthropics/claude-code-action@v1
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          model: claude-sonnet-4
-          review-level: detailed
-          auto-comment: true
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: "/review"
+          claude_args: "--max-turns 5"
