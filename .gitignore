@@ -209,3 +209,40 @@ __marimo__/
 # Kiro IDE settings with secrets
 # These files may contain API keys and tokens
 .kiro/settings/mcp.json
+
+# Security - Sensitive files that should never be committed
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+id_rsa
+id_rsa.pub
+*.ppk
+
+# Credentials and secrets
+credentials.json
+secrets.json
+secrets.yaml
+secrets.yml
+service-account*.json
+
+# Environment-specific files
+.env.local
+.env.*.local
+.env.production
+.env.staging
+
+# Database files with potential sensitive data
+*.sql
+*.dump
+backup/
+dumps/
+
+# Logs that may contain sensitive information
+logs/
+*.log.*
+error.log
+access.log
