@@ -7,37 +7,36 @@ on:
       - main
       - develop
 
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write
-
 jobs:
   claude-review:
     runs-on: ubuntu-latest
-    name: Review PR with Claude Code
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Claude Code PR Review
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@beta
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          prompt: |
-            Review this pull request and post your feedback as comments on the PR.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-            Analyze the code changes for:
+          direct_prompt: |
+            Please review this pull request and provide feedback on:
             - Code quality and best practices
             - Security vulnerabilities
             - Performance issues
             - Python/FastAPI specific patterns
             - Logic bugs and edge cases
             - Missing error handling or type hints
+            - Potential bugs or issues
+            - Test coverage
+            - **File appropriateness**: Check if any files should be kept local-only (build artifacts, coverage files, temporary files, IDE configs, etc.) and should be added to .gitignore instead of being committed
 
-            Post your findings as comments on the PR using the GitHub API.
-          claude_args: "--max-turns 10"
+            Be constructive and helpful in your feedback.
