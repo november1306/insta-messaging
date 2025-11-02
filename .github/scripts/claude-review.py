@@ -46,13 +46,10 @@ def get_pr_files(repo: str, pr_number: int, github_token: str) -> List[Dict]:
 
 
 def review_with_claude(diff: str, files: List[Dict], api_key: str) -> str:
-    """Send diff to Claude for review."""
-    url = "https://api.anthropic.com/v1/messages"
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
-    }
+    """Send diff to Claude for review using the official Anthropic client."""
+    from anthropic import Anthropic
+    
+    client = Anthropic(api_key=api_key)
     
     file_list = "\n".join([f"- {f['filename']} ({f['status']})" for f in files])
     
@@ -98,22 +95,18 @@ Format your response as:
 [APPROVE / REQUEST_CHANGES / COMMENT with reasoning]
 """
     
-    data = {
-        "model": "claude-3-5-sonnet-20241022",
-        "max_tokens": 4096,
-        "messages": [
+    message = client.messages.create(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=4096,
+        messages=[
             {
                 "role": "user",
                 "content": prompt
             }
         ]
-    }
+    )
     
-    response = requests.post(url, headers=headers, json=data)
-    response.raise_for_status()
-    
-    result = response.json()
-    return result["content"][0]["text"]
+    return message.content[0].text
 
 
 def post_review_comment(
