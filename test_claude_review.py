@@ -1,7 +1,7 @@
 # Test file for Claude PR review
 def test_function():
     """Test function to trigger Claude review."""
-    return "Hello Claude!"
+    return "Hello Claude! App is now enabled!"
 
 # Intentional issues for review:
 def bad_function(x):
