@@ -1,5 +1,8 @@
 """
-Utility functions for Instagram automation testing
+Utility functions for Instagram automation testing.
+
+This module provides helper functions for validating and formatting
+Instagram-related data before sending messages.
 """
 
 def validate_message(message):
