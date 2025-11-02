@@ -1,0 +1,69 @@
+name: Claude AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, develop]
+    paths:
+      - '**/*.py'
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.jsx'
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - 'package.json'
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  claude-review:
+    name: AI Review with Claude
+    runs-on: ubuntu-latest
+    # Only run if ANTHROPIC_API_KEY is configured and PR is not from a fork
+    if: ${{ secrets.ANTHROPIC_API_KEY != '' && github.event.pull_request.head.repo.full_name == github.repository }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests anthropic
+      
+      - name: Run Claude Code Review
+        id: claude-review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python .github/scripts/claude-review.py --pr-number ${{ github.event.pull_request.number }}
+        continue-on-error: true
+      
+      - name: Review Summary
+        if: always()
+        run: |
+          echo "## 🤖 Claude AI Review" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.claude-review.outcome }}" == "success" ]]; then
+            echo "✅ Review completed successfully and posted as a comment." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Review failed - check logs for details." >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**PR Number:** #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Changed Files:** ${{ github.event.pull_request.changed_files }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Review Status:** ${{ steps.claude-review.outcome }}" >> $GITHUB_STEP_SUMMARY
