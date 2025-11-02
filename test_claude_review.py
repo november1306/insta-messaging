@@ -22,5 +22,5 @@ class TestClass:
         return self.data[key]
     
     def trigger_review(self):
-        """Added to trigger Claude review with app enabled."""
+        """Added to trigger Claude review with API key authentication."""
         return None
