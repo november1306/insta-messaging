@@ -1,8 +1,8 @@
-name: Claude AI Code Review
+name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize]
     branches: [main, develop]
     paths:
       - '**/*.py'
@@ -14,56 +14,64 @@ on:
       - 'pyproject.toml'
       - 'package.json'
 
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write
-
 jobs:
   claude-review:
-    name: AI Review with Claude
     runs-on: ubuntu-latest
-    # Only run if PR is not from a fork (secret check happens in script)
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
-    
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      
+          fetch-depth: 1
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests anthropic
-      
+
       - name: Run Claude Code Review
         id: claude-review
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          python .github/scripts/claude-review.py --pr-number ${{ github.event.pull_request.number }}
-        continue-on-error: true
-      
-      - name: Review Summary
-        if: always()
-        run: |
-          echo "## 🤖 Claude AI Review" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ steps.claude-review.outcome }}" == "success" ]]; then
-            echo "✅ Review completed successfully and posted as a comment." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Review failed - check logs for details." >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**PR Number:** #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Changed Files:** ${{ github.event.pull_request.changed_files }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Review Status:** ${{ steps.claude-review.outcome }}" >> $GITHUB_STEP_SUMMARY
+        uses: anthropics/claude-code-action@beta
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # Direct prompt for automated review
+          direct_prompt: |
+            Please review this pull request for an Instagram Messenger Automation system and provide feedback on:
+
+            **Project Context:**
+            - Multi-account Instagram messaging automation system
+            - Built with FastAPI and MySQL
+            - All operations must be account-scoped (require account_id parameter)
+            - Uses interfaces (IMessageSender, IMessageReceiver, etc.) not direct implementations
+            - Credentials stored encrypted in MySQL database
+            - Follows async/await patterns
+
+            **Review Focus:**
+            - **Security Issues**: Credential exposure, SQL injection, authentication bypass
+            - **Account Isolation**: Ensure all operations are properly scoped to accounts
+            - **Code Quality**: FastAPI patterns, Pydantic models, type hints
+            - **Architecture**: Interface usage, separation of concerns, domain models
+            - **Performance**: Database queries, async operations, bottlenecks
+            - **Error Handling**: Webhook responses (always 200), internal error handling
+            - **Testing**: Coverage, edge cases, and test quality
+            - **File appropriateness**: Check if any files should be kept local-only and added to .gitignore
+
+            **Testing Principles:**
+            - Tests should respect initial requirements, not adjust to pass
+            - Test application logic, not dependencies - focus on wrapper behavior
+            - Avoid tests requiring system privileges or external resources
+            - Prioritize edge cases, validation, and error paths
+
+            Be constructive and provide specific file:line references for issues.
+
+          # Allow Claude to run Python tests and linting
+          allowed_tools: "Bash(python -m pytest),Bash(ruff check .),Bash(mypy app),Bash(black --check .)"
+
+          # Use sticky comments to reuse the same comment on subsequent pushes
+          use_sticky_comment: true
