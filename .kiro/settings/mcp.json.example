@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "your_github_token_here"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "create_or_update_file",
+        "create_branch",
+        "create_pull_request",
+        "push_files"
+      ]
+    }
+  }
+}
