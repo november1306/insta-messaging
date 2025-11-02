@@ -8,8 +8,10 @@ This system receives customer messages via Instagram Direct Messages through Fac
 
 ## Tech Stack
 
-- **Backend**: Python with FastAPI
-- **Database**: PostgreSQL
+- **Backend**: Python with FastAPI (async support)
+- **Database**: MySQL (multi-account storage)
+- **ORM**: SQLAlchemy with Alembic migrations
+- **Security**: Cryptography for credential encryption
 - **Deployment**: Railway or custom Linux server
 - **Local Development**: Windows with ngrok for webhook tunneling
 
@@ -17,7 +19,8 @@ This system receives customer messages via Instagram Direct Messages through Fac
 
 ### Prerequisites
 
-- **Python 3.9+** (tested with Python 3.9.13)
+- **Python 3.11+** (using Python 3.12.9)
+- **MySQL 8.0+** (for database storage)
 - **Facebook App** with Instagram permissions configured
 - **ngrok** for local webhook testing (install via `scoop install ngrok`)
 
@@ -37,10 +40,7 @@ This system receives customer messages via Instagram Direct Messages through Fac
    # Copy the example file
    cp .env.example .env
    
-   # Edit .env with your Facebook/Instagram credentials:
-   # - FACEBOOK_VERIFY_TOKEN: Any random string (e.g., "my_webhook_token_123")
-   # - FACEBOOK_APP_SECRET: From Facebook App Settings > Basic
-   # - INSTAGRAM_PAGE_ACCESS_TOKEN: From Facebook App > Instagram > Settings
+   # Edit .env with your credentials (see Token Setup section below)
    ```
 
 3. **Start the server:**
@@ -68,19 +68,107 @@ This system receives customer messages via Instagram Direct Messages through Fac
    - Check server logs for incoming messages
    - Server responds at: http://localhost:8000
 
-### Environment Variables
+## Token Setup (Critical)
+
+This system requires 3 specific tokens from Facebook/Instagram. **Getting the right tokens is crucial** - wrong tokens will cause authentication failures.
+
+### 1. FACEBOOK_VERIFY_TOKEN
+**What it is**: A custom string you create for webhook verification
+**Where to get**: You make this up yourself
+**Example**: `"my_webhook_token_123"`
+**Usage**: Facebook sends this back to verify your webhook endpoint
 
 ```env
-# Required for webhook functionality
-FACEBOOK_VERIFY_TOKEN=your_custom_verify_token
-FACEBOOK_APP_SECRET=your_facebook_app_secret
-INSTAGRAM_PAGE_ACCESS_TOKEN=your_instagram_page_token
+FACEBOOK_VERIFY_TOKEN="my_webhook_token_123"
+```
 
-# Server configuration (optional)
+### 2. FACEBOOK_APP_SECRET  
+**What it is**: Your Facebook app's secret key for webhook signature validation
+**Where to get**: 
+1. Go to https://developers.facebook.com/apps/YOUR_APP_ID/settings/basic/
+2. Find "App Secret" section
+3. Click "Show" and copy the value
+**Format**: 32-character hex string
+**Example**: `"6fc9d415657d17e47cda9c61d44a511b"`
+
+```env
+FACEBOOK_APP_SECRET="your_32_character_app_secret"
+```
+
+### 3. INSTAGRAM_PAGE_ACCESS_TOKEN ⚠️ **Most Important**
+**What it is**: Token for sending Instagram messages via Instagram Graph API
+**Critical**: Must be an **Instagram Access Token** (starts with `IGAA`), NOT a Facebook Page token
+
+#### How to get the correct token:
+1. **Go to**: https://developers.facebook.com/apps/YOUR_APP_ID/instagram-basic-display/
+2. **Find**: "User Token Generator" section  
+3. **Select**: Your Instagram business account (@ser_bain)
+4. **Generate Token**: Click "Generate Token"
+5. **Copy**: The token (starts with `IGAA`, ~180 characters)
+
+#### ❌ **Wrong Token Types** (Don't use these):
+- Facebook Page Access Tokens (start with `EAAG`) - Won't work for Instagram
+- User Access Tokens for personal Facebook accounts - Wrong scope
+- Instagram Basic Display tokens without messaging permissions
+
+#### ✅ **Correct Token Format**:
+```env
+INSTAGRAM_PAGE_ACCESS_TOKEN="IGAALkT2BsMhxBZAFR0eUhBVXlRYVBjTVllb3ZAWQUtTQTYwcDNET1VxWXZAKaTRXYUVuNy1KeW9mTm5RYXdVOVhwTjl2NTZAJUXhSa2lobm8zMTJfZAlF2bDdPZAUg5UU9zVXE0bmFUTDUzQVoyYzdzMllIY2d1T2VycDB1Nlp3dnNzcwZDZD"
+```
+
+### Complete .env File Example (New Architecture):
+
+```env
+# Database Configuration
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_DATABASE=instagram_automation
+MYSQL_USERNAME=app_user
+MYSQL_PASSWORD=secure_password
+
+# Application Security
+APP_SECRET_KEY=your-secret-key-for-encryption-change-this-in-production
+
+# Server Configuration
+HOST=0.0.0.0
+PORT=8000
+ENVIRONMENT=development
+
+# Note: Instagram account credentials are now stored in the database
+# Use the account management API to add Instagram business accounts
+```
+
+### Old .env File Example (MVP - Being Phased Out):
+
+```env
+# Facebook/Instagram Configuration (OLD - will be moved to database)
+FACEBOOK_VERIFY_TOKEN="my_webhook_token_123"
+FACEBOOK_APP_SECRET="6fc9d415657d17e47cda9c61d44a511b"
+INSTAGRAM_PAGE_ACCESS_TOKEN="IGAALkT2BsMhxBZAFR0eUhBVXlRYVBjTVllb3ZAWQUtTQTYwcDNET1VxWXZAKaTRXYUVuNy1KeW9mTm5RYXdVOVhwTjl2NTZAJUXhSa2lobm8zMTJfZAlF2bDdPZAUg5UU9zVXE0bmFUTDUzQVoyYzdzMllIY2d1T2VycDB1Nlp3dnNzcwZDZD"
+
+# Server Configuration
 HOST=0.0.0.0
 PORT=8000
 ENVIRONMENT=development
 ```
+
+### Token Troubleshooting:
+
+#### Problem: "Invalid OAuth access token - Cannot parse access token"
+**Solution**: You're using a Facebook token instead of Instagram token
+- ❌ Wrong: `EAAG...` (Facebook Page token)  
+- ✅ Correct: `IGAA...` (Instagram token)
+
+#### Problem: "Object with ID 'me' does not exist"
+**Solution**: Use Instagram Graph API, not Facebook Graph API
+- ❌ Wrong: `https://graph.facebook.com/v18.0/me/messages`
+- ✅ Correct: `https://graph.instagram.com/v21.0/me/messages`
+
+#### Problem: Messages not sending
+**Solution**: Ensure your Instagram account is in Live mode
+1. Go to your Facebook App dashboard
+2. Switch from "Development" to "Live" mode
+3. Ensure privacy policy URL is set
 
 ### Testing Endpoints
 
@@ -88,11 +176,82 @@ ENVIRONMENT=development
 - **Webhook**: http://localhost:8000/webhooks/instagram - Instagram webhook endpoint
 - **ngrok Web UI**: http://127.0.0.1:4040 - Monitor tunnel traffic
 
-## Development Status
+### Message Testing
 
-🚧 **In Development** - Currently implementing Phase 1: Minimal Viable Solution
+Use the test script to send messages programmatically:
 
-See [tasks.md](.kiro/specs/instagram-messenger-automation/tasks.md) for implementation progress.
+```bash
+# Send a message to @ser_bain
+py test_send_message.py "@ser_bain" "Hello from automation!"
+
+# Send a message to @tol1306  
+py test_send_message.py "@tol1306" "Thanks for your message!"
+```
+
+**Available users:**
+- `@ser_bain`: Business account (ID: 1180376147344794)
+- `@tol1306`: Test user account (ID: 1558635688632972)
+
+### Quick Resume Tomorrow
+
+1. **Start servers:**
+   ```bash
+   # Terminal 1: Start FastAPI server
+   py -m uvicorn app.main:app --reload
+   
+   # Terminal 2: Start ngrok tunnel
+   ngrok http 8000
+   ```
+
+2. **Test webhook:** Send message from @tol1306 to @ser_bain on Instagram
+
+3. **Test sending:** `py test_send_message.py "@ser_bain" "Test message"`
+
+## Current Status
+
+**Phase 1 Complete**: Minimal Viable Solution - Basic webhook and messaging working ✅  
+**Phase 2 In Progress**: Architecture Refactoring for Production Scale 🔄
+
+### ✅ **What's Working (MVP):**
+- **Basic webhook server** receiving Instagram messages
+- **Message sending** via Instagram Graph API  
+- **Single account** (@ser_bain) messaging capability
+- **Test script** for manual message sending
+
+### 🔄 **Current Refactoring (Phase 2):**
+- **Multi-account architecture** - Support multiple Instagram business accounts
+- **Proper interfaces** - Abstract messaging operations with clean interfaces (IMessageReceiver, IMessageSender)
+- **MySQL integration** - Replace hardcoded data with database storage
+- **Configuration management** - Move hardcoded values to database/config
+- **Account-specific routing** - Route messages to correct Instagram accounts
+
+### 🎯 **Target Architecture:**
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Webhook API   │────│  Message Router  │────│ Instagram APIs  │
+│  (per account)  │    │  (IMessageRcvr)  │    │ (IMessageSndr)  │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+         │                       │                       │
+         │              ┌─────────────────┐              │
+         └──────────────│ Account Manager │──────────────┘
+                        │  (Repository)   │
+                        └─────────────────┘
+                                 │
+                        ┌─────────────────┐
+                        │ MySQL Database  │
+                        │ - Accounts      │
+                        │ - Messages      │
+                        │ - Conversations │
+                        │ - Rules         │
+                        └─────────────────┘
+```
+
+### 📚 **Architecture Documentation:**
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Comprehensive architecture overview
+- [Design Document](.kiro/specs/instagram-messenger-automation/design.md) - Detailed component design
+- [Implementation Tasks](.kiro/specs/instagram-messenger-automation/tasks.md) - Step-by-step implementation plan
+
+See [tasks.md](.kiro/specs/instagram-messenger-automation/tasks.md) for detailed implementation progress.
 
 ## Documentation
 

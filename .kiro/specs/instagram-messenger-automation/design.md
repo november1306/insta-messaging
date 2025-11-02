@@ -2,15 +2,16 @@
 
 ## Overview
 
-The Instagram Messenger Automation system is a Python-based webhook server that receives Instagram Direct Messages via Facebook's Messenger Platform API and automatically responds to customers. The system uses FastAPI for high-performance async webhook handling, PostgreSQL for persistent storage, and is designed for easy deployment on Railway or custom Linux servers. The architecture supports future AI/ML integration for intelligent response generation.
+The Instagram Messenger Automation system is a Python-based webhook server that receives Instagram Direct Messages via Facebook's Messenger Platform API and automatically responds to customers. The system uses FastAPI for high-performance async webhook handling, MySQL for persistent storage, and is designed to support multiple Instagram business accounts with proper interface abstractions. The architecture is built around clean interfaces (IMessageReceiver, IMessageSender) that separate concerns and enable easy testing and future enhancements.
 
 ### Key Design Principles
-- **Minimal MVP**: Only implement what's needed for core functionality
-- **Modular Architecture**: Each component has clear interfaces and single responsibility
-- **Interface-Driven**: Program to interfaces (abstract base classes), not implementations
+- **Multi-Account First**: Support multiple Instagram business accounts from the start
+- **Interface-Driven**: Program to interfaces (IMessageReceiver, IMessageSender), not implementations
+- **Database-First**: All configuration stored in MySQL, not environment variables
+- **Account-Scoped**: All operations linked to specific Instagram business accounts
 - **Loose Coupling**: Components communicate through well-defined contracts
 - **Fail-safe**: Always acknowledge webhooks within 20 seconds, even if processing fails
-- **Start Simple**: Begin with basic features, add complexity only when needed
+- **Secure by Default**: Encrypted credential storage, account isolation
 
 ### Modularity Benefits
 This design allows you to:
@@ -45,46 +46,52 @@ This design allows you to:
 ### High-Level Architecture
 
 ```
-┌─────────────┐         ┌──────────────────┐         ┌─────────────┐
-│  Instagram  │────────>│   FastAPI        │────────>│ PostgreSQL  │
-│  (Meta API) │ Webhook │   Webhook Server │  Store  │  Database   │
-└─────────────┘         └──────────────────┘         └─────────────┘
-                               │
-                               │ Send API
-                               ▼
-                        ┌──────────────┐
-                        │ Response     │
-                        │ Logic Engine │
-                        └──────────────┘
-                               │
-                               │ (Future)
-                               ▼
-                        ┌──────────────┐
-                        │  AI/ML       │
-                        │  Service     │
-                        └──────────────┘
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Webhook API   │────│  Message Router  │────│ Instagram APIs  │
+│  (per account)  │    │  (IMessageRcvr)  │    │ (IMessageSndr)  │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+         │                       │                       │
+         │              ┌─────────────────┐              │
+         └──────────────│ Account Manager │──────────────┘
+                        │  (Repository)   │
+                        └─────────────────┘
+                                 │
+                        ┌─────────────────┐
+                        │ MySQL Database  │
+                        │ - Accounts      │
+                        │ - Messages      │
+                        │ - Conversations │
+                        │ - Rules         │
+                        └─────────────────┘
 ```
 
 ### Component Layers
 
 1. **API Layer** (FastAPI)
-   - Webhook endpoints (verification & message handling)
+   - Webhook endpoints (account-aware verification & message handling)
+   - Account management endpoints (CRUD for Instagram accounts)
    - Health check endpoints
-   - Admin endpoints (optional, for rule management)
 
-2. **Business Logic Layer**
-   - Message processor
-   - Response rules engine
-   - Instagram Send API client
+2. **Interface Layer** (Abstractions)
+   - IMessageReceiver: Webhook processing interface
+   - IMessageSender: Message sending interface
+   - IAccountRepository: Account data access interface
 
-3. **Data Layer**
-   - PostgreSQL database with SQLAlchemy ORM
-   - Message repository
-   - Conversation repository
+3. **Business Logic Layer**
+   - Account-scoped message processor
+   - Account-specific response rules engine
+   - Message routing logic
 
-4. **Infrastructure Layer**
-   - Configuration management (pydantic-settings)
-   - Logging (structlog)
+4. **Data Layer**
+   - MySQL database with SQLAlchemy ORM
+   - Account repository (encrypted credentials)
+   - Message repository (account-scoped)
+   - Conversation repository (account-scoped)
+
+5. **Infrastructure Layer**
+   - Configuration management (minimal env vars)
+   - Credential encryption/decryption
+   - Logging and monitoring
    - Error handling middleware
 
 ## Components and Interfaces
@@ -123,89 +130,124 @@ These abstract base classes define the contracts that all implementations must f
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
-# Message Processing Interface
-class IMessageProcessor(ABC):
+# Account-Aware Message Receiver Interface
+class IMessageReceiver(ABC):
     @abstractmethod
-    async def process_webhook_event(self, event: dict) -> None:
-        """Process incoming webhook event"""
+    async def receive_webhook(self, account_id: str, payload: dict) -> None:
+        """Process incoming webhook for specific account"""
         pass
     
     @abstractmethod
-    async def handle_message(self, message: IncomingMessage) -> None:
-        """Handle a single incoming message"""
+    async def validate_signature(self, account_id: str, signature: str, body: str) -> bool:
+        """Validate webhook signature using account-specific secret"""
         pass
-
-# Response Generation Interface
-class IResponseEngine(ABC):
+    
     @abstractmethod
-    async def generate_response(
-        self, 
-        message: IncomingMessage,
-        conversation_history: List[Message]
-    ) -> str:
-        """Generate response for incoming message"""
+    async def process_message(self, account_id: str, message: InboundMessage) -> None:
+        """Handle a single incoming message for specific account"""
         pass
 
-# Messaging Client Interface
-class IMessagingClient(ABC):
+# Account-Aware Message Sender Interface
+class IMessageSender(ABC):
     @abstractmethod
     async def send_message(
         self, 
+        account_id: str,
         recipient_id: str, 
         message_text: str
     ) -> SendMessageResponse:
-        """Send message to recipient"""
+        """Send message using specific account credentials"""
         pass
     
     @abstractmethod
-    async def validate_webhook_signature(
+    async def send_template(
         self, 
-        payload: str, 
-        signature: str
-    ) -> bool:
-        """Validate webhook signature"""
+        account_id: str,
+        recipient_id: str, 
+        template_id: str,
+        params: dict
+    ) -> SendMessageResponse:
+        """Send template message using specific account"""
         pass
 
-# Repository Interfaces
+# Account Repository Interface
+class IAccountRepository(ABC):
+    @abstractmethod
+    async def get_by_id(self, account_id: str) -> Optional[InstagramBusinessAccount]:
+        """Get account by ID"""
+        pass
+    
+    @abstractmethod
+    async def get_by_username(self, username: str) -> Optional[InstagramBusinessAccount]:
+        """Get account by username"""
+        pass
+    
+    @abstractmethod
+    async def create(self, account: InstagramBusinessAccount) -> InstagramBusinessAccount:
+        """Create new account"""
+        pass
+    
+    @abstractmethod
+    async def update(self, account: InstagramBusinessAccount) -> InstagramBusinessAccount:
+        """Update existing account"""
+        pass
+    
+    @abstractmethod
+    async def get_active_accounts(self) -> List[InstagramBusinessAccount]:
+        """Get all active accounts"""
+        pass
+
+# Message Repository Interface (Account-Scoped)
 class IMessageRepository(ABC):
     @abstractmethod
-    async def create(self, message: Message) -> Message:
+    async def create(self, account_id: str, message: Message) -> Message:
+        """Store message for specific account"""
         pass
     
     @abstractmethod
     async def get_conversation_history(
         self, 
-        conversation_id: UUID, 
+        account_id: str,
+        conversation_id: str, 
         limit: int = 10
     ) -> List[Message]:
+        """Get conversation history for specific account"""
         pass
 
+# Conversation Repository Interface (Account-Scoped)
 class IConversationRepository(ABC):
     @abstractmethod
     async def get_or_create(
         self, 
-        instagram_user_id: str, 
-        page_id: str
+        account_id: str,
+        participant_id: str
     ) -> Conversation:
+        """Get or create conversation for specific account"""
         pass
     
     @abstractmethod
     async def update_last_message_time(
         self, 
-        conversation_id: UUID
+        account_id: str,
+        conversation_id: str
     ) -> None:
+        """Update last message timestamp"""
         pass
 
+# Rule Repository Interface (Account-Scoped)
 class IRuleRepository(ABC):
     @abstractmethod
-    async def get_active_rules(self) -> List[ResponseRule]:
+    async def get_active_rules(self, account_id: str) -> List[ResponseRule]:
+        """Get active rules for specific account"""
         pass
     
     @abstractmethod
     async def find_matching_rule(
         self, 
+        account_id: str,
         message_text: str
     ) -> Optional[ResponseRule]:
+        """Find matching rule for specific account"""
         pass
 ```
 
@@ -377,11 +419,27 @@ async def validate_webhook_signature(
 
 ### 5. Database Models (`app/models/`)
 
-**Message Model:**
+**InstagramBusinessAccount Model:**
+```python
+class InstagramBusinessAccount(Base):
+    id: str  # Instagram account ID
+    username: str
+    display_name: str
+    access_token_encrypted: str  # Encrypted with APP_SECRET_KEY
+    app_secret_encrypted: str  # Encrypted with APP_SECRET_KEY
+    webhook_verify_token: str
+    status: AccountStatus  # active/inactive/suspended
+    settings: JSON
+    created_at: datetime
+    updated_at: datetime
+```
+
+**Message Model (Account-Scoped):**
 ```python
 class Message(Base):
-    id: UUID
-    conversation_id: UUID
+    id: str  # Message ID from Instagram
+    account_id: str  # FK to InstagramBusinessAccount
+    conversation_id: str
     sender_id: str
     recipient_id: str
     message_text: str
@@ -390,30 +448,35 @@ class Message(Base):
     timestamp: datetime
     status: MessageStatus
     metadata: JSON
+    created_at: datetime
 ```
 
-**Conversation Model:**
+**Conversation Model (Account-Scoped):**
 ```python
 class Conversation(Base):
-    id: UUID
-    instagram_user_id: str
-    page_id: str
-    created_at: datetime
-    updated_at: datetime
+    id: str  # Conversation ID
+    account_id: str  # FK to InstagramBusinessAccount
+    participant_id: str  # Instagram user ID
+    participant_username: str
+    status: ConversationStatus  # active/archived/blocked
     last_message_at: datetime
-    status: ConversationStatus  # active/archived
+    message_count: int
+    metadata: JSON
+    created_at: datetime
 ```
 
-**ResponseRule Model:**
+**ResponseRule Model (Account-Scoped):**
 ```python
 class ResponseRule(Base):
-    id: UUID
+    id: int  # Auto-increment
+    account_id: str  # FK to InstagramBusinessAccount
     name: str
-    keywords: List[str]
-    match_type: MatchType  # exact/contains/regex
-    response_text: str
+    trigger_type: TriggerType  # keyword/pattern/intent
+    trigger_value: str
+    response_template: str
     priority: int
     is_active: bool
+    conditions: JSON
     created_at: datetime
 ```
 
@@ -538,7 +601,7 @@ def get_message_processor(
 ### 7. Configuration Service (`app/core/config.py`)
 
 **Responsibilities:**
-- Load environment variables
+- Load minimal environment variables (database, encryption key)
 - Validate required configuration
 - Provide typed configuration access
 
@@ -550,15 +613,15 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = False
     
-    # Facebook/Instagram
-    facebook_app_id: str
-    facebook_app_secret: str
-    facebook_verify_token: str
-    instagram_page_access_token: str
-    instagram_page_id: str
+    # Database (MySQL)
+    mysql_host: str
+    mysql_port: int = 3306
+    mysql_database: str
+    mysql_username: str
+    mysql_password: str
     
-    # Database
-    database_url: str
+    # Security
+    app_secret_key: str  # For encrypting account credentials
     
     # Server
     host: str = "0.0.0.0"
@@ -566,27 +629,53 @@ class Settings(BaseSettings):
     
     # Logging
     log_level: str = "INFO"
+    
+    @property
+    def database_url(self) -> str:
+        return f"mysql+aiomysql://{self.mysql_username}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
 ```
+
+**Note:** Instagram account credentials (access tokens, app secrets, verify tokens) are stored in the database, not environment variables.
 
 ## Data Models
 
 ### Database Schema
 
+**instagram_business_accounts table:**
+```sql
+CREATE TABLE instagram_business_accounts (
+    id VARCHAR(50) PRIMARY KEY,
+    username VARCHAR(100) NOT NULL UNIQUE,
+    display_name VARCHAR(200),
+    access_token_encrypted TEXT NOT NULL,
+    app_secret_encrypted TEXT NOT NULL,
+    webhook_verify_token VARCHAR(100) NOT NULL,
+    status ENUM('active', 'inactive', 'suspended') DEFAULT 'active',
+    settings JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_username (username),
+    INDEX idx_status (status)
+);
+```
+
 **messages table:**
 ```sql
 CREATE TABLE messages (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id UUID NOT NULL REFERENCES conversations(id),
-    sender_id VARCHAR(255) NOT NULL,
-    recipient_id VARCHAR(255) NOT NULL,
+    id VARCHAR(100) PRIMARY KEY,
+    account_id VARCHAR(50) NOT NULL,
+    conversation_id VARCHAR(100) NOT NULL,
+    direction ENUM('inbound', 'outbound') NOT NULL,
+    sender_id VARCHAR(50),
+    recipient_id VARCHAR(50),
     message_text TEXT,
-    message_type VARCHAR(50) NOT NULL,
-    direction VARCHAR(20) NOT NULL,
+    message_type VARCHAR(50) DEFAULT 'text',
+    metadata JSON,
+    status VARCHAR(50) DEFAULT 'delivered',
     timestamp TIMESTAMP NOT NULL,
-    status VARCHAR(50) NOT NULL,
-    metadata JSONB,
-    created_at TIMESTAMP DEFAULT NOW(),
-    INDEX idx_conversation_id (conversation_id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES instagram_business_accounts(id),
+    INDEX idx_account_conversation (account_id, conversation_id),
     INDEX idx_timestamp (timestamp)
 );
 ```
@@ -594,14 +683,18 @@ CREATE TABLE messages (
 **conversations table:**
 ```sql
 CREATE TABLE conversations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    instagram_user_id VARCHAR(255) NOT NULL UNIQUE,
-    page_id VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW(),
+    id VARCHAR(100) PRIMARY KEY,
+    account_id VARCHAR(50) NOT NULL,
+    participant_id VARCHAR(50) NOT NULL,
+    participant_username VARCHAR(100),
+    status ENUM('active', 'archived', 'blocked') DEFAULT 'active',
     last_message_at TIMESTAMP,
-    status VARCHAR(50) NOT NULL DEFAULT 'active',
-    INDEX idx_instagram_user_id (instagram_user_id),
+    message_count INT DEFAULT 0,
+    metadata JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES instagram_business_accounts(id),
+    UNIQUE KEY unique_account_participant (account_id, participant_id),
+    INDEX idx_account_id (account_id),
     INDEX idx_last_message_at (last_message_at)
 );
 ```
@@ -609,16 +702,20 @@ CREATE TABLE conversations (
 **response_rules table:**
 ```sql
 CREATE TABLE response_rules (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    keyword VARCHAR(255) NOT NULL,
-    response_text TEXT NOT NULL,
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    account_id VARCHAR(50) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    trigger_type ENUM('keyword', 'pattern', 'intent') NOT NULL,
+    trigger_value TEXT NOT NULL,
+    response_template TEXT NOT NULL,
+    priority INT DEFAULT 0,
     is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT NOW(),
-    INDEX idx_is_active (is_active)
+    conditions JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES instagram_business_accounts(id),
+    INDEX idx_account_active (account_id, is_active)
 );
 ```
-
-**MVP Note:** Simplified schema - one keyword per rule, no priority, no match types. Keep it simple.
 
 ### Message Flow Data
 
