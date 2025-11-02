@@ -18,6 +18,11 @@ jobs:
     name: Review PR with Claude Code
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Claude Code PR Review
         uses: anthropics/claude-code-action@v1
         with:
