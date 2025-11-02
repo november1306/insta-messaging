@@ -20,3 +20,7 @@ class TestClass:
     def get_data(self, key):
         # No validation, could throw KeyError
         return self.data[key]
+    
+    def trigger_review(self):
+        """Added to trigger Claude review with app enabled."""
+        return None
