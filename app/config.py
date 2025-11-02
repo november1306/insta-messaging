@@ -14,9 +14,16 @@ class Settings:
         self.environment = os.getenv("ENVIRONMENT", "development")
         
         # Instagram/Facebook credentials
-        self.facebook_verify_token = os.getenv("FACEBOOK_VERIFY_TOKEN", "dev_verify_token_12345")
-        self.facebook_app_secret = os.getenv("FACEBOOK_APP_SECRET", "")
-        self.instagram_page_access_token = os.getenv("INSTAGRAM_PAGE_ACCESS_TOKEN", "")
+        # Security: Only use defaults in development mode
+        if self.environment == "production":
+            self.facebook_verify_token = self._get_required("FACEBOOK_VERIFY_TOKEN")
+            self.facebook_app_secret = self._get_required("FACEBOOK_APP_SECRET")
+            self.instagram_page_access_token = self._get_required("INSTAGRAM_PAGE_ACCESS_TOKEN")
+        else:
+            # Development defaults (not secure, only for local testing)
+            self.facebook_verify_token = os.getenv("FACEBOOK_VERIFY_TOKEN", "dev_verify_token_12345")
+            self.facebook_app_secret = os.getenv("FACEBOOK_APP_SECRET", "")
+            self.instagram_page_access_token = os.getenv("INSTAGRAM_PAGE_ACCESS_TOKEN", "")
         
         # Server configuration
         self.host = os.getenv("HOST", "0.0.0.0")
@@ -24,6 +31,16 @@ class Settings:
         
         # Logging
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
+    
+    def _get_required(self, key: str) -> str:
+        """Get required environment variable or raise error."""
+        value = os.getenv(key)
+        if not value:
+            raise ValueError(
+                f"Missing required environment variable: {key}. "
+                f"Required in production mode."
+            )
+        return value
 
 
 # Global settings instance

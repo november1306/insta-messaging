@@ -61,10 +61,13 @@ async def get_db_session() -> AsyncSession:
     async with async_session_maker() as session:
         try:
             yield session
-            await session.commit()
-        except Exception:
+        except Exception as e:
             await session.rollback()
+            logger.error(f"Database session error: {e}")
             raise
+        else:
+            # Only commit if no exception occurred
+            await session.commit()
         finally:
             await session.close()
 
