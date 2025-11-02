@@ -1,4 +1,4 @@
-# Test file for Claude PR review  
+# Test file for Claude PR review - Authentication Fixed!
 def test_function():
     """Test function to trigger Claude review."""
     return "Hello Claude!"
