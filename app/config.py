@@ -16,7 +16,9 @@ class Settings:
         self.instagram_page_access_token = self._get_required_env("INSTAGRAM_PAGE_ACCESS_TOKEN")
         
         # Server configuration
-        self.host = os.getenv("HOST", "0.0.0.0")
+        # nosec B104: Binding to 0.0.0.0 is intentional for containerized deployment
+        # In production, use a reverse proxy (nginx) to restrict access
+        self.host = os.getenv("HOST", "0.0.0.0")  # nosec B104
         self.port = int(os.getenv("PORT", "8000"))
         self.environment = os.getenv("ENVIRONMENT", "development")
         
