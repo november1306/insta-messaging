@@ -187,13 +187,7 @@ Brief description of changes
 
 Your PR will automatically get:
 
-1. **Claude AI Review** (if configured)
-   - Security analysis
-   - Bug detection
-   - Best practices check
-   - Architecture alignment
-
-2. **Code Quality Checks**
+1. **Code Quality Checks**
    - Linting (Ruff)
    - Formatting (Black)
    - Type checking (MyPy)
