@@ -1,7 +1,11 @@
-# Test file for Claude PR review
+# Test file for Claude PR review  
 def test_function():
     """Test function to trigger Claude review."""
     return "Hello Claude!"
+
+def another_test():
+    """Another function to test workflow trigger."""
+    return "Testing workflow..."
 
 # Intentional issues for review:
 def bad_function(x):
