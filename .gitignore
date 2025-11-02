@@ -1,6 +1,6 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
-*.py[codz]
+*.py[cod]
 *$py.class
 
 # C extensions
@@ -264,26 +264,6 @@ test_results/
 .vscode/launch.json
 .vscode/*.local.*
 
-# PyCharm
-.idea/
-*.iml
-*.iws
-*.ipr
-
-# Sublime Text
-*.sublime-project
-*.sublime-workspace
-
-# Vim
-*.swp
-*.swo
-.vim/
-
-# Emacs
-*~
-\#*\#
-.\#*
-
 # macOS
 .DS_Store
 .AppleDouble
@@ -318,15 +298,7 @@ ngrok.yml
 docker-compose.override.yml
 docker-compose.local.yml
 
-# Coverage reports
-htmlcov/
-.coverage
-.coverage.*
-coverage.xml
-*.cover
-
 # Pytest
-.pytest_cache/
 pytestdebug.log
 
 # MySQL/Database
