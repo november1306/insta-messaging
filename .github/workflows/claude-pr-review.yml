@@ -23,5 +23,16 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          prompt: "/review"
-          claude_args: "--max-turns 5"
+          prompt: |
+            Review this pull request and post your feedback as comments on the PR.
+
+            Analyze the code changes for:
+            - Code quality and best practices
+            - Security vulnerabilities
+            - Performance issues
+            - Python/FastAPI specific patterns
+            - Logic bugs and edge cases
+            - Missing error handling or type hints
+
+            Post your findings as comments on the PR using the GitHub API.
+          claude_args: "--max-turns 10"
