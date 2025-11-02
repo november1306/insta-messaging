@@ -277,7 +277,6 @@ test_results/
 # Vim
 *.swp
 *.swo
-*~
 .vim/
 
 # Emacs
