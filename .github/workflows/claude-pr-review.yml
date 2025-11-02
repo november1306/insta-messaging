@@ -23,8 +23,8 @@ jobs:
   claude-review:
     name: AI Review with Claude
     runs-on: ubuntu-latest
-    # Only run if ANTHROPIC_API_KEY is configured and PR is not from a fork
-    if: ${{ secrets.ANTHROPIC_API_KEY != '' && github.event.pull_request.head.repo.full_name == github.repository }}
+    # Only run if PR is not from a fork (secret check happens in script)
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     
     steps:
       - name: Checkout code
