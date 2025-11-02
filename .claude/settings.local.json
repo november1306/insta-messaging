@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "Bash(gh pr list:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
