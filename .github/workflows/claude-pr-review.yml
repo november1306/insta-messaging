@@ -19,8 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
       id-token: write
 
     steps:
@@ -29,20 +29,17 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
       - name: Run Claude Code Review
         id: claude-review
-        uses: anthropics/claude-code-action@beta
+        uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 
-          # Direct prompt for automated review
-          direct_prompt: |
+          # Automated review prompt
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
             Please review this pull request for an Instagram Messenger Automation system and provide feedback on:
 
             **Project Context:**
@@ -70,9 +67,3 @@ jobs:
             - Prioritize edge cases, validation, and error paths
 
             Be constructive and provide specific file:line references for issues.
-
-          # Allow Claude to run Python tests and linting
-          allowed_tools: "Bash(python -m pytest),Bash(ruff check .),Bash(mypy app),Bash(black --check .)"
-
-          # Use sticky comments to reuse the same comment on subsequent pushes
-          use_sticky_comment: true
