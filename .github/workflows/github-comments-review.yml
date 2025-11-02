@@ -1,4 +1,4 @@
-name: Claude Code PR Review
+name: Claude PR Review (GitHub Comments)
 
 on:
   pull_request:
