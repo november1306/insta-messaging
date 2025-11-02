@@ -210,6 +210,11 @@ __marimo__/
 # These files may contain API keys and tokens
 .kiro/settings/mcp.json
 
+# Claude AI IDE settings
+# Local settings may contain permissions and user-specific configurations
+.claude/settings.local.json
+.claude/*.local.json
+
 # Security - Sensitive files that should never be committed
 # Private keys and certificates
 *.pem
@@ -246,3 +251,96 @@ logs/
 *.log.*
 error.log
 access.log
+
+# Test and verification scripts (project-specific)
+# Keep test_send_message.py but ignore any test output
+test_output/
+test_results/
+*.test.log
+
+# IDE and Editor specific files
+# VS Code
+.vscode/settings.json
+.vscode/launch.json
+.vscode/*.local.*
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+.vim/
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+.Trash-*
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+
+# ngrok
+ngrok
+ngrok.exe
+ngrok.yml
+
+# Local development tools
+.devcontainer/
+docker-compose.override.yml
+docker-compose.local.yml
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Pytest
+.pytest_cache/
+pytestdebug.log
+
+# MySQL/Database
+*.sql.gz
+*.sql.bz2
+mysql_data/
+postgres_data/
+
+# Instagram API specific
+# Postman collections with tokens (keep example, ignore local)
+*.postman_collection.local.json
+postman_environment.json
+
+# Project-specific temporary files
+verify_interfaces.py.bak
+SETUP_NOTES.local.md
