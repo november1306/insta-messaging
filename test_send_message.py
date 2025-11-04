@@ -1,21 +1,36 @@
 """
-Test script to send a message from our Instagram business account (@ser_bain) 
+Test script to send a message from our Instagram business account (@ser_bain)
 to any user using the Instagram Send API
 
 Usage: py test_send_message.py "@username" "message text"
 Example: py test_send_message.py "@ser_bain" "Hello from automation!"
+
+Note: User IDs must be configured in .env file as TEST_USER_IDS
+Format: @username1:user_id1,@username2:user_id2
 """
 import httpx
 import asyncio
 import sys
+import os
 from app.config import settings
 
-# User ID mappings (Instagram recipient IDs)
-USER_IDS = {
-    "@ser_bain": "1180376147344794",      # ser_bain business account
-    "@tol1306": "1558635688632972",       # tol1306 personal account
-    # Add more users here as needed
-}
+# Load user ID mappings from environment variable
+def load_user_ids() -> dict:
+    """Load user ID mappings from TEST_USER_IDS environment variable"""
+    test_user_ids = os.getenv("TEST_USER_IDS", "")
+
+    if not test_user_ids:
+        return {}
+
+    user_ids = {}
+    for pair in test_user_ids.split(","):
+        if ":" in pair:
+            username, user_id = pair.strip().split(":", 1)
+            user_ids[username] = user_id
+
+    return user_ids
+
+USER_IDS = load_user_ids()
 
 async def send_test_message(recipient_username: str, message_text: str):
     """Send a test message to specified user"""
