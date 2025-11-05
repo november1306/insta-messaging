@@ -48,7 +48,14 @@ This plan implements a simple POC for receiving and sending Instagram messages. 
 
 ## Phase 3: Message Sending (POC)
 
-- [ ] 6. Create Instagram API client
+- [x] 6. Create Instagram API client
+
+
+
+
+
+
+
   - Create InstagramClient class for API calls
   - Implement send_message(recipient_id, message_text) method
   - Use httpx for async HTTP requests
