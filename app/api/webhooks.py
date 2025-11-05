@@ -1,5 +1,6 @@
 """Instagram webhook endpoints"""
 from fastapi import APIRouter, Request, Query, HTTPException, status, Depends
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.connection import get_db_session
@@ -282,8 +283,6 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
 # Send Message API Endpoint
 # ============================================================================
 
-from pydantic import BaseModel
-
 class SendMessageRequest(BaseModel):
     """Request model for sending messages"""
     recipient_id: str
@@ -321,7 +320,8 @@ async def send_message_api(
     logger.info(f"📤 API request to send message to {request.recipient_id}")
     
     try:
-        # Create Instagram client
+        # Create Instagram client (MVP: one client per request)
+        # TODO: For production, consider reusing HTTP client across requests for better performance
         async with httpx.AsyncClient() as http_client:
             instagram_client = InstagramClient(
                 http_client=http_client,
@@ -348,15 +348,25 @@ async def send_message_api(
                     timestamp=datetime.now(timezone.utc)
                 )
                 
-                await message_repo.save(outbound_message)
-                
-                logger.info(f"✅ Message sent successfully - ID: {response.message_id}")
-                
-                return SendMessageResponse(
-                    success=True,
-                    message_id=response.message_id,
-                    error=None
-                )
+                try:
+                    await message_repo.save(outbound_message)
+                    logger.info(f"✅ Message sent and stored - ID: {response.message_id}")
+                    
+                    return SendMessageResponse(
+                        success=True,
+                        message_id=response.message_id,
+                        error=None
+                    )
+                except Exception as db_error:
+                    # Message was sent successfully but failed to store in DB
+                    # Log the error but still return success since Instagram API succeeded
+                    logger.error(f"⚠️ Message sent but failed to store in DB: {db_error}", exc_info=True)
+                    
+                    return SendMessageResponse(
+                        success=True,
+                        message_id=response.message_id,
+                        error=f"Message sent but not stored: {str(db_error)}"
+                    )
             else:
                 logger.error(f"❌ Failed to send message: {response.error_message}")
                 raise HTTPException(
