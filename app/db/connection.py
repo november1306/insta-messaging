@@ -54,6 +54,9 @@ async def get_db_session() -> AsyncSession:
         @app.get("/endpoint")
         async def endpoint(db: AsyncSession = Depends(get_db_session)):
             ...
+    
+    Note: This session auto-commits on success and auto-rolls back on error.
+    Manual commit/rollback in endpoint code is not needed.
     """
     if async_session_maker is None:
         raise RuntimeError("Database not initialized. Call init_db() first.")

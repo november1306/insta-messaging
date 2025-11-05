@@ -67,6 +67,8 @@ class MessageRepository(IMessageRepository):
             return message
             
         except IntegrityError as e:
+            # Rollback the failed transaction to clean up the session state
+            await self._db.rollback()
             logger.error(f"Message {message.id} already exists: {e}")
             raise ValueError(f"Message {message.id} already exists") from e
         except Exception as e:

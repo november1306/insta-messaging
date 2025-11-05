@@ -39,7 +39,11 @@ async def verify_webhook(
     if hub_mode == "subscribe" and hub_verify_token == settings.facebook_verify_token:
         logger.info("✅ Webhook verification successful")
         # Return the challenge to complete verification
-        return int(hub_challenge)
+        # Facebook expects the challenge as plain text (string or int)
+        try:
+            return int(hub_challenge)
+        except ValueError:
+            return hub_challenge
     else:
         logger.warning(f"❌ Webhook verification failed - invalid token")
         raise HTTPException(
@@ -135,11 +139,11 @@ async def handle_webhook(
                         else:
                             # Non-text message or unsupported event type
                             logger.info(f"ℹ️ Skipped non-text message or unsupported event")
-                        
-                except Exception as msg_error:
-                    # Log error but continue processing other messages
-                    logger.error(f"Error processing individual message: {msg_error}", exc_info=True)
-                    continue
+                    
+                    except Exception as msg_error:
+                        # Log error but continue processing other messages
+                        logger.error(f"Error processing individual message: {msg_error}", exc_info=True)
+                        continue
 
         logger.info(f"✅ Processed {messages_processed} messages from webhook")
 
@@ -271,3 +275,99 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
     except Exception as e:
         logger.error(f"Error extracting message data: {e}", exc_info=True)
         return None
+
+
+# ============================================================================
+# Send Message API Endpoint
+# ============================================================================
+
+from pydantic import BaseModel
+
+class SendMessageRequest(BaseModel):
+    """Request model for sending messages"""
+    recipient_id: str
+    message_text: str
+
+class SendMessageResponse(BaseModel):
+    """Response model for send message endpoint"""
+    success: bool
+    message_id: str | None = None
+    error: str | None = None
+
+
+@router.post("/send", response_model=SendMessageResponse)
+async def send_message_api(
+    request: SendMessageRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    API endpoint to send a message from the business account to a user.
+    
+    Usage:
+        POST /webhooks/send
+        {
+            "recipient_id": "1558635688632972",
+            "message_text": "Hello from the business!"
+        }
+    
+    Returns:
+        {
+            "success": true,
+            "message_id": "message_id_from_instagram",
+            "error": null
+        }
+    """
+    logger.info(f"📤 API request to send message to {request.recipient_id}")
+    
+    try:
+        # Create Instagram client
+        async with httpx.AsyncClient() as http_client:
+            instagram_client = InstagramClient(
+                http_client=http_client,
+                settings=settings,
+                logger_instance=logger
+            )
+            
+            # Send message via Instagram API
+            response = await instagram_client.send_message(
+                recipient_id=request.recipient_id,
+                message_text=request.message_text
+            )
+            
+            if response.success:
+                # Store outbound message in database
+                message_repo = MessageRepository(db)
+                
+                outbound_message = Message(
+                    id=response.message_id,
+                    sender_id=settings.instagram_page_access_token[:20],  # Placeholder for page ID
+                    recipient_id=request.recipient_id,
+                    message_text=request.message_text,
+                    direction="outbound",
+                    timestamp=datetime.now(timezone.utc)
+                )
+                
+                await message_repo.save(outbound_message)
+                
+                logger.info(f"✅ Message sent successfully - ID: {response.message_id}")
+                
+                return SendMessageResponse(
+                    success=True,
+                    message_id=response.message_id,
+                    error=None
+                )
+            else:
+                logger.error(f"❌ Failed to send message: {response.error_message}")
+                return SendMessageResponse(
+                    success=False,
+                    message_id=None,
+                    error=response.error_message
+                )
+                
+    except Exception as e:
+        logger.error(f"❌ Error in send message API: {e}", exc_info=True)
+        return SendMessageResponse(
+            success=False,
+            message_id=None,
+            error=str(e)
+        )
