@@ -164,8 +164,23 @@ async def _handle_auto_reply(
             logger.info(f"No reply rule matched, skipping auto-reply")
             return
         
-        # Get reply text from user-defined rules
-        reply_text = get_reply_text(inbound_message.message_text)
+        # Fetch username for personalization
+        username = None
+        async with httpx.AsyncClient() as http_client:
+            instagram_client = InstagramClient(
+                http_client=http_client,
+                settings=settings,
+                logger_instance=logger
+            )
+            
+            # Try to get user profile (non-blocking, fallback if fails)
+            profile = await instagram_client.get_user_profile(inbound_message.sender_id)
+            if profile and "username" in profile:
+                username = profile["username"]
+                logger.info(f"👤 Retrieved username: @{username}")
+        
+        # Get reply text from user-defined rules (with username if available)
+        reply_text = get_reply_text(inbound_message.message_text, username=username)
         
         if not reply_text:
             logger.warning(f"Reply rule matched but no reply text defined")

@@ -31,19 +31,24 @@ def should_reply(message_text: str) -> bool:
     return False
 
 
-def get_reply_text(message_text: str) -> Optional[str]:
+def get_reply_text(message_text: str, username: Optional[str] = None) -> Optional[str]:
     """
     Get the reply text for a given message.
     
     Args:
         message_text: The text content of the incoming message
+        username: Optional Instagram username of the sender (for personalization)
         
     Returns:
         The reply text to send, or None if no reply should be sent
     """
     # Rule: "order66" keyword triggers confirmation message
     if "order66" in message_text.lower():
-        return "Order 66 confirmed! Your request has been received."
+        if username:
+            return f"Order 66 confirmed, @{username}! Your request has been received."
+        else:
+            # Fallback if username not available
+            return "Order 66 confirmed! Your request has been received."
     
     # No matching rule
     return None
