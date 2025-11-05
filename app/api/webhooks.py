@@ -56,7 +56,8 @@ async def handle_webhook(
     Facebook sends POST requests with message data.
     We parse the payload, extract messages, and store them in the database.
     
-    Note: Webhook signature validation will be implemented in Task 9.
+    TODO (Task 9): Implement webhook signature validation before processing
+                   https://developers.facebook.com/docs/messenger-platform/webhooks#security
     """
     messages_processed = 0
     
@@ -110,6 +111,10 @@ async def handle_webhook(
                             # Message already exists - this is ok for webhook retries
                             logger.info(f"ℹ️ Message {message.id} already exists, skipping")
                             continue
+                        except Exception as save_error:
+                            # Other database errors (connection issues, etc.)
+                            logger.error(f"Failed to save message {message.id}: {save_error}", exc_info=True)
+                            continue
                     else:
                         # Non-text message or unsupported event type
                         logger.info(f"ℹ️ Skipped non-text message or unsupported event")
@@ -124,6 +129,7 @@ async def handle_webhook(
     except Exception as e:
         logger.error(f"Error processing webhook: {e}", exc_info=True)
         # Transaction will be rolled back by get_db_session() on exception
+        messages_processed = 0  # Reset count since transaction rolled back
     
     # Always return 200 to acknowledge receipt and prevent Facebook retries
     return {"status": "ok", "messages_processed": messages_processed}

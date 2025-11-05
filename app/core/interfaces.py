@@ -5,7 +5,7 @@ YAGNI: Start with minimal abstractions. Add complexity when needed.
 """
 from abc import ABC, abstractmethod
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # Simple domain model for messages
@@ -27,7 +27,7 @@ class Message:
         self.message_text = message_text
         self.direction = direction
         self.timestamp = timestamp
-        self.created_at = created_at or datetime.now()
+        self.created_at = created_at or datetime.now(timezone.utc)
 
 
 # Repository interface (add when we actually implement it)
