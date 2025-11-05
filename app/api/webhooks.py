@@ -51,15 +51,18 @@ async def handle_webhook(request: Request):
     try:
         # Get the raw request body
         body = await request.json()
-        
-        logger.info("📨 Webhook POST request received")
-        logger.info(f"Payload: {body}")
-        
+
+        # Log only metadata, never log message content or personal data
+        entry_count = len(body.get("entry", []))
+        object_type = body.get("object", "unknown")
+
+        logger.info(f"📨 Webhook POST request received - object: {object_type}, entries: {entry_count}")
+
         # For now, just acknowledge receipt
         # Message processing will be implemented in Task 2 & 3
         return {"status": "ok"}
-        
+
     except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
+        logger.error(f"Error processing webhook: {e}", exc_info=True)
         # Always return 200 to prevent Facebook from retrying
         return {"status": "error", "message": str(e)}
