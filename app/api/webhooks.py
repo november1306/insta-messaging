@@ -1,11 +1,13 @@
 """Instagram webhook endpoints"""
 from fastapi import APIRouter, Request, Query, HTTPException, status, Depends
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.connection import get_db_session
 from app.repositories.message_repository import MessageRepository
 from app.core.interfaces import Message
 from app.clients import InstagramClient
+from app.clients.instagram_client import InstagramAPIError
 from app.rules.reply_rules import get_reply_text
 from datetime import datetime, timezone
 import logging
@@ -39,7 +41,11 @@ async def verify_webhook(
     if hub_mode == "subscribe" and hub_verify_token == settings.facebook_verify_token:
         logger.info("✅ Webhook verification successful")
         # Return the challenge to complete verification
-        return int(hub_challenge)
+        # Facebook expects the challenge as plain text (string or int)
+        try:
+            return int(hub_challenge)
+        except ValueError:
+            return hub_challenge
     else:
         logger.warning(f"❌ Webhook verification failed - invalid token")
         raise HTTPException(
@@ -135,11 +141,11 @@ async def handle_webhook(
                         else:
                             # Non-text message or unsupported event type
                             logger.info(f"ℹ️ Skipped non-text message or unsupported event")
-                        
-                except Exception as msg_error:
-                    # Log error but continue processing other messages
-                    logger.error(f"Error processing individual message: {msg_error}", exc_info=True)
-                    continue
+                    
+                    except Exception as msg_error:
+                        # Log error but continue processing other messages
+                        logger.error(f"Error processing individual message: {msg_error}", exc_info=True)
+                        continue
 
         logger.info(f"✅ Processed {messages_processed} messages from webhook")
 
@@ -271,3 +277,112 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
     except Exception as e:
         logger.error(f"Error extracting message data: {e}", exc_info=True)
         return None
+
+
+# ============================================================================
+# Send Message API Endpoint
+# ============================================================================
+
+class SendMessageRequest(BaseModel):
+    """Request model for sending messages"""
+    recipient_id: str
+    message_text: str
+
+class SendMessageResponse(BaseModel):
+    """Response model for send message endpoint"""
+    success: bool
+    message_id: str | None = None
+    error: str | None = None
+
+
+@router.post("/send", response_model=SendMessageResponse)
+async def send_message_api(
+    request: SendMessageRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    API endpoint to send a message from the business account to a user.
+    
+    Usage:
+        POST /webhooks/send
+        {
+            "recipient_id": "1558635688632972",
+            "message_text": "Hello from the business!"
+        }
+    
+    Returns:
+        {
+            "success": true,
+            "message_id": "message_id_from_instagram",
+            "error": null
+        }
+    """
+    logger.info(f"📤 API request to send message to {request.recipient_id}")
+    
+    try:
+        # Create Instagram client (MVP: one client per request)
+        # TODO: For production, consider reusing HTTP client across requests for better performance
+        async with httpx.AsyncClient() as http_client:
+            instagram_client = InstagramClient(
+                http_client=http_client,
+                settings=settings,
+                logger_instance=logger
+            )
+            
+            # Send message via Instagram API
+            response = await instagram_client.send_message(
+                recipient_id=request.recipient_id,
+                message_text=request.message_text
+            )
+            
+            if response.success:
+                # Store outbound message in database
+                message_repo = MessageRepository(db)
+                
+                outbound_message = Message(
+                    id=response.message_id,
+                    sender_id=settings.instagram_business_account_id,
+                    recipient_id=request.recipient_id,
+                    message_text=request.message_text,
+                    direction="outbound",
+                    timestamp=datetime.now(timezone.utc)
+                )
+                
+                try:
+                    await message_repo.save(outbound_message)
+                    logger.info(f"✅ Message sent and stored - ID: {response.message_id}")
+                    
+                    return SendMessageResponse(
+                        success=True,
+                        message_id=response.message_id,
+                        error=None
+                    )
+                except Exception as db_error:
+                    # Message was sent successfully but failed to store in DB
+                    # Log the error but still return success since Instagram API succeeded
+                    logger.error(f"⚠️ Message sent but failed to store in DB: {db_error}", exc_info=True)
+                    
+                    return SendMessageResponse(
+                        success=True,
+                        message_id=response.message_id,
+                        error=f"Message sent but not stored: {str(db_error)}"
+                    )
+            else:
+                logger.error(f"❌ Failed to send message: {response.error_message}")
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to send message: {response.error_message}"
+                )
+                
+    except InstagramAPIError as e:
+        logger.error(f"❌ Instagram API error: {e.message}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to send message: {e.message}"
+        )
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in send message API: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )

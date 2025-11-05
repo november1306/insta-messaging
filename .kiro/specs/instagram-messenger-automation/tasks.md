@@ -77,7 +77,11 @@ This plan implements a simple POC for receiving and sending Instagram messages. 
 
 ## Phase 4: Testing and Validation (POC)
 
-- [ ] 8. Test end-to-end message flow
+- [x] 8. Test end-to-end message flow
+
+
+
+
   - Set up ngrok tunnel for local testing
   - Configure Instagram webhook with ngrok URL
   - Send test message from Instagram account

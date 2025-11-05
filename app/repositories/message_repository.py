@@ -67,6 +67,7 @@ class MessageRepository(IMessageRepository):
             return message
             
         except IntegrityError as e:
+            # Session manager in get_db_session() handles rollback automatically
             logger.error(f"Message {message.id} already exists: {e}")
             raise ValueError(f"Message {message.id} already exists") from e
         except Exception as e:
