@@ -5,7 +5,7 @@ from app.config import settings
 from app.db.connection import get_db_session
 from app.repositories.message_repository import MessageRepository
 from app.core.interfaces import Message
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 # Set up logging
@@ -55,10 +55,23 @@ async def handle_webhook(
     
     Facebook sends POST requests with message data.
     We parse the payload, extract messages, and store them in the database.
+    
+    Note: Webhook signature validation will be implemented in Task 9.
     """
+    messages_processed = 0
+    
     try:
         # Get the raw request body
         body = await request.json()
+        
+        # Validate request body structure
+        if not isinstance(body, dict):
+            logger.warning("Invalid webhook payload: not a dictionary")
+            return {"status": "ok", "messages_processed": 0}
+        
+        if "entry" not in body:
+            logger.warning("Invalid webhook payload: missing 'entry' field")
+            return {"status": "ok", "messages_processed": 0}
 
         # Log only metadata, never log message content or personal data
         entry_count = len(body.get("entry", []))
@@ -70,7 +83,6 @@ async def handle_webhook(
         message_repo = MessageRepository(db)
 
         # Parse and store messages from webhook payload
-        messages_processed = 0
         for entry in body.get("entry", []):
             # Each entry can contain multiple messaging events
             for messaging_event in entry.get("messaging", []):
@@ -85,15 +97,19 @@ async def handle_webhook(
                             sender_id=message_data["sender_id"],
                             recipient_id=message_data["recipient_id"],
                             message_text=message_data["text"],
-                            direction="inbound",
+                            direction="inbound",  # Webhooks only receive inbound messages
                             timestamp=message_data["timestamp"]
                         )
                         
-                        # Save to database
-                        await message_repo.save(message)
-                        messages_processed += 1
-                        
-                        logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
+                        # Save to database (handle duplicates from webhook retries)
+                        try:
+                            await message_repo.save(message)
+                            messages_processed += 1
+                            logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
+                        except ValueError:
+                            # Message already exists - this is ok for webhook retries
+                            logger.info(f"ℹ️ Message {message.id} already exists, skipping")
+                            continue
                     else:
                         # Non-text message or unsupported event type
                         logger.info(f"ℹ️ Skipped non-text message or unsupported event")
@@ -104,14 +120,13 @@ async def handle_webhook(
                     continue
 
         logger.info(f"✅ Processed {messages_processed} messages from webhook")
-        
-        # Always return 200 to acknowledge receipt
-        return {"status": "ok", "messages_processed": messages_processed}
 
     except Exception as e:
         logger.error(f"Error processing webhook: {e}", exc_info=True)
-        # Always return 200 to prevent Facebook from retrying
-        return {"status": "error", "message": str(e)}
+        # Transaction will be rolled back by get_db_session() on exception
+    
+    # Always return 200 to acknowledge receipt and prevent Facebook retries
+    return {"status": "ok", "messages_processed": messages_processed}
 
 
 def _extract_message_data(messaging_event: dict) -> dict | None:
@@ -149,8 +164,8 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
             logger.warning("Missing required fields in message event")
             return None
         
-        # Convert timestamp from milliseconds to datetime
-        timestamp = datetime.fromtimestamp(timestamp_ms / 1000.0)
+        # Convert timestamp from milliseconds to datetime (UTC timezone-aware)
+        timestamp = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc)
         
         return {
             "id": message_id,
