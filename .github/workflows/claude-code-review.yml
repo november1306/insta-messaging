@@ -41,13 +41,16 @@ jobs:
             PR NUMBER: ${{ github.event.pull_request.number }}
 
             Please review this pull request and provide feedback on:
-            - Code quality and best practices
-            - Potential bugs or issues
-            - Performance considerations
-            - Security concerns
-            - Test coverage
+            - Code quality and best practices: be moderate on edge case validation and forgiving for low priority issues
+            - Prefer less but well-rounded code instead of handling every possible edge case
+            - Critical bugs or security issues only
+            - Test coverage for core functionality
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+            Context: This is an MVP project. Focus on what matters for getting it working, not perfection.
+            
+            Use the repository's CLAUDE.md for guidance on style and conventions.
+            Skip the "this is good" part - go straight to issues that need fixing.
+            Be concise, constructive and helpful in your feedback.
 
             Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
 
