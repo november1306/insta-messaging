@@ -6,6 +6,7 @@ from app.db.connection import get_db_session
 from app.repositories.message_repository import MessageRepository
 from app.core.interfaces import Message
 from app.clients import InstagramClient
+from app.clients.instagram_client import InstagramAPIError
 from app.rules.reply_rules import get_reply_text
 from datetime import datetime, timezone
 import logging
@@ -340,7 +341,7 @@ async def send_message_api(
                 
                 outbound_message = Message(
                     id=response.message_id,
-                    sender_id=settings.instagram_page_access_token[:20],  # Placeholder for page ID
+                    sender_id=settings.instagram_business_account_id,
                     recipient_id=request.recipient_id,
                     message_text=request.message_text,
                     direction="outbound",
@@ -358,16 +359,20 @@ async def send_message_api(
                 )
             else:
                 logger.error(f"❌ Failed to send message: {response.error_message}")
-                return SendMessageResponse(
-                    success=False,
-                    message_id=None,
-                    error=response.error_message
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to send message: {response.error_message}"
                 )
                 
+    except InstagramAPIError as e:
+        logger.error(f"❌ Instagram API error: {e.message}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to send message: {e.message}"
+        )
     except Exception as e:
-        logger.error(f"❌ Error in send message API: {e}", exc_info=True)
-        return SendMessageResponse(
-            success=False,
-            message_id=None,
-            error=str(e)
+        logger.error(f"❌ Unexpected error in send message API: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
         )
