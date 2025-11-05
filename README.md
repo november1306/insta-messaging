@@ -19,35 +19,54 @@ This system receives customer messages via Instagram Direct Messages through Fac
 
 ### Prerequisites
 
-- **Python 3.11+** (using Python 3.12.9)
-- **MySQL 8.0+** (for database storage)
+- **Miniconda or Anaconda** (recommended) or Python 3.12+
 - **Facebook App** with Instagram permissions configured
-- **ngrok** for local webhook testing (install via `scoop install ngrok`)
+- **ngrok** for local webhook testing
 
-### Local Development Setup
+### Automated Setup (Windows)
 
-1. **Clone and install dependencies:**
+```bash
+# Run the setup script
+setup.bat
+```
+
+This will:
+1. Create conda environment with all dependencies
+2. Copy .env.example to .env
+3. Run database migrations
+
+### Manual Setup
+
+1. **Create conda environment:**
    ```bash
-   git clone https://github.com/november1306/insta-messaging.git
-   cd insta-messaging
+   # Create environment from environment.yml
+   conda env create -f environment.yml
    
-   # Install dependencies (use 'py' on Windows)
-   py -m pip install -r requirements.txt
+   # Activate environment
+   conda activate insta-auto
    ```
 
 2. **Configure environment variables:**
    ```bash
    # Copy the example file
-   cp .env.example .env
+   copy .env.example .env  # Windows
    
-   # Edit .env with your credentials (see Token Setup section below)
+   # Edit .env with your credentials
    ```
 
-3. **Start the server:**
+3. **Initialize database:**
+   ```bash
+   # Run migrations to create SQLite database
+   alembic upgrade head
+   ```
+
+4. **Start the server:**
    ```bash
    # Start FastAPI server (runs on http://localhost:8000)
-   py -m uvicorn app.main:app --reload
+   uvicorn app.main:app --reload
    ```
+
+For detailed setup instructions, see [SETUP.md](SETUP.md)
 
 4. **Set up ngrok tunnel (in separate terminal):**
    ```bash
