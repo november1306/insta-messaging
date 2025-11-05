@@ -6,7 +6,7 @@ from app.db.connection import get_db_session
 from app.repositories.message_repository import MessageRepository
 from app.core.interfaces import Message
 from app.clients import InstagramClient
-from app.rules.reply_rules import should_reply, get_reply_text
+from app.rules.reply_rules import get_reply_text
 from datetime import datetime, timezone
 import logging
 import httpx
@@ -111,9 +111,6 @@ async def handle_webhook(
                             messages_processed += 1
                             logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
                             
-                            # Check for trigger keyword and send auto-reply
-                            await _handle_auto_reply(message, message_repo, db)
-                            
                         except ValueError:
                             # Message already exists - this is ok for webhook retries
                             logger.info(f"ℹ️ Message {message.id} already exists, skipping")
@@ -122,6 +119,11 @@ async def handle_webhook(
                             # Other database errors (connection issues, etc.)
                             logger.error(f"Failed to save message {message.id}: {save_error}", exc_info=True)
                             continue
+                        
+                        # Handle auto-reply after successful save (outside try/catch to not rollback on reply failure)
+                        # Use a separate HTTP client for the reply to avoid connection leaks
+                        async with httpx.AsyncClient() as http_client:
+                            await _handle_auto_reply(message, message_repo, http_client)
                     else:
                         # Non-text message or unsupported event type
                         logger.info(f"ℹ️ Skipped non-text message or unsupported event")
@@ -145,7 +147,7 @@ async def handle_webhook(
 async def _handle_auto_reply(
     inbound_message: Message,
     message_repo: MessageRepository,
-    db: AsyncSession
+    http_client: httpx.AsyncClient
 ) -> None:
     """
     Handle auto-reply logic for inbound messages.
@@ -153,74 +155,63 @@ async def _handle_auto_reply(
     Uses user-defined rules from app.rules.reply_rules to determine
     if and how to reply to messages.
     
+    This function is called AFTER the inbound message is saved to avoid
+    transaction rollback if reply fails.
+    
     Args:
         inbound_message: The inbound message that was just received
         message_repo: Repository for storing outbound messages
-        db: Database session for transaction management
+        http_client: HTTP client for making API requests (reused to avoid leaks)
     """
     try:
-        # Check if message should trigger a reply (user-defined rule)
-        if not should_reply(inbound_message.message_text):
-            logger.info(f"No reply rule matched, skipping auto-reply")
-            return
-        
-        # Fetch username for personalization
+        # Fetch username for personalization (non-blocking, fallback if fails)
         username = None
-        async with httpx.AsyncClient() as http_client:
-            instagram_client = InstagramClient(
-                http_client=http_client,
-                settings=settings,
-                logger_instance=logger
-            )
-            
-            # Try to get user profile (non-blocking, fallback if fails)
-            profile = await instagram_client.get_user_profile(inbound_message.sender_id)
-            if profile and "username" in profile:
-                username = profile["username"]
-                logger.info(f"👤 Retrieved username: @{username}")
+        instagram_client = InstagramClient(
+            http_client=http_client,
+            settings=settings,
+            logger_instance=logger
+        )
         
-        # Get reply text from user-defined rules (with username if available)
+        profile = await instagram_client.get_user_profile(inbound_message.sender_id)
+        if profile and "username" in profile:
+            username = profile["username"]
+            logger.info(f"👤 Retrieved username: @{username}")
+        
+        # Get reply text from user-defined rules (returns None if no match)
         reply_text = get_reply_text(inbound_message.message_text, username=username)
         
         if not reply_text:
-            logger.warning(f"Reply rule matched but no reply text defined")
+            logger.info(f"No reply rule matched, skipping auto-reply")
             return
         
         logger.info(f"📤 Sending auto-reply...")
         
-        # Send reply using Instagram API
-        async with httpx.AsyncClient() as http_client:
-            instagram_client = InstagramClient(
-                http_client=http_client,
-                settings=settings,
-                logger_instance=logger
+        # Send message (sender becomes recipient for reply)
+        response = await instagram_client.send_message(
+            recipient_id=inbound_message.sender_id,
+            message_text=reply_text
+        )
+        
+        if response.success:
+            # Create outbound message record
+            outbound_message = Message(
+                id=response.message_id,
+                sender_id=inbound_message.recipient_id,  # Our page ID
+                recipient_id=inbound_message.sender_id,  # Customer ID
+                message_text=reply_text,
+                direction="outbound",
+                timestamp=datetime.now(timezone.utc)
             )
             
-            # Send message (sender becomes recipient for reply)
-            response = await instagram_client.send_message(
-                recipient_id=inbound_message.sender_id,
-                message_text=reply_text
-            )
+            # Store outbound message in database
+            await message_repo.save(outbound_message)
+            logger.info(f"✅ Auto-reply sent and stored: {response.message_id}")
+        else:
+            logger.error(f"❌ Failed to send auto-reply: {response.error_message}")
             
-            if response.success:
-                # Create outbound message record
-                outbound_message = Message(
-                    id=response.message_id,
-                    sender_id=inbound_message.recipient_id,  # Our page ID
-                    recipient_id=inbound_message.sender_id,  # Customer ID
-                    message_text=reply_text,
-                    direction="outbound",
-                    timestamp=datetime.now(timezone.utc)
-                )
-                
-                # Store outbound message in database
-                await message_repo.save(outbound_message)
-                logger.info(f"✅ Auto-reply sent and stored: {response.message_id}")
-            else:
-                logger.error(f"❌ Failed to send auto-reply: {response.error_message}")
-                
     except Exception as e:
         # Log error but don't fail the webhook processing
+        # Inbound message is already saved, so webhook won't be retried
         logger.error(f"❌ Error in auto-reply handler: {e}", exc_info=True)
 
 
