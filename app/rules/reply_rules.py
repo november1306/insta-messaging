@@ -1,14 +1,11 @@
 """
 User-defined auto-reply rules.
 
-This module contains the business logic for determining when and how to reply
-to incoming messages. Rules are defined here and can be easily modified without
-touching the core webhook system.
+ADMIN: Edit app/rules/message_rules.py to add/modify reply rules.
+This file just provides a simple interface.
 """
-import logging
 from typing import Optional
-
-logger = logging.getLogger(__name__)
+from app.rules.message_rules import get_reply
 
 
 def get_reply_text(message_text: str, username: Optional[str] = None) -> Optional[str]:
@@ -24,15 +21,4 @@ def get_reply_text(message_text: str, username: Optional[str] = None) -> Optiona
     Returns:
         The reply text to send, or None if no reply should be sent
     """
-    # Rule: "order66" keyword triggers confirmation message
-    if "order66" in message_text.lower():
-        logger.info(f"🎯 Trigger keyword 'order66' detected")
-        
-        if username:
-            return f"Order 66 confirmed, @{username}! Your request has been received."
-        else:
-            # Fallback if username not available
-            return "Order 66 confirmed! Your request has been received."
-    
-    # No matching rule
-    return None
+    return get_reply(message_text, username=username)

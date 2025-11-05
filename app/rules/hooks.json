@@ -1,0 +1,48 @@
+{
+  "hooks": [
+    {
+      "name": "order66_confirmation",
+      "enabled": true,
+      "priority": 10,
+      "condition": {
+        "type": "contains",
+        "value": "order66",
+        "case_sensitive": false
+      },
+      "action": {
+        "type": "reply",
+        "message": "Order 66 confirmed, @{username}! Your request has been received.",
+        "message_fallback": "Order 66 confirmed! Your request has been received."
+      }
+    },
+    {
+      "name": "greeting",
+      "enabled": false,
+      "priority": 5,
+      "condition": {
+        "type": "contains",
+        "value": "hello",
+        "case_sensitive": false
+      },
+      "action": {
+        "type": "reply",
+        "message": "Hello @{username}! How can we help you today?",
+        "message_fallback": "Hello! How can we help you today?"
+      }
+    },
+    {
+      "name": "help_command",
+      "enabled": false,
+      "priority": 8,
+      "condition": {
+        "type": "exact",
+        "value": "help",
+        "case_sensitive": false
+      },
+      "action": {
+        "type": "reply",
+        "message": "Available commands:\n- order66: Execute order\n- help: Show this message"
+      }
+    }
+  ]
+}

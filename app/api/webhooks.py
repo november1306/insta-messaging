@@ -119,18 +119,19 @@ async def handle_webhook(
                                 messages_processed += 1
                                 logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
                                 
+                                # Handle auto-reply ONLY for newly saved messages (not duplicates)
+                                # Reuse instagram_client for all messages in this webhook batch
+                                await _handle_auto_reply(message, message_repo, instagram_client)
+                                
                             except ValueError:
                                 # Message already exists - this is ok for webhook retries
-                                logger.info(f"ℹ️ Message {message.id} already exists, skipping")
+                                # Skip auto-reply to prevent duplicate responses
+                                logger.info(f"ℹ️ Message {message.id} already exists, skipping auto-reply")
                                 continue
                             except Exception as save_error:
                                 # Other database errors (connection issues, etc.)
                                 logger.error(f"Failed to save message {message.id}: {save_error}", exc_info=True)
                                 continue
-                            
-                            # Handle auto-reply after successful save
-                            # Reuse instagram_client for all messages in this webhook batch
-                            await _handle_auto_reply(message, message_repo, instagram_client)
                         else:
                             # Non-text message or unsupported event type
                             logger.info(f"ℹ️ Skipped non-text message or unsupported event")
