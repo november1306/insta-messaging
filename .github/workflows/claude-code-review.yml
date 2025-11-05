@@ -41,13 +41,15 @@ jobs:
             PR NUMBER: ${{ github.event.pull_request.number }}
 
             Please review this pull request and provide feedback on:
-            - Code quality and best practices
+            - Code quality and best practices: be moderate on edge case validation and forgiving for low priority issues. 
+            - prefer less but well rounded code instead of handling all cases. 
             - Potential bugs or issues
-            - Performance considerations
             - Security concerns
             - Test coverage
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+            Use the repository's CLAUDE.md for guidance on style and conventions.
+            skip 'this is good' part, go straight to issues
+             Be concise, constructive and helpful in your feedback.
 
             Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
 

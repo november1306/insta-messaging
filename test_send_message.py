@@ -12,7 +12,15 @@ import httpx
 import asyncio
 import sys
 import os
+import logging
 from app.config import settings
+from app.clients.instagram_client import InstagramClient, InstagramAPIError
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 # Load user ID mappings from environment variable
 def load_user_ids() -> dict:
