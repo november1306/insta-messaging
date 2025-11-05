@@ -1,6 +1,11 @@
 """Instagram webhook endpoints"""
-from fastapi import APIRouter, Request, Query, HTTPException, status
+from fastapi import APIRouter, Request, Query, HTTPException, status, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
+from app.db.connection import get_db_session
+from app.repositories.message_repository import MessageRepository
+from app.core.interfaces import Message
+from datetime import datetime
 import logging
 
 # Set up logging
@@ -41,12 +46,15 @@ async def verify_webhook(
 
 
 @router.post("/instagram")
-async def handle_webhook(request: Request):
+async def handle_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session)
+):
     """
     Webhook endpoint for receiving Instagram messages.
     
     Facebook sends POST requests with message data.
-    We log the payload and return 200 to acknowledge receipt.
+    We parse the payload, extract messages, and store them in the database.
     """
     try:
         # Get the raw request body
@@ -58,11 +66,100 @@ async def handle_webhook(request: Request):
 
         logger.info(f"📨 Webhook POST request received - object: {object_type}, entries: {entry_count}")
 
-        # For now, just acknowledge receipt
-        # Message processing will be implemented in Task 2 & 3
-        return {"status": "ok"}
+        # Initialize repository
+        message_repo = MessageRepository(db)
+
+        # Parse and store messages from webhook payload
+        messages_processed = 0
+        for entry in body.get("entry", []):
+            # Each entry can contain multiple messaging events
+            for messaging_event in entry.get("messaging", []):
+                try:
+                    # Extract message data
+                    message_data = _extract_message_data(messaging_event)
+                    
+                    if message_data:
+                        # Create domain Message object
+                        message = Message(
+                            id=message_data["id"],
+                            sender_id=message_data["sender_id"],
+                            recipient_id=message_data["recipient_id"],
+                            message_text=message_data["text"],
+                            direction="inbound",
+                            timestamp=message_data["timestamp"]
+                        )
+                        
+                        # Save to database
+                        await message_repo.save(message)
+                        messages_processed += 1
+                        
+                        logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
+                    else:
+                        # Non-text message or unsupported event type
+                        logger.info(f"ℹ️ Skipped non-text message or unsupported event")
+                        
+                except Exception as msg_error:
+                    # Log error but continue processing other messages
+                    logger.error(f"Error processing individual message: {msg_error}", exc_info=True)
+                    continue
+
+        logger.info(f"✅ Processed {messages_processed} messages from webhook")
+        
+        # Always return 200 to acknowledge receipt
+        return {"status": "ok", "messages_processed": messages_processed}
 
     except Exception as e:
         logger.error(f"Error processing webhook: {e}", exc_info=True)
         # Always return 200 to prevent Facebook from retrying
         return {"status": "error", "message": str(e)}
+
+
+def _extract_message_data(messaging_event: dict) -> dict | None:
+    """
+    Extract message data from a messaging event.
+    
+    Args:
+        messaging_event: A single messaging event from the webhook payload
+        
+    Returns:
+        Dictionary with message data if it's a text message, None otherwise
+    """
+    try:
+        # Check if this is a message event (not delivery, read, etc.)
+        if "message" not in messaging_event:
+            return None
+        
+        message = messaging_event["message"]
+        
+        # Only process text messages for now
+        if "text" not in message:
+            message_type = "image" if "attachments" in message else "unknown"
+            logger.info(f"Skipping non-text message type: {message_type}")
+            return None
+        
+        # Extract required fields
+        sender_id = messaging_event.get("sender", {}).get("id")
+        recipient_id = messaging_event.get("recipient", {}).get("id")
+        message_id = message.get("mid")
+        message_text = message.get("text")
+        timestamp_ms = messaging_event.get("timestamp")
+        
+        # Validate required fields
+        if not all([sender_id, recipient_id, message_id, message_text, timestamp_ms]):
+            logger.warning("Missing required fields in message event")
+            return None
+        
+        # Convert timestamp from milliseconds to datetime
+        timestamp = datetime.fromtimestamp(timestamp_ms / 1000.0)
+        
+        return {
+            "id": message_id,
+            "sender_id": sender_id,
+            "recipient_id": recipient_id,
+            "text": message_text,
+            "timestamp": timestamp
+        }
+        
+    except Exception as e:
+        logger.error(f"Error extracting message data: {e}", exc_info=True)
+        return None
