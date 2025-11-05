@@ -86,47 +86,48 @@ async def handle_webhook(
         # Initialize repository
         message_repo = MessageRepository(db)
 
-        # Parse and store messages from webhook payload
-        for entry in body.get("entry", []):
-            # Each entry can contain multiple messaging events
-            for messaging_event in entry.get("messaging", []):
-                try:
-                    # Extract message data
-                    message_data = _extract_message_data(messaging_event)
-                    
-                    if message_data:
-                        # Create domain Message object
-                        message = Message(
-                            id=message_data["id"],
-                            sender_id=message_data["sender_id"],
-                            recipient_id=message_data["recipient_id"],
-                            message_text=message_data["text"],
-                            direction="inbound",  # Webhooks only receive inbound messages
-                            timestamp=message_data["timestamp"]
-                        )
+        # Create HTTP client once for all auto-replies (avoid connection leaks)
+        async with httpx.AsyncClient() as http_client:
+            # Parse and store messages from webhook payload
+            for entry in body.get("entry", []):
+                # Each entry can contain multiple messaging events
+                for messaging_event in entry.get("messaging", []):
+                    try:
+                        # Extract message data
+                        message_data = _extract_message_data(messaging_event)
                         
-                        # Save to database (handle duplicates from webhook retries)
-                        try:
-                            await message_repo.save(message)
-                            messages_processed += 1
-                            logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
+                        if message_data:
+                            # Create domain Message object
+                            message = Message(
+                                id=message_data["id"],
+                                sender_id=message_data["sender_id"],
+                                recipient_id=message_data["recipient_id"],
+                                message_text=message_data["text"],
+                                direction="inbound",  # Webhooks only receive inbound messages
+                                timestamp=message_data["timestamp"]
+                            )
                             
-                        except ValueError:
-                            # Message already exists - this is ok for webhook retries
-                            logger.info(f"ℹ️ Message {message.id} already exists, skipping")
-                            continue
-                        except Exception as save_error:
-                            # Other database errors (connection issues, etc.)
-                            logger.error(f"Failed to save message {message.id}: {save_error}", exc_info=True)
-                            continue
-                        
-                        # Handle auto-reply after successful save (outside try/catch to not rollback on reply failure)
-                        # Use a separate HTTP client for the reply to avoid connection leaks
-                        async with httpx.AsyncClient() as http_client:
+                            # Save to database (handle duplicates from webhook retries)
+                            try:
+                                await message_repo.save(message)
+                                messages_processed += 1
+                                logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
+                                
+                            except ValueError:
+                                # Message already exists - this is ok for webhook retries
+                                logger.info(f"ℹ️ Message {message.id} already exists, skipping")
+                                continue
+                            except Exception as save_error:
+                                # Other database errors (connection issues, etc.)
+                                logger.error(f"Failed to save message {message.id}: {save_error}", exc_info=True)
+                                continue
+                            
+                            # Handle auto-reply after successful save
+                            # Reuse http_client for all messages in this webhook batch
                             await _handle_auto_reply(message, message_repo, http_client)
-                    else:
-                        # Non-text message or unsupported event type
-                        logger.info(f"ℹ️ Skipped non-text message or unsupported event")
+                        else:
+                            # Non-text message or unsupported event type
+                            logger.info(f"ℹ️ Skipped non-text message or unsupported event")
                         
                 except Exception as msg_error:
                     # Log error but continue processing other messages
