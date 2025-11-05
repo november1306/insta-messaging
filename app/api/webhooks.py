@@ -179,14 +179,17 @@ async def _handle_auto_reply(
             logger.info(f"No reply rule matched, skipping auto-reply")
             return
         
-        # Only fetch username if we're actually going to reply
-        username = None
-        profile = await instagram_client.get_user_profile(inbound_message.sender_id)
-        if profile and "username" in profile:
-            username = profile["username"]
-            logger.info(f"👤 Retrieved username: @{username}")
-            # Regenerate reply with username for personalization
-            reply_text = get_reply_text(inbound_message.message_text, username=username)
+        # Only fetch username if reply contains {username} placeholder
+        if "{username}" in reply_text:
+            profile = await instagram_client.get_user_profile(inbound_message.sender_id)
+            if profile and "username" in profile:
+                username = profile["username"]
+                logger.info(f"👤 Retrieved username: @{username}")
+                # Replace placeholder with actual username
+                reply_text = reply_text.replace("{username}", f"@{username}")
+            else:
+                # Fallback: remove placeholder if profile fetch failed
+                reply_text = reply_text.replace("{username}", "")
         
         logger.info(f"📤 Sending auto-reply...")
         

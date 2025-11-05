@@ -69,19 +69,18 @@ elif "order" in msg and "status" in msg:
 ### Personalized Reply
 ```python
 elif "hello" in msg:
-    if username:
-        return f"Hello @{username}!"
-    else:
-        return "Hello!"
+    return "Hello {username}! How can we help?"
+    # {username} will be replaced with @username automatically
 ```
 
 ## Tips
 
 1. **Order matters**: First matching rule wins
 2. **Case-insensitive**: Use `msg = message_text.lower()`
-3. **Test locally**: Send test messages before deploying
-4. **Keep it simple**: Don't overcomplicate
-5. **Comment disabled rules**: Use `#` to disable without deleting
+3. **Personalization**: Use `{username}` placeholder - it will be replaced automatically
+4. **Test locally**: Send test messages before deploying
+5. **Keep it simple**: Don't overcomplicate
+6. **Comment disabled rules**: Use `#` to disable without deleting
 
 ## Files
 

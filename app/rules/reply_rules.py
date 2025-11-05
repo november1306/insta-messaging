@@ -8,17 +8,17 @@ from typing import Optional
 from app.rules.message_rules import get_reply
 
 
-def get_reply_text(message_text: str, username: Optional[str] = None) -> Optional[str]:
+def get_reply_text(message_text: str) -> Optional[str]:
     """
     Get the reply text for a given message.
     
     Returns None if no rule matches (no reply should be sent).
+    Reply may contain {username} placeholder for personalization.
     
     Args:
         message_text: The text content of the incoming message
-        username: Optional Instagram username of the sender (for personalization)
         
     Returns:
-        The reply text to send, or None if no reply should be sent
+        The reply text (with optional {username} placeholder), or None if no reply should be sent
     """
-    return get_reply(message_text, username=username)
+    return get_reply(message_text)

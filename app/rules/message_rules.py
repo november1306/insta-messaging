@@ -7,26 +7,26 @@ Just use simple if/elif/else logic.
 from typing import Optional
 
 
-def get_reply(message_text: str, username: Optional[str] = None) -> Optional[str]:
+def get_reply(message_text: str) -> Optional[str]:
     """
     Get reply for a message based on simple if/elif/else rules.
     
+    Use {username} placeholder in reply text for personalization.
+    The webhook handler will replace it with the actual username.
+    
     Args:
         message_text: The incoming message text
-        username: Optional Instagram username for personalization
         
     Returns:
-        Reply text, or None if no rule matches
+        Reply text with optional {username} placeholder, or None if no rule matches
     """
     # Convert to lowercase for case-insensitive matching
     msg = message_text.lower()
     
     # Rule 1: order66 keyword
     if "order66" in msg:
-        if username:
-            return f"Order 66 confirmed, @{username}! Your request has been received."
-        else:
-            return "Order 66 confirmed! Your request has been received."
+        # Use {username} placeholder - webhook handler will replace it
+        return "Order 66 confirmed, {username}! Your request has been received."
     
     # Rule 2: Help command (disabled - uncomment to enable)
     # elif msg.strip() == "help":
