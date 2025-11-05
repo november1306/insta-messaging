@@ -35,7 +35,10 @@ This plan implements a simple POC for receiving and sending Instagram messages. 
   - Use SQLAlchemy with async session
   - _Requirements: 5.1, 5.2_
 
-- [ ] 5. Parse and store incoming webhook messages
+- [x] 5. Parse and store incoming webhook messages
+
+
+
   - Extract message data from webhook payload (sender_id, text, timestamp)
   - Create Message domain object from webhook data
   - Save message to database using MessageRepository
