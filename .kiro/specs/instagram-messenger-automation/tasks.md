@@ -25,7 +25,10 @@ This plan implements a simple POC for receiving and sending Instagram messages. 
 
 ## Phase 2: Message Processing (POC)
 
-- [ ] 4. Implement Message Repository
+- [x] 4. Implement Message Repository
+
+
+
   - Create MessageRepository implementing IMessageRepository
   - Implement save() to store incoming messages
   - Implement get_by_id() to retrieve messages
