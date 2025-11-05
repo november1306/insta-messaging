@@ -6,10 +6,10 @@ from app.db.connection import get_db_session
 from app.repositories.message_repository import MessageRepository
 from app.core.interfaces import Message
 from app.clients import InstagramClient
+from app.rules.reply_rules import should_reply, get_reply_text
 from datetime import datetime, timezone
 import logging
 import httpx
-import uuid
 
 # Set up logging
 logging.basicConfig(
@@ -150,8 +150,8 @@ async def _handle_auto_reply(
     """
     Handle auto-reply logic for inbound messages.
     
-    Checks if message contains trigger keyword "order66" (case-insensitive).
-    If matched, sends automated reply and stores it in database.
+    Uses user-defined rules from app.rules.reply_rules to determine
+    if and how to reply to messages.
     
     Args:
         inbound_message: The inbound message that was just received
@@ -159,16 +159,19 @@ async def _handle_auto_reply(
         db: Database session for transaction management
     """
     try:
-        # Check for trigger keyword (case-insensitive)
-        trigger_keyword = "order66"
-        if trigger_keyword.lower() not in inbound_message.message_text.lower():
-            logger.info(f"No trigger keyword found in message, skipping auto-reply")
+        # Check if message should trigger a reply (user-defined rule)
+        if not should_reply(inbound_message.message_text):
+            logger.info(f"No reply rule matched, skipping auto-reply")
             return
         
-        logger.info(f"🎯 Trigger keyword '{trigger_keyword}' detected! Sending auto-reply...")
+        # Get reply text from user-defined rules
+        reply_text = get_reply_text(inbound_message.message_text)
         
-        # Prepare auto-reply message
-        reply_text = "Order 66 confirmed! Your request has been received."
+        if not reply_text:
+            logger.warning(f"Reply rule matched but no reply text defined")
+            return
+        
+        logger.info(f"📤 Sending auto-reply...")
         
         # Send reply using Instagram API
         async with httpx.AsyncClient() as http_client:
