@@ -5,8 +5,11 @@ from app.config import settings
 from app.db.connection import get_db_session
 from app.repositories.message_repository import MessageRepository
 from app.core.interfaces import Message
+from app.clients import InstagramClient
 from datetime import datetime, timezone
 import logging
+import httpx
+import uuid
 
 # Set up logging
 logging.basicConfig(
@@ -107,6 +110,10 @@ async def handle_webhook(
                             await message_repo.save(message)
                             messages_processed += 1
                             logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
+                            
+                            # Check for trigger keyword and send auto-reply
+                            await _handle_auto_reply(message, message_repo, db)
+                            
                         except ValueError:
                             # Message already exists - this is ok for webhook retries
                             logger.info(f"ℹ️ Message {message.id} already exists, skipping")
@@ -133,6 +140,70 @@ async def handle_webhook(
     
     # Always return 200 to acknowledge receipt and prevent Facebook retries
     return {"status": "ok", "messages_processed": messages_processed}
+
+
+async def _handle_auto_reply(
+    inbound_message: Message,
+    message_repo: MessageRepository,
+    db: AsyncSession
+) -> None:
+    """
+    Handle auto-reply logic for inbound messages.
+    
+    Checks if message contains trigger keyword "order66" (case-insensitive).
+    If matched, sends automated reply and stores it in database.
+    
+    Args:
+        inbound_message: The inbound message that was just received
+        message_repo: Repository for storing outbound messages
+        db: Database session for transaction management
+    """
+    try:
+        # Check for trigger keyword (case-insensitive)
+        trigger_keyword = "order66"
+        if trigger_keyword.lower() not in inbound_message.message_text.lower():
+            logger.info(f"No trigger keyword found in message, skipping auto-reply")
+            return
+        
+        logger.info(f"🎯 Trigger keyword '{trigger_keyword}' detected! Sending auto-reply...")
+        
+        # Prepare auto-reply message
+        reply_text = "Order 66 confirmed! Your request has been received."
+        
+        # Send reply using Instagram API
+        async with httpx.AsyncClient() as http_client:
+            instagram_client = InstagramClient(
+                http_client=http_client,
+                settings=settings,
+                logger_instance=logger
+            )
+            
+            # Send message (sender becomes recipient for reply)
+            response = await instagram_client.send_message(
+                recipient_id=inbound_message.sender_id,
+                message_text=reply_text
+            )
+            
+            if response.success:
+                # Create outbound message record
+                outbound_message = Message(
+                    id=response.message_id,
+                    sender_id=inbound_message.recipient_id,  # Our page ID
+                    recipient_id=inbound_message.sender_id,  # Customer ID
+                    message_text=reply_text,
+                    direction="outbound",
+                    timestamp=datetime.now(timezone.utc)
+                )
+                
+                # Store outbound message in database
+                await message_repo.save(outbound_message)
+                logger.info(f"✅ Auto-reply sent and stored: {response.message_id}")
+            else:
+                logger.error(f"❌ Failed to send auto-reply: {response.error_message}")
+                
+    except Exception as e:
+        # Log error but don't fail the webhook processing
+        logger.error(f"❌ Error in auto-reply handler: {e}", exc_info=True)
 
 
 def _extract_message_data(messaging_event: dict) -> dict | None:

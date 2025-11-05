@@ -64,9 +64,12 @@ This plan implements a simple POC for receiving and sending Instagram messages. 
   - Add basic error handling and logging
   - _Requirements: 3.1, 3.2_
 
-- [ ] 7. Implement simple auto-reply logic
-  - After receiving and storing a message, generate a simple response
-  - For POC: hardcoded response like "Thanks for your message! We'll get back to you soon."
+- [x] 7. Implement simple auto-reply logic
+
+
+
+  - After receiving and storing a message, check if it contains "order66" (case-insensitive)
+  - If keyword matches, send hardcoded response: "Order 66 confirmed! Your request has been received."
   - Call InstagramClient.send_message() to send reply
   - Store outgoing message in database
   - Handle Send API errors gracefully
