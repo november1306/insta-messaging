@@ -5,8 +5,11 @@ from app.config import settings
 from app.db.connection import get_db_session
 from app.repositories.message_repository import MessageRepository
 from app.core.interfaces import Message
+from app.clients import InstagramClient
+from app.rules.reply_rules import get_reply_text
 from datetime import datetime, timezone
 import logging
+import httpx
 
 # Set up logging
 logging.basicConfig(
@@ -83,41 +86,55 @@ async def handle_webhook(
         # Initialize repository
         message_repo = MessageRepository(db)
 
-        # Parse and store messages from webhook payload
-        for entry in body.get("entry", []):
-            # Each entry can contain multiple messaging events
-            for messaging_event in entry.get("messaging", []):
-                try:
-                    # Extract message data
-                    message_data = _extract_message_data(messaging_event)
-                    
-                    if message_data:
-                        # Create domain Message object
-                        message = Message(
-                            id=message_data["id"],
-                            sender_id=message_data["sender_id"],
-                            recipient_id=message_data["recipient_id"],
-                            message_text=message_data["text"],
-                            direction="inbound",  # Webhooks only receive inbound messages
-                            timestamp=message_data["timestamp"]
-                        )
+        # Create HTTP client and Instagram client once for all auto-replies
+        async with httpx.AsyncClient() as http_client:
+            instagram_client = InstagramClient(
+                http_client=http_client,
+                settings=settings,
+                logger_instance=logger
+            )
+            
+            # Parse and store messages from webhook payload
+            for entry in body.get("entry", []):
+                # Each entry can contain multiple messaging events
+                for messaging_event in entry.get("messaging", []):
+                    try:
+                        # Extract message data
+                        message_data = _extract_message_data(messaging_event)
                         
-                        # Save to database (handle duplicates from webhook retries)
-                        try:
-                            await message_repo.save(message)
-                            messages_processed += 1
-                            logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
-                        except ValueError:
-                            # Message already exists - this is ok for webhook retries
-                            logger.info(f"ℹ️ Message {message.id} already exists, skipping")
-                            continue
-                        except Exception as save_error:
-                            # Other database errors (connection issues, etc.)
-                            logger.error(f"Failed to save message {message.id}: {save_error}", exc_info=True)
-                            continue
-                    else:
-                        # Non-text message or unsupported event type
-                        logger.info(f"ℹ️ Skipped non-text message or unsupported event")
+                        if message_data:
+                            # Create domain Message object
+                            message = Message(
+                                id=message_data["id"],
+                                sender_id=message_data["sender_id"],
+                                recipient_id=message_data["recipient_id"],
+                                message_text=message_data["text"],
+                                direction="inbound",  # Webhooks only receive inbound messages
+                                timestamp=message_data["timestamp"]
+                            )
+                            
+                            # Save to database (handle duplicates from webhook retries)
+                            try:
+                                await message_repo.save(message)
+                                messages_processed += 1
+                                logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
+                                
+                                # Handle auto-reply ONLY for newly saved messages (not duplicates)
+                                # Reuse instagram_client for all messages in this webhook batch
+                                await _handle_auto_reply(message, message_repo, instagram_client)
+                                
+                            except ValueError:
+                                # Message already exists - this is ok for webhook retries
+                                # Skip auto-reply to prevent duplicate responses
+                                logger.info(f"ℹ️ Message {message.id} already exists, skipping auto-reply")
+                                continue
+                            except Exception as save_error:
+                                # Other database errors (connection issues, etc.)
+                                logger.error(f"Failed to save message {message.id}: {save_error}", exc_info=True)
+                                continue
+                        else:
+                            # Non-text message or unsupported event type
+                            logger.info(f"ℹ️ Skipped non-text message or unsupported event")
                         
                 except Exception as msg_error:
                     # Log error but continue processing other messages
@@ -133,6 +150,76 @@ async def handle_webhook(
     
     # Always return 200 to acknowledge receipt and prevent Facebook retries
     return {"status": "ok", "messages_processed": messages_processed}
+
+
+async def _handle_auto_reply(
+    inbound_message: Message,
+    message_repo: MessageRepository,
+    instagram_client: InstagramClient
+) -> None:
+    """
+    Handle auto-reply logic for inbound messages.
+    
+    Uses user-defined rules from app.rules.reply_rules to determine
+    if and how to reply to messages.
+    
+    This function is called AFTER the inbound message is saved to avoid
+    transaction rollback if reply fails.
+    
+    Args:
+        inbound_message: The inbound message that was just received
+        message_repo: Repository for storing outbound messages
+        instagram_client: Instagram API client (reused to avoid creating multiple instances)
+    """
+    try:
+        # Check if message should trigger a reply (without username first)
+        reply_text = get_reply_text(inbound_message.message_text)
+        
+        if not reply_text:
+            logger.info(f"No reply rule matched, skipping auto-reply")
+            return
+        
+        # Only fetch username if reply contains {username} placeholder
+        if "{username}" in reply_text:
+            profile = await instagram_client.get_user_profile(inbound_message.sender_id)
+            if profile and "username" in profile:
+                username = profile["username"]
+                logger.info(f"👤 Retrieved username: @{username}")
+                # Replace placeholder with actual username
+                reply_text = reply_text.replace("{username}", f"@{username}")
+            else:
+                # Fallback: remove placeholder if profile fetch failed
+                reply_text = reply_text.replace("{username}", "")
+        
+        logger.info(f"📤 Sending auto-reply...")
+        
+        # Send message (sender becomes recipient for reply)
+        response = await instagram_client.send_message(
+            recipient_id=inbound_message.sender_id,
+            message_text=reply_text
+        )
+        
+        if response.success:
+            # Create outbound message record
+            outbound_message = Message(
+                id=response.message_id,
+                sender_id=inbound_message.recipient_id,  # Our page ID
+                recipient_id=inbound_message.sender_id,  # Customer ID
+                message_text=reply_text,
+                direction="outbound",
+                timestamp=datetime.now(timezone.utc)
+            )
+            
+            # Store outbound message in database
+            await message_repo.save(outbound_message)
+            logger.info(f"✅ Auto-reply sent and stored: {response.message_id}")
+        else:
+            logger.error(f"❌ Failed to send auto-reply: {response.error_message}")
+            
+    except Exception as e:
+        # Log error but don't fail the webhook processing
+        # Inbound message is already saved, so webhook won't be retried
+        logger.error(f"❌ Error in auto-reply handler: {e}", exc_info=True)
 
 
 def _extract_message_data(messaging_event: dict) -> dict | None:

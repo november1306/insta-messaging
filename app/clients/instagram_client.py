@@ -69,6 +69,49 @@ class InstagramClient:
         self._logger = logger_instance
         self._api_base_url = "https://graph.instagram.com/v21.0"
     
+    async def get_user_profile(self, user_id: str) -> Optional[dict]:
+        """
+        Get user profile information from Instagram.
+        
+        Args:
+            user_id: Instagram user's PSID (Page-Scoped ID)
+            
+        Returns:
+            Dictionary with user profile data (name, username, profile_pic) or None if failed
+            
+        Example:
+            profile = await client.get_user_profile("1558635688632972")
+            # Returns: {"name": "John Doe", "username": "johndoe", "profile_pic": "..."}
+        """
+        url = f"{self._api_base_url}/{user_id}"
+        
+        try:
+            response = await self._http_client.get(
+                url,
+                params={
+                    "fields": "name,username,profile_pic",
+                    "access_token": self._settings.instagram_page_access_token
+                },
+                timeout=5.0
+            )
+            
+            if response.status_code == 200:
+                profile_data = response.json()
+                self._logger.info(f"✅ Retrieved profile for user {user_id}")
+                return profile_data
+            else:
+                error_data = response.json() if response.text else {}
+                error_message = error_data.get("error", {}).get("message", "Unknown error")
+                self._logger.warning(
+                    f"⚠️ Failed to get user profile - status: {response.status_code}, "
+                    f"message: {error_message}"
+                )
+                return None
+                
+        except Exception as e:
+            self._logger.warning(f"⚠️ Error fetching user profile for {user_id}: {e}")
+            return None
+    
     async def send_message(
         self, 
         recipient_id: str, 
