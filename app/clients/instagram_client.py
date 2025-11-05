@@ -54,7 +54,16 @@ class InstagramClient:
             http_client: httpx AsyncClient for making HTTP requests
             settings: Application settings containing access token
             logger_instance: Logger for tracking API calls
+            
+        Raises:
+            ValueError: If instagram_page_access_token is not configured
         """
+        if not settings.instagram_page_access_token:
+            raise ValueError(
+                "instagram_page_access_token is required but not configured. "
+                "Please set INSTAGRAM_PAGE_ACCESS_TOKEN in your .env file."
+            )
+        
         self._http_client = http_client
         self._settings = settings
         self._logger = logger_instance
@@ -76,6 +85,7 @@ class InstagramClient:
             SendMessageResponse with message_id and status
             
         Raises:
+            ValueError: If recipient_id or message_text is invalid
             InstagramAPIError: If the API request fails
             
         Example:
@@ -84,25 +94,38 @@ class InstagramClient:
                 message_text="Thanks for your message!"
             )
         """
+        # Input validation
+        if not recipient_id or not recipient_id.strip():
+            raise ValueError("recipient_id cannot be empty")
+        
+        if not message_text or not message_text.strip():
+            raise ValueError("message_text cannot be empty")
+        
+        # Instagram has a 1000 character limit for text messages
+        if len(message_text) > 1000:
+            raise ValueError(
+                f"message_text exceeds 1000 character limit (got {len(message_text)} characters)"
+            )
+        
         url = f"{self._api_base_url}/me/messages"
         
-        # Prepare request payload
+        # Prepare request payload (access token sent as URL parameter per Instagram best practices)
         payload = {
             "recipient": {
                 "id": recipient_id
             },
             "message": {
                 "text": message_text
-            },
-            "access_token": self._settings.instagram_page_access_token
+            }
         }
         
         self._logger.info(f"Sending message to recipient {recipient_id}")
         
         try:
-            # Make API request
+            # Make API request (access token as URL parameter per Instagram best practices)
             response = await self._http_client.post(
                 url,
+                params={"access_token": self._settings.instagram_page_access_token},
                 json=payload,
                 timeout=10.0
             )
@@ -112,6 +135,14 @@ class InstagramClient:
                 response_data = response.json()
                 message_id = response_data.get("message_id")
                 recipient_id_response = response_data.get("recipient_id")
+                
+                # Validate required fields in response
+                if not message_id or not recipient_id_response:
+                    raise InstagramAPIError(
+                        "Invalid API response: missing message_id or recipient_id",
+                        status_code=200,
+                        response_body=response_data
+                    )
                 
                 self._logger.info(
                     f"✅ Message sent successfully - "
