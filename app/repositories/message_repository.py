@@ -6,6 +6,7 @@ Implements IMessageRepository interface for storing and retrieving messages.
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from app.core.interfaces import IMessageRepository, Message
 from app.db.models import MessageModel
 import logging
@@ -20,7 +21,7 @@ class MessageRepository(IMessageRepository):
     Handles conversion between domain Message objects and MessageModel ORM objects.
     """
     
-    def __init__(self, db_session: AsyncSession):
+    def __init__(self, db_session: AsyncSession) -> None:
         """
         Initialize repository with database session.
         
@@ -40,6 +41,7 @@ class MessageRepository(IMessageRepository):
             The saved Message object
             
         Raises:
+            ValueError: If a message with the same ID already exists
             Exception: If database operation fails
         """
         try:
@@ -55,6 +57,8 @@ class MessageRepository(IMessageRepository):
             )
             
             # Add to session and flush to get any DB-generated values
+            # Note: Transaction will be committed by the session context manager
+            # in get_db_session() (app/db/connection.py)
             self._db.add(db_message)
             await self._db.flush()
             
@@ -62,6 +66,9 @@ class MessageRepository(IMessageRepository):
             
             return message
             
+        except IntegrityError as e:
+            logger.error(f"Message {message.id} already exists: {e}")
+            raise ValueError(f"Message {message.id} already exists") from e
         except Exception as e:
             logger.error(f"Failed to save message {message.id}: {e}")
             raise
