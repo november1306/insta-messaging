@@ -27,7 +27,7 @@ def upgrade() -> None:
     sa.Column('access_token_encrypted', sa.Text(), nullable=False),
     sa.Column('crm_webhook_url', sa.String(length=500), nullable=False),
     sa.Column('webhook_secret', sa.String(length=100), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('instagram_account_id')
     )
@@ -39,7 +39,7 @@ def upgrade() -> None:
     sa.Column('message_text', sa.Text(), nullable=False),
     sa.Column('idempotency_key', sa.String(length=100), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=False, server_default='pending'),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
     sa.ForeignKeyConstraint(['account_id'], ['accounts.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('idempotency_key')
