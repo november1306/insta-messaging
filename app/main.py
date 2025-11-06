@@ -2,6 +2,7 @@
 Instagram Messenger Automation - Main Application Entry Point
 """
 from contextlib import asynccontextmanager
+from functools import wraps
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.responses import JSONResponse
@@ -99,6 +100,7 @@ async def health_check():
 
 def require_openapi_spec(func):
     """Decorator to check if OpenAPI spec is available before serving docs"""
+    @wraps(func)
     async def wrapper(*args, **kwargs):
         if openapi_spec is None:
             return JSONResponse(
@@ -113,13 +115,6 @@ def require_openapi_spec(func):
     return wrapper
 
 
-def get_openapi_title() -> str:
-    """Safely extract title from OpenAPI spec with fallback"""
-    if openapi_spec and isinstance(openapi_spec, dict):
-        return openapi_spec.get('info', {}).get('title', 'API Documentation') + " - API Documentation"
-    return "API Documentation"
-
-
 @app.get("/openapi.json", include_in_schema=False)
 @require_openapi_spec
 async def get_openapi():
@@ -131,9 +126,12 @@ async def get_openapi():
 @require_openapi_spec
 async def custom_swagger_ui_html():
     """Custom Swagger UI with enhanced features"""
+    # Extract title from spec, fallback to default
+    title = openapi_spec.get('info', {}).get('title', 'API Documentation') if openapi_spec else 'API Documentation'
+    
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
-        title=get_openapi_title(),
+        title=title,
         swagger_ui_parameters={
             "persistAuthorization": True,  # Remember auth token
             "displayRequestDuration": True,  # Show request timing
@@ -147,7 +145,10 @@ async def custom_swagger_ui_html():
 @require_openapi_spec
 async def redoc_html():
     """Alternative API documentation with ReDoc"""
+    # Extract title from spec, fallback to default
+    title = openapi_spec.get('info', {}).get('title', 'API Documentation') if openapi_spec else 'API Documentation'
+    
     return get_redoc_html(
         openapi_url="/openapi.json",
-        title=get_openapi_title()
+        title=title
     )
