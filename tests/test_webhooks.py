@@ -382,3 +382,33 @@ class TestWebhookMessageProcessing:
         )
         
         assert response.status_code == 401
+    
+    def test_webhook_with_real_signature_computation(self, monkeypatch):
+        """Integration test with real HMAC signature computation."""
+        monkeypatch.setenv("FACEBOOK_APP_SECRET", "test_secret")
+        from app.config import Settings
+        import app.api.webhooks as webhooks_module
+        webhooks_module.settings = Settings()
+        
+        # Compute real signature for test payload
+        payload = json.dumps(SAMPLE_WEBHOOK_PAYLOAD).encode()
+        signature = hmac.new(
+            b"test_secret",
+            payload,
+            hashlib.sha256
+        ).hexdigest()
+        
+        client = TestClient(app)
+        response = client.post(
+            "/webhooks/instagram",
+            content=payload,
+            headers={
+                "X-Hub-Signature-256": f"sha256={signature}",
+                "Content-Type": "application/json"
+            }
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["messages_processed"] == 1

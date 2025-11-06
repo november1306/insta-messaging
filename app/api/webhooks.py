@@ -32,6 +32,9 @@ async def verify_webhook(
     
     Facebook sends a GET request with verification parameters.
     We validate the verify_token and return the challenge.
+    
+    Note: Facebook does not sign GET requests during webhook verification,
+    only POST requests with actual webhook data are signed.
     """
     logger.info(f"Webhook verification request received - mode: {hub_mode}")
     
