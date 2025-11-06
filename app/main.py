@@ -6,7 +6,7 @@ from functools import wraps
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.responses import JSONResponse
-from app.api import webhooks
+from app.api import webhooks, accounts
 from app.config import settings
 from app.db import init_db, close_db
 import logging
@@ -76,6 +76,9 @@ app = FastAPI(
 
 # Register webhook routes
 app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
+
+# Register CRM integration API routes
+app.include_router(accounts.router, prefix="/api/v1", tags=["accounts"])
 
 
 @app.get("/")
