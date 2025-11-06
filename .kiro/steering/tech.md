@@ -34,8 +34,19 @@ conda env create -f environment.yml
 # Activate environment
 conda activate insta-auto
 
-# Install dependencies (if not using conda)
+# Update environment after requirements.txt changes
+conda env update -f environment.yml --prune
+
+# Install/update dependencies with pip (inside conda env)
 pip install -r requirements.txt
+
+# Install single package
+pip install package-name==version
+# or with conda
+conda install package-name
+
+# Export current environment
+conda env export > environment.yml
 ```
 
 ### Database Management
