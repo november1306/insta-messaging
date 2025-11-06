@@ -28,7 +28,10 @@ Goal: Get a working API deployed and testable ASAP. No error handling, no retrie
   - Run Alembic migration
   - _Requirements: 7.1, 7.3_
 
-- [ ] 3. Implement stub authentication (hardcoded for now)
+- [x] 3. Implement stub authentication (hardcoded for now)
+
+
+
   - Create simple verify_api_key dependency that accepts any "Bearer test_key"
   - Add Authorization header requirement to endpoints
   - Return 401 if header missing
