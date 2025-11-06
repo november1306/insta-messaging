@@ -17,7 +17,11 @@ Goal: Get a working API deployed and testable ASAP. No error handling, no retrie
   - Test that all endpoints are documented
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6_
 
-- [ ] 2. Create minimal database models
+- [x] 2. Create minimal database models
+
+
+
+
   - Create accounts table (id, instagram_account_id, username, access_token_encrypted, crm_webhook_url, webhook_secret)
   - Create outbound_messages table (id, account_id, recipient_id, message_text, idempotency_key, status, created_at)
   - Create Account and OutboundMessage SQLAlchemy models
