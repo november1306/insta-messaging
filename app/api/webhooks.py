@@ -262,8 +262,18 @@ def _validate_webhook_signature(payload: bytes, signature_header: str) -> bool:
         - Uses constant-time comparison to prevent timing attacks
         - Validates signature format before comparison
         - Logs security events for monitoring
+        - Development mode: Bypasses validation if app secret not configured
     """
     try:
+        # Development mode bypass: Allow webhooks when app secret is not configured
+        # This enables local testing with ngrok before Facebook app is fully set up
+        if settings.environment == "development" and not settings.facebook_app_secret:
+            logger.warning(
+                "⚠️  DEV MODE: Skipping signature validation (no app secret configured). "
+                "This is INSECURE and should NEVER happen in production!"
+            )
+            return True
+        
         # Check if signature header is present and has correct format
         if not signature_header or not signature_header.startswith("sha256="):
             logger.warning("Missing or malformed signature header")
