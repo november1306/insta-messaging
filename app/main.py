@@ -20,31 +20,36 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load OpenAPI spec from file (fail gracefully if missing)
+# OpenAPI spec - loaded during startup
 openapi_spec = None
-openapi_spec_path = Path(__file__).parent / "static" / "openapi.yaml"
-try:
-    with open(openapi_spec_path, "r", encoding="utf-8") as f:
-        openapi_spec = yaml.safe_load(f)
-    logger.info(f"✅ Loaded OpenAPI spec from {openapi_spec_path}")
-except FileNotFoundError:
-    logger.warning(
-        f"⚠️  OpenAPI spec not found at {openapi_spec_path}. "
-        f"/docs endpoint will not be available. "
-        f"This is expected if CRM integration API is not yet implemented."
-    )
-except yaml.YAMLError as e:
-    logger.error(
-        f"❌ Failed to parse OpenAPI spec at {openapi_spec_path}: {e}. "
-        f"/docs endpoint will not be available."
-    )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager - handles startup and shutdown"""
+    global openapi_spec
+    
     # Startup
     logger.info("🚀 Starting Instagram Messenger Automation")
     logger.info(f"📝 Environment: {settings.environment}")
+    
+    # Load OpenAPI spec from file (fail gracefully if missing)
+    openapi_spec_path = Path(__file__).parent / "static" / "openapi.yaml"
+    try:
+        with open(openapi_spec_path, "r", encoding="utf-8") as f:
+            openapi_spec = yaml.safe_load(f)
+        logger.info(f"✅ Loaded OpenAPI spec from {openapi_spec_path}")
+    except FileNotFoundError:
+        logger.warning(
+            f"⚠️  OpenAPI spec not found at {openapi_spec_path}. "
+            f"/docs endpoint will not be available. "
+            f"This is expected if CRM integration API is not yet implemented."
+        )
+    except yaml.YAMLError as e:
+        logger.error(
+            f"❌ Failed to parse OpenAPI spec at {openapi_spec_path}: {e}. "
+            f"/docs endpoint will not be available."
+        )
     
     # Initialize database
     await init_db()
