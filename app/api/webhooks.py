@@ -70,23 +70,23 @@ async def handle_webhook(
     
     Security: Validates X-Hub-Signature-256 header to ensure requests come from Facebook.
     """
+    # Get the raw request body for signature validation
+    raw_body = await request.body()
+    
+    # Validate webhook signature before processing
+    signature_header = request.headers.get("X-Hub-Signature-256", "")
+    if not _validate_webhook_signature(raw_body, signature_header):
+        logger.warning("❌ Invalid webhook signature - potential security threat")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid signature"
+        )
+    
+    logger.info("✅ Webhook signature validated")
+    
     messages_processed = 0
     
     try:
-        # Get the raw request body for signature validation
-        raw_body = await request.body()
-        
-        # Validate webhook signature before processing
-        signature_header = request.headers.get("X-Hub-Signature-256", "")
-        if not _validate_webhook_signature(raw_body, signature_header):
-            logger.warning("❌ Invalid webhook signature - potential security threat")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid signature"
-            )
-        
-        logger.info("✅ Webhook signature validated")
-        
         # Parse the JSON body (json.loads handles bytes directly)
         body = json.loads(raw_body)
         
@@ -147,6 +147,8 @@ async def handle_webhook(
                                 
                             except ValueError:
                                 # Message already exists - this is ok for webhook retries
+                                # Rollback the failed transaction to clean up session state
+                                await db.rollback()
                                 # Skip auto-reply to prevent duplicate responses
                                 logger.info(f"ℹ️ Message {message.id} already exists, skipping auto-reply")
                                 continue
@@ -262,23 +264,8 @@ def _validate_webhook_signature(payload: bytes, signature_header: str) -> bool:
         - Uses constant-time comparison to prevent timing attacks
         - Validates signature format before comparison
         - Logs security events for monitoring
-        - MANDATORY validation - no bypass allowed
-        
-    TODO: Add automatic secret setup using GitHub Secrets for CI/CD deployments
-          This would allow automated deployments to pull FACEBOOK_APP_SECRET
-          from GitHub repository secrets during deployment workflows.
     """
     try:
-        # Check if app secret is configured
-        if not settings.facebook_app_secret:
-            logger.error(
-                "❌ FACEBOOK_APP_SECRET is not configured! "
-                "Webhook signature validation cannot proceed. "
-                "Set FACEBOOK_APP_SECRET environment variable with your Facebook app secret. "
-                "Get it from: https://developers.facebook.com/apps/YOUR_APP_ID/settings/basic/"
-            )
-            return False
-        
         # Check if signature header is present and has correct format
         if not signature_header or not signature_header.startswith("sha256="):
             logger.warning("Missing or malformed signature header")
@@ -296,29 +283,17 @@ def _validate_webhook_signature(payload: bytes, signature_header: str) -> bool:
         ).hexdigest()
         
         # Use constant-time comparison to prevent timing attacks
-        # hmac.compare_digest is designed for this purpose
         is_valid = hmac.compare_digest(computed_signature, expected_signature)
         
-        if not is_valid:
-            logger.warning(
-                f"Signature mismatch - computed: {computed_signature[:10]}..., "
-                f"expected: {expected_signature[:10]}..."
-            )
+        if is_valid:
+            logger.debug("✅ Webhook signature validated")
+        else:
+            logger.warning("❌ Invalid webhook signature")
         
         return is_valid
         
-    except UnicodeDecodeError as e:
-        # Specific handling for encoding issues
-        logger.error(f"Failed to decode app secret or payload: {e}", exc_info=True)
-        return False
     except Exception as e:
-        # Unexpected errors during validation (not validation failures)
-        # This distinguishes between "signature is wrong" vs "validation process failed"
-        logger.error(
-            f"Unexpected error during signature validation: {e}. "
-            f"This is a system error, not an invalid signature.",
-            exc_info=True
-        )
+        logger.error(f"Signature validation error: {e}", exc_info=True)
         return False
 
 
@@ -415,7 +390,6 @@ async def send_message_api(
     
     try:
         # Create Instagram client (MVP: one client per request)
-        # TODO: For production, consider reusing HTTP client across requests for better performance
         async with httpx.AsyncClient() as http_client:
             instagram_client = InstagramClient(
                 http_client=http_client,

@@ -1,3 +1,0 @@
-"""
-Repository tests package.
-"""

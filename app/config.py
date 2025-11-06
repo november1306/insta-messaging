@@ -14,10 +14,6 @@ class Settings:
         self.environment = os.getenv("ENVIRONMENT", "development")
         
         # Instagram/Facebook credentials
-        # Security: App secret is always required for webhook signature validation
-        # TODO: Integrate with GitHub Secrets for automated deployments
-        #       This would allow CI/CD pipelines to automatically inject secrets
-        #       during deployment without manual configuration.
         if self.environment == "production":
             self.facebook_verify_token = self._get_required("FACEBOOK_VERIFY_TOKEN")
             self.facebook_app_secret = self._get_required("FACEBOOK_APP_SECRET")
@@ -26,9 +22,18 @@ class Settings:
         else:
             # Development mode: Load from .env file (never commit secrets to git)
             self.facebook_verify_token = os.getenv("FACEBOOK_VERIFY_TOKEN", "")
-            self.facebook_app_secret = os.getenv("FACEBOOK_APP_SECRET", "")
+            self.facebook_app_secret = os.getenv("FACEBOOK_APP_SECRET", "test_secret_dev")
             self.instagram_page_access_token = os.getenv("INSTAGRAM_PAGE_ACCESS_TOKEN", "")
             self.instagram_business_account_id = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
+            
+            # Warn if using test secret
+            if self.facebook_app_secret == "test_secret_dev":
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "⚠️  Using development test secret for webhook validation. "
+                    "Set FACEBOOK_APP_SECRET in .env for production-like testing."
+                )
             
             # Check for missing credentials and warn
             self._warn_missing_credentials()
