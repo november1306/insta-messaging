@@ -16,11 +16,6 @@ import hmac
 import hashlib
 import json
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -266,15 +261,14 @@ def _validate_webhook_signature(payload: bytes, signature_header: str) -> bool:
         - Logs security events for monitoring
     """
     try:
-        # Check if signature header is present and has correct format
+        # Extract signature or use invalid placeholder to prevent timing attacks
         if not signature_header or not signature_header.startswith("sha256="):
             logger.warning("Missing or malformed signature header")
-            return False
+            expected_signature = "invalid"  # Will fail compare_digest below
+        else:
+            expected_signature = signature_header[7:]  # len("sha256=") = 7
         
-        # Extract the signature (remove "sha256=" prefix)
-        expected_signature = signature_header[7:]  # len("sha256=") = 7
-        
-        # Compute HMAC-SHA256 signature using app secret
+        # Always compute HMAC-SHA256 signature to prevent timing attacks
         app_secret = settings.facebook_app_secret.encode('utf-8')
         computed_signature = hmac.new(
             app_secret,

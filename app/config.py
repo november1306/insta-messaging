@@ -19,21 +19,19 @@ class Settings:
             self.facebook_app_secret = self._get_required("FACEBOOK_APP_SECRET")
             self.instagram_page_access_token = self._get_required("INSTAGRAM_PAGE_ACCESS_TOKEN")
             self.instagram_business_account_id = self._get_required("INSTAGRAM_BUSINESS_ACCOUNT_ID")
+            
+            # Reject test secrets in production
+            if self.facebook_app_secret == "test_secret_dev":
+                raise ValueError(
+                    "Cannot use test secret 'test_secret_dev' in production mode. "
+                    "Set a real FACEBOOK_APP_SECRET from your Facebook app."
+                )
         else:
             # Development mode: Load from .env file (never commit secrets to git)
             self.facebook_verify_token = os.getenv("FACEBOOK_VERIFY_TOKEN", "")
             self.facebook_app_secret = os.getenv("FACEBOOK_APP_SECRET", "test_secret_dev")
             self.instagram_page_access_token = os.getenv("INSTAGRAM_PAGE_ACCESS_TOKEN", "")
             self.instagram_business_account_id = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
-            
-            # Warn if using test secret
-            if self.facebook_app_secret == "test_secret_dev":
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(
-                    "⚠️  Using development test secret for webhook validation. "
-                    "Set FACEBOOK_APP_SECRET in .env for production-like testing."
-                )
             
             # Check for missing credentials and warn
             self._warn_missing_credentials()
@@ -47,7 +45,7 @@ class Settings:
     
     def _get_required(self, key: str) -> str:
         """Get required environment variable or raise error."""
-        value = os.getenv(key)
+        value = os.getenv(key, "").strip()
         if not value:
             raise ValueError(
                 f"Missing required environment variable: {key}. "
@@ -68,17 +66,18 @@ class Settings:
             "INSTAGRAM_BUSINESS_ACCOUNT_ID": "Required for send message API. This is your Instagram Business Account ID (recipient_id from inbound messages)."
         }
         
-        # Check which credentials are missing
+        # Check which credentials are missing or empty
         missing = [
             f"{key} - {desc}"
             for key, desc in required_credentials.items()
-            if not getattr(self, key.lower(), None)
+            if not getattr(self, key.lower(), "").strip()
         ]
         
         if missing:
             logger.warning(
-                "⚠️  Missing configuration in .env file:\n" + 
-                "\n".join(f"  - {config}" for config in missing)
+                "⚠️  Missing configuration - webhook validation will fail until these are set:\n" + 
+                "\n".join(f"  - {config}" for config in missing) +
+                "\n\nCopy .env.example to .env and fill in your credentials."
             )
 
 
