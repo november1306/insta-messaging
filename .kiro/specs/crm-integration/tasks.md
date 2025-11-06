@@ -17,7 +17,8 @@ Goal: Get a working API deployed and testable ASAP. No error handling, no retrie
   - Test that all endpoints are documented
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6_
 
-- [ ] 2. Create minimal database models
+- [x] 2. Create minimal database models
+
 
 
 
