@@ -3,7 +3,7 @@ Instagram Messenger Automation - Main Application Entry Point
 """
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
-from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse
 from app.api import webhooks
 from app.config import settings
 from app.db import init_db, close_db
@@ -18,10 +18,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load OpenAPI spec from file
+# Load OpenAPI spec from file (fail gracefully if missing)
+openapi_spec = None
 openapi_spec_path = Path(__file__).parent / "static" / "openapi.yaml"
-with open(openapi_spec_path, "r", encoding="utf-8") as f:
-    openapi_spec = yaml.safe_load(f)
+try:
+    with open(openapi_spec_path, "r", encoding="utf-8") as f:
+        openapi_spec = yaml.safe_load(f)
+    logger.info(f"✅ Loaded OpenAPI spec from {openapi_spec_path}")
+except FileNotFoundError:
+    logger.warning(
+        f"⚠️  OpenAPI spec not found at {openapi_spec_path}. "
+        f"/docs endpoint will not be available. "
+        f"This is expected if CRM integration API is not yet implemented."
+    )
+except yaml.YAMLError as e:
+    logger.error(
+        f"❌ Failed to parse OpenAPI spec at {openapi_spec_path}: {e}. "
+        f"/docs endpoint will not be available."
+    )
 
 app = FastAPI(
     title="Instagram Messenger Automation",
@@ -84,12 +98,30 @@ async def health_check():
 @app.get("/openapi.json", include_in_schema=False)
 async def get_openapi():
     """Serve the OpenAPI spec from file"""
+    if openapi_spec is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "not_available",
+                "message": "OpenAPI specification is not available. The CRM integration API is not yet implemented."
+            }
+        )
     return openapi_spec
 
 
 @app.get("/docs", include_in_schema=False)
 async def custom_swagger_ui_html():
     """Custom Swagger UI with enhanced features"""
+    if openapi_spec is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "not_available",
+                "message": "API documentation is not available. The CRM integration API is not yet implemented.",
+                "hint": "The OpenAPI spec file is missing or could not be loaded. Check server logs for details."
+            }
+        )
+    
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
         title=f"{openapi_spec['info']['title']} - API Documentation",
@@ -98,6 +130,9 @@ async def custom_swagger_ui_html():
             "displayRequestDuration": True,  # Show request timing
             "filter": True,  # Enable search/filter
             "tryItOutEnabled": True,  # Enable "Try it out" by default
+        },
+        swagger_ui_init_oauth={
+            "usePkceWithAuthorizationCodeGrant": True
         }
     )
 
@@ -105,6 +140,15 @@ async def custom_swagger_ui_html():
 @app.get("/redoc", include_in_schema=False)
 async def redoc_html():
     """Alternative API documentation with ReDoc"""
+    if openapi_spec is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "not_available",
+                "message": "API documentation is not available. The CRM integration API is not yet implemented."
+            }
+        )
+    
     return get_redoc_html(
         openapi_url="/openapi.json",
         title=f"{openapi_spec['info']['title']} - API Documentation"

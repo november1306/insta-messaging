@@ -10,6 +10,7 @@ Goal: Get a working API deployed and testable ASAP. No error handling, no retrie
 
 
 
+
   - Copy api-spec.yaml to app/static/ directory
   - Configure FastAPI to serve OpenAPI spec from file
   - Mount Swagger UI at /docs endpoint

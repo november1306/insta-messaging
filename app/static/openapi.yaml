@@ -2,12 +2,28 @@ openapi: 3.0.3
 info:
   title: Instagram Message Router - CRM Integration API
   description: |
+    ⚠️ **DOCUMENTATION ONLY - ENDPOINTS NOT YET IMPLEMENTED** ⚠️
+    
+    This API specification documents the planned CRM integration endpoints.
+    **These endpoints are not yet available in the current deployment.**
+    
+    Currently implemented:
+    - ✅ Instagram webhook receiver at `/webhooks/instagram`
+    - ✅ Health check at `/health`
+    
+    Coming soon (documented below):
+    - 🚧 Message sending API
+    - 🚧 Account management
+    - 🚧 Delivery status tracking
+    
+    ---
+    
     API for integrating a CRM system with Instagram messaging.
     
     **Authentication:** All endpoints require Bearer token authentication.
     
     **Webhooks:** The router sends webhooks to your CRM for inbound messages and status updates.
-  version: 1.0.0
+  version: 1.0.0-preview
   contact:
     name: API Support
 
