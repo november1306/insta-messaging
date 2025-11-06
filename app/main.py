@@ -122,17 +122,19 @@ async def custom_swagger_ui_html():
             }
         )
     
+    # Safely extract title with fallback
+    title = "API Documentation"
+    if openapi_spec and isinstance(openapi_spec, dict):
+        title = openapi_spec.get('info', {}).get('title', 'API Documentation') + " - API Documentation"
+    
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
-        title=f"{openapi_spec['info']['title']} - API Documentation",
+        title=title,
         swagger_ui_parameters={
             "persistAuthorization": True,  # Remember auth token
             "displayRequestDuration": True,  # Show request timing
             "filter": True,  # Enable search/filter
             "tryItOutEnabled": True,  # Enable "Try it out" by default
-        },
-        swagger_ui_init_oauth={
-            "usePkceWithAuthorizationCodeGrant": True
         }
     )
 
@@ -149,7 +151,12 @@ async def redoc_html():
             }
         )
     
+    # Safely extract title with fallback
+    title = "API Documentation"
+    if openapi_spec and isinstance(openapi_spec, dict):
+        title = openapi_spec.get('info', {}).get('title', 'API Documentation') + " - API Documentation"
+    
     return get_redoc_html(
         openapi_url="/openapi.json",
-        title=f"{openapi_spec['info']['title']} - API Documentation"
+        title=title
     )
