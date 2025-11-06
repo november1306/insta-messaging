@@ -87,8 +87,8 @@ async def handle_webhook(
         
         logger.info("✅ Webhook signature validated")
         
-        # Parse the JSON body from raw bytes
-        body = json.loads(raw_body.decode('utf-8'))
+        # Parse the JSON body (json.loads handles bytes directly)
+        body = json.loads(raw_body)
         
         # Validate request body structure
         if not isinstance(body, dict):
@@ -262,17 +262,22 @@ def _validate_webhook_signature(payload: bytes, signature_header: str) -> bool:
         - Uses constant-time comparison to prevent timing attacks
         - Validates signature format before comparison
         - Logs security events for monitoring
-        - Development mode: Bypasses validation if app secret not configured
+        - MANDATORY validation - no bypass allowed
+        
+    TODO: Add automatic secret setup using GitHub Secrets for CI/CD deployments
+          This would allow automated deployments to pull FACEBOOK_APP_SECRET
+          from GitHub repository secrets during deployment workflows.
     """
     try:
-        # Development mode bypass: Allow webhooks when app secret is not configured
-        # This enables local testing with ngrok before Facebook app is fully set up
-        if settings.environment == "development" and not settings.facebook_app_secret:
-            logger.warning(
-                "⚠️  DEV MODE: Skipping signature validation (no app secret configured). "
-                "This is INSECURE and should NEVER happen in production!"
+        # Check if app secret is configured
+        if not settings.facebook_app_secret:
+            logger.error(
+                "❌ FACEBOOK_APP_SECRET is not configured! "
+                "Webhook signature validation cannot proceed. "
+                "Set FACEBOOK_APP_SECRET environment variable with your Facebook app secret. "
+                "Get it from: https://developers.facebook.com/apps/YOUR_APP_ID/settings/basic/"
             )
-            return True
+            return False
         
         # Check if signature header is present and has correct format
         if not signature_header or not signature_header.startswith("sha256="):
@@ -302,8 +307,18 @@ def _validate_webhook_signature(payload: bytes, signature_header: str) -> bool:
         
         return is_valid
         
+    except UnicodeDecodeError as e:
+        # Specific handling for encoding issues
+        logger.error(f"Failed to decode app secret or payload: {e}", exc_info=True)
+        return False
     except Exception as e:
-        logger.error(f"Error validating webhook signature: {e}", exc_info=True)
+        # Unexpected errors during validation (not validation failures)
+        # This distinguishes between "signature is wrong" vs "validation process failed"
+        logger.error(
+            f"Unexpected error during signature validation: {e}. "
+            f"This is a system error, not an invalid signature.",
+            exc_info=True
+        )
         return False
 
 

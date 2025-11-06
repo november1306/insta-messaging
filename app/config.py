@@ -14,18 +14,24 @@ class Settings:
         self.environment = os.getenv("ENVIRONMENT", "development")
         
         # Instagram/Facebook credentials
-        # Security: Only use defaults in development mode
+        # Security: App secret is always required for webhook signature validation
+        # TODO: Integrate with GitHub Secrets for automated deployments
+        #       This would allow CI/CD pipelines to automatically inject secrets
+        #       during deployment without manual configuration.
         if self.environment == "production":
             self.facebook_verify_token = self._get_required("FACEBOOK_VERIFY_TOKEN")
             self.facebook_app_secret = self._get_required("FACEBOOK_APP_SECRET")
             self.instagram_page_access_token = self._get_required("INSTAGRAM_PAGE_ACCESS_TOKEN")
             self.instagram_business_account_id = self._get_required("INSTAGRAM_BUSINESS_ACCOUNT_ID")
         else:
-            # Development defaults (not secure, only for local testing)
-            self.facebook_verify_token = os.getenv("FACEBOOK_VERIFY_TOKEN", "dev_verify_token_12345")
+            # Development mode: Load from .env file (never commit secrets to git)
+            self.facebook_verify_token = os.getenv("FACEBOOK_VERIFY_TOKEN", "")
             self.facebook_app_secret = os.getenv("FACEBOOK_APP_SECRET", "")
             self.instagram_page_access_token = os.getenv("INSTAGRAM_PAGE_ACCESS_TOKEN", "")
-            self.instagram_business_account_id = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "BUSINESS_ACCOUNT_ID_PLACEHOLDER")
+            self.instagram_business_account_id = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
+            
+            # Check for missing credentials and warn
+            self._warn_missing_credentials()
         
         # Server configuration
         self.host = os.getenv("HOST", "0.0.0.0")
@@ -43,6 +49,32 @@ class Settings:
                 f"Required in production mode."
             )
         return value
+    
+    def _warn_missing_credentials(self) -> None:
+        """Warn about missing credentials in development mode."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Define required credentials with their descriptions
+        required_credentials = {
+            "FACEBOOK_VERIFY_TOKEN": "Required for webhook verification. Create a custom token string (e.g., 'my_webhook_token_123').",
+            "FACEBOOK_APP_SECRET": "Required for webhook signature validation. Get from: https://developers.facebook.com/apps/YOUR_APP_ID/settings/basic/",
+            "INSTAGRAM_PAGE_ACCESS_TOKEN": "Required for sending messages. Generate from Facebook App Dashboard → Instagram → User Token Generator.",
+            "INSTAGRAM_BUSINESS_ACCOUNT_ID": "Required for send message API. This is your Instagram Business Account ID (recipient_id from inbound messages)."
+        }
+        
+        # Check which credentials are missing
+        missing = [
+            f"{key} - {desc}"
+            for key, desc in required_credentials.items()
+            if not getattr(self, key.lower(), None)
+        ]
+        
+        if missing:
+            logger.warning(
+                "⚠️  Missing configuration in .env file:\n" + 
+                "\n".join(f"  - {config}" for config in missing)
+            )
 
 
 # Global settings instance
