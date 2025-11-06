@@ -3,7 +3,7 @@ SQLAlchemy ORM models for database tables.
 
 YAGNI: Start minimal, add tables only when needed.
 """
-from sqlalchemy import Column, String, Text, DateTime, Index
+from sqlalchemy import Column, String, Text, DateTime, Index, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 
@@ -69,7 +69,7 @@ class OutboundMessage(Base):
     __tablename__ = "outbound_messages"
     
     id = Column(String(50), primary_key=True)  # Our message ID
-    account_id = Column(String(50), nullable=False)  # FK to accounts.id
+    account_id = Column(String(50), ForeignKey('accounts.id'), nullable=False)  # FK to accounts.id
     recipient_id = Column(String(50), nullable=False)  # Instagram PSID
     message_text = Column(Text, nullable=False)  # Message content
     idempotency_key = Column(String(100), unique=True, nullable=False)  # Prevent duplicates
@@ -78,5 +78,5 @@ class OutboundMessage(Base):
     
     __table_args__ = (
         Index('idx_account_status', 'account_id', 'status'),
-        Index('idx_idempotency_key', 'idempotency_key'),
+        # Note: No need for idx_idempotency_key - unique constraint creates its own index
     )
