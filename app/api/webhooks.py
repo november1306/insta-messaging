@@ -12,6 +12,9 @@ from app.rules.reply_rules import get_reply_text
 from datetime import datetime, timezone
 import logging
 import httpx
+import hmac
+import hashlib
+import json
 
 # Set up logging
 logging.basicConfig(
@@ -65,14 +68,27 @@ async def handle_webhook(
     Facebook sends POST requests with message data.
     We parse the payload, extract messages, and store them in the database.
     
-    TODO (Task 9): Implement webhook signature validation before processing
-                   https://developers.facebook.com/docs/messenger-platform/webhooks#security
+    Security: Validates X-Hub-Signature-256 header to ensure requests come from Facebook.
     """
     messages_processed = 0
     
     try:
-        # Get the raw request body
-        body = await request.json()
+        # Get the raw request body for signature validation
+        raw_body = await request.body()
+        
+        # Validate webhook signature before processing
+        signature_header = request.headers.get("X-Hub-Signature-256", "")
+        if not _validate_webhook_signature(raw_body, signature_header):
+            logger.warning("❌ Invalid webhook signature - potential security threat")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid signature"
+            )
+        
+        logger.info("✅ Webhook signature validated")
+        
+        # Parse the JSON body from raw bytes
+        body = json.loads(raw_body.decode('utf-8'))
         
         # Validate request body structure
         if not isinstance(body, dict):
@@ -226,6 +242,59 @@ async def _handle_auto_reply(
         # Log error but don't fail the webhook processing
         # Inbound message is already saved, so webhook won't be retried
         logger.error(f"❌ Error in auto-reply handler: {e}", exc_info=True)
+
+
+def _validate_webhook_signature(payload: bytes, signature_header: str) -> bool:
+    """
+    Validate the webhook signature from Facebook.
+    
+    Facebook signs all webhook requests with HMAC-SHA256 using the app secret.
+    The signature is sent in the X-Hub-Signature-256 header as "sha256=<signature>".
+    
+    Args:
+        payload: Raw request body as bytes
+        signature_header: Value of X-Hub-Signature-256 header
+        
+    Returns:
+        True if signature is valid, False otherwise
+        
+    Security:
+        - Uses constant-time comparison to prevent timing attacks
+        - Validates signature format before comparison
+        - Logs security events for monitoring
+    """
+    try:
+        # Check if signature header is present and has correct format
+        if not signature_header or not signature_header.startswith("sha256="):
+            logger.warning("Missing or malformed signature header")
+            return False
+        
+        # Extract the signature (remove "sha256=" prefix)
+        expected_signature = signature_header[7:]  # len("sha256=") = 7
+        
+        # Compute HMAC-SHA256 signature using app secret
+        app_secret = settings.facebook_app_secret.encode('utf-8')
+        computed_signature = hmac.new(
+            app_secret,
+            payload,
+            hashlib.sha256
+        ).hexdigest()
+        
+        # Use constant-time comparison to prevent timing attacks
+        # hmac.compare_digest is designed for this purpose
+        is_valid = hmac.compare_digest(computed_signature, expected_signature)
+        
+        if not is_valid:
+            logger.warning(
+                f"Signature mismatch - computed: {computed_signature[:10]}..., "
+                f"expected: {expected_signature[:10]}..."
+            )
+        
+        return is_valid
+        
+    except Exception as e:
+        logger.error(f"Error validating webhook signature: {e}", exc_info=True)
+        return False
 
 
 def _extract_message_data(messaging_event: dict) -> dict | None:
