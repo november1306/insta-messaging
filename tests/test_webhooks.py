@@ -4,13 +4,17 @@ Tests for Instagram webhook endpoints.
 Tests webhook verification, message parsing, and storage.
 """
 import pytest
+import hmac
+import hashlib
+import json
 from datetime import datetime, timezone
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.main import app
 from app.db.connection import init_db, get_db_session
 from app.repositories.message_repository import MessageRepository
-from app.api.webhooks import _extract_message_data
+from app.api.webhooks import _extract_message_data, _validate_webhook_signature
 
 
 # Sample Instagram webhook payload (based on Facebook's documentation)
@@ -207,13 +211,67 @@ class TestMessageExtraction:
 class TestWebhookMessageProcessing:
     """Tests for webhook message processing endpoint (POST)."""
     
-    def test_webhook_with_valid_payload(self):
-        """Test webhook endpoint with valid message payload."""
-        client = TestClient(app)
+    # Signature validation unit tests
+    def test_valid_signature_accepted(self, monkeypatch):
+        """Test that valid signatures are accepted."""
+        monkeypatch.setenv("FACEBOOK_APP_SECRET", "test_secret_dev")
+        from app.config import Settings
+        import app.api.webhooks as webhooks_module
+        webhooks_module.settings = Settings()
         
+        payload = b'{"test": "data"}'
+        signature = hmac.new(
+            b"test_secret_dev",
+            payload,
+            hashlib.sha256
+        ).hexdigest()
+        
+        assert _validate_webhook_signature(payload, f"sha256={signature}") is True
+    
+    def test_invalid_signature_rejected(self, monkeypatch):
+        """Test that invalid signatures are rejected."""
+        monkeypatch.setenv("FACEBOOK_APP_SECRET", "test_secret_dev")
+        from app.config import Settings
+        import app.api.webhooks as webhooks_module
+        webhooks_module.settings = Settings()
+        
+        payload = b'{"test": "data"}'
+        
+        assert _validate_webhook_signature(payload, "sha256=invalid_signature") is False
+    
+    def test_missing_signature_header_rejected(self, monkeypatch):
+        """Test that missing signature header is rejected."""
+        monkeypatch.setenv("FACEBOOK_APP_SECRET", "test_secret_dev")
+        from app.config import Settings
+        import app.api.webhooks as webhooks_module
+        webhooks_module.settings = Settings()
+        
+        payload = b'{"test": "data"}'
+        
+        assert _validate_webhook_signature(payload, "") is False
+    
+    def test_malformed_signature_header_rejected(self, monkeypatch):
+        """Test that malformed signature header is rejected."""
+        monkeypatch.setenv("FACEBOOK_APP_SECRET", "test_secret_dev")
+        from app.config import Settings
+        import app.api.webhooks as webhooks_module
+        webhooks_module.settings = Settings()
+        
+        payload = b'{"test": "data"}'
+        
+        assert _validate_webhook_signature(payload, "invalid_format") is False
+    
+    # Webhook endpoint integration tests
+    @patch('app.api.webhooks._validate_webhook_signature')
+    def test_webhook_with_valid_payload(self, mock_validate):
+        """Test webhook endpoint with valid message payload."""
+        mock_validate.return_value = True
+        
+        client = TestClient(app)
         response = client.post(
             "/webhooks/instagram",
-            json=SAMPLE_WEBHOOK_PAYLOAD
+            json=SAMPLE_WEBHOOK_PAYLOAD,
+            headers={"X-Hub-Signature-256": "sha256=mock_signature"}
         )
         
         assert response.status_code == 200
@@ -221,13 +279,16 @@ class TestWebhookMessageProcessing:
         assert data["status"] == "ok"
         assert data["messages_processed"] == 1
     
-    def test_webhook_with_complex_payload(self):
+    @patch('app.api.webhooks._validate_webhook_signature')
+    def test_webhook_with_complex_payload(self, mock_validate):
         """Test webhook with multiple messages and edge cases."""
-        client = TestClient(app)
+        mock_validate.return_value = True
         
+        client = TestClient(app)
         response = client.post(
             "/webhooks/instagram",
-            json=COMPLEX_WEBHOOK_PAYLOAD
+            json=COMPLEX_WEBHOOK_PAYLOAD,
+            headers={"X-Hub-Signature-256": "sha256=mock_signature"}
         )
         
         assert response.status_code == 200
@@ -236,13 +297,16 @@ class TestWebhookMessageProcessing:
         # Should process 2 text messages, skip 2 non-text events
         assert data["messages_processed"] == 2
     
-    def test_webhook_with_invalid_payload_not_dict(self):
+    @patch('app.api.webhooks._validate_webhook_signature')
+    def test_webhook_with_invalid_payload_not_dict(self, mock_validate):
         """Test webhook with invalid payload (not a dictionary)."""
-        client = TestClient(app)
+        mock_validate.return_value = True
         
+        client = TestClient(app)
         response = client.post(
             "/webhooks/instagram",
-            json=["invalid", "payload"]
+            json=["invalid", "payload"],
+            headers={"X-Hub-Signature-256": "sha256=mock_signature"}
         )
         
         assert response.status_code == 200
@@ -250,13 +314,16 @@ class TestWebhookMessageProcessing:
         assert data["status"] == "ok"
         assert data["messages_processed"] == 0
     
-    def test_webhook_with_missing_entry_field(self):
+    @patch('app.api.webhooks._validate_webhook_signature')
+    def test_webhook_with_missing_entry_field(self, mock_validate):
         """Test webhook with missing 'entry' field."""
-        client = TestClient(app)
+        mock_validate.return_value = True
         
+        client = TestClient(app)
         response = client.post(
             "/webhooks/instagram",
-            json={"object": "instagram"}
+            json={"object": "instagram"},
+            headers={"X-Hub-Signature-256": "sha256=mock_signature"}
         )
         
         assert response.status_code == 200
@@ -264,18 +331,23 @@ class TestWebhookMessageProcessing:
         assert data["status"] == "ok"
         assert data["messages_processed"] == 0
     
-    def test_webhook_handles_duplicate_messages(self):
+    @patch('app.api.webhooks._validate_webhook_signature')
+    def test_webhook_handles_duplicate_messages(self, mock_validate):
         """Test that duplicate messages are handled gracefully."""
+        mock_validate.return_value = True
+        
         client = TestClient(app)
         
         # Send same webhook twice
         response1 = client.post(
             "/webhooks/instagram",
-            json=SAMPLE_WEBHOOK_PAYLOAD
+            json=SAMPLE_WEBHOOK_PAYLOAD,
+            headers={"X-Hub-Signature-256": "sha256=mock_signature"}
         )
         response2 = client.post(
             "/webhooks/instagram",
-            json=SAMPLE_WEBHOOK_PAYLOAD
+            json=SAMPLE_WEBHOOK_PAYLOAD,
+            headers={"X-Hub-Signature-256": "sha256=mock_signature"}
         )
         
         # Both should return 200
@@ -286,3 +358,57 @@ class TestWebhookMessageProcessing:
         assert response1.json()["messages_processed"] == 1
         # Second should skip duplicate (0 processed)
         assert response2.json()["messages_processed"] == 0
+    
+    @patch('app.api.webhooks._validate_webhook_signature')
+    def test_webhook_rejects_invalid_signature(self, mock_validate):
+        """Test webhook rejects requests with invalid signatures."""
+        mock_validate.return_value = False
+        
+        client = TestClient(app)
+        response = client.post(
+            "/webhooks/instagram",
+            json=SAMPLE_WEBHOOK_PAYLOAD,
+            headers={"X-Hub-Signature-256": "sha256=invalid"}
+        )
+        
+        assert response.status_code == 401
+    
+    def test_webhook_rejects_missing_signature_header(self):
+        """Test webhook rejects requests without signature header."""
+        client = TestClient(app)
+        response = client.post(
+            "/webhooks/instagram",
+            json=SAMPLE_WEBHOOK_PAYLOAD
+        )
+        
+        assert response.status_code == 401
+    
+    def test_webhook_with_real_signature_computation(self, monkeypatch):
+        """Integration test with real HMAC signature computation."""
+        monkeypatch.setenv("FACEBOOK_APP_SECRET", "test_secret")
+        from app.config import Settings
+        import app.api.webhooks as webhooks_module
+        webhooks_module.settings = Settings()
+        
+        # Compute real signature for test payload
+        payload = json.dumps(SAMPLE_WEBHOOK_PAYLOAD).encode()
+        signature = hmac.new(
+            b"test_secret",
+            payload,
+            hashlib.sha256
+        ).hexdigest()
+        
+        client = TestClient(app)
+        response = client.post(
+            "/webhooks/instagram",
+            content=payload,
+            headers={
+                "X-Hub-Signature-256": f"sha256={signature}",
+                "Content-Type": "application/json"
+            }
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["messages_processed"] == 1

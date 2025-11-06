@@ -89,7 +89,10 @@ This plan implements a simple POC for receiving and sending Instagram messages. 
   - Check database for stored messages
   - _Requirements: 8.1, 8.3_
 
-- [ ] 9. Add webhook signature validation
+- [x] 9. Add webhook signature validation
+
+
+
   - Implement signature validation using X-Hub-Signature-256 header
   - Use FACEBOOK_APP_SECRET from config
   - Validate signature before processing webhook
