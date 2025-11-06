@@ -52,7 +52,7 @@ class Account(Base):
     access_token_encrypted = Column(Text, nullable=False)  # Encrypted Instagram access token
     crm_webhook_url = Column(String(500), nullable=False)  # Where to send webhooks
     webhook_secret = Column(String(100), nullable=False)  # For webhook signature
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, nullable=False, default=func.now())  # Python + DB default for defense-in-depth
     
     __table_args__ = (
         Index('idx_instagram_account_id', 'instagram_account_id'),
@@ -73,8 +73,8 @@ class OutboundMessage(Base):
     recipient_id = Column(String(50), nullable=False)  # Instagram PSID
     message_text = Column(Text, nullable=False)  # Message content
     idempotency_key = Column(String(100), unique=True, nullable=False)  # Prevent duplicates
-    status = Column(String(20), nullable=False, default='pending')  # pending, sent, delivered, failed
-    created_at = Column(DateTime, default=func.now())
+    status = Column(String(20), nullable=False, default='pending', server_default='pending')  # Python + DB default
+    created_at = Column(DateTime, nullable=False, default=func.now())  # Python + DB default (server_default in migration)
     
     __table_args__ = (
         Index('idx_account_status', 'account_id', 'status'),
