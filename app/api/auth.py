@@ -17,15 +17,6 @@ import os
 
 logger = logging.getLogger(__name__)
 
-# Prevent accidental production deployment with stub auth
-# This check runs at module import time to fail fast on startup
-_ENV = os.getenv("ENVIRONMENT", "development").lower()
-if _ENV in ("production", "prod"):
-    raise RuntimeError(
-        "Stub authentication module cannot be imported in production environment. "
-        "Implement real API key validation (Priority 2, Task 10) before deploying."
-    )
-
 
 def verify_api_key(
     authorization: Optional[str] = Header(None)
@@ -41,7 +32,17 @@ def verify_api_key(
     
     Raises:
         HTTPException: 401 if Authorization header is missing or invalid format
+        HTTPException: 503 if called in production environment
     """
+    # Prevent stub auth from being used in production
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    if env in ("production", "prod"):
+        logger.error("Stub authentication called in production environment")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service not available. Implement real API key validation before using CRM endpoints in production."
+        )
+    
     # Check if Authorization header is present and valid format
     if not authorization or not authorization.startswith("Bearer "):
         logger.warning("API request rejected: Invalid or missing Authorization header")

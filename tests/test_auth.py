@@ -58,26 +58,17 @@ def test_verify_api_key_whitespace_only():
 
 
 @pytest.mark.parametrize("env_value", ["production", "prod", "PRODUCTION", "PROD"])
-def test_auth_module_blocks_production_environments(env_value, monkeypatch):
+def test_verify_api_key_blocks_production_environments(env_value, monkeypatch):
     """
-    Test that stub auth module cannot be imported in production-like environments.
+    Test that stub auth returns 503 when called in production-like environments.
     
-    Note: This tests the module-level check. In real deployment, the app would
-    fail to start if ENVIRONMENT is set to production, preventing any requests.
+    This allows the app to start in production (for phased rollout) but prevents
+    stub auth from being used if CRM endpoints are accidentally called.
     """
-    import importlib
-    import sys
-    
-    # Set environment before importing
     monkeypatch.setenv("ENVIRONMENT", env_value)
     
-    # Remove module from cache if already imported
-    if "app.api.auth" in sys.modules:
-        del sys.modules["app.api.auth"]
+    with pytest.raises(HTTPException) as exc_info:
+        verify_api_key(authorization="Bearer test_key")
     
-    # Attempt to import should raise RuntimeError
-    with pytest.raises(RuntimeError) as exc_info:
-        import app.api.auth
-        importlib.reload(app.api.auth)
-    
-    assert "production" in str(exc_info.value).lower()
+    assert exc_info.value.status_code == 503
+    assert "not available" in exc_info.value.detail.lower()
