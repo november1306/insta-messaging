@@ -6,7 +6,10 @@ This plan implements the CRM integration feature using a **skeleton-first approa
 
 Goal: Get a working API deployed and testable ASAP. No error handling, no retries, no edge cases - just the core flow.
 
-- [ ] 1. Integrate OpenAPI spec and set up Swagger UI
+- [x] 1. Integrate OpenAPI spec and set up Swagger UI
+
+
+
   - Copy api-spec.yaml to app/static/ directory
   - Configure FastAPI to serve OpenAPI spec from file
   - Mount Swagger UI at /docs endpoint

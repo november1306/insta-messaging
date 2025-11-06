@@ -1,0 +1,589 @@
+openapi: 3.0.3
+info:
+  title: Instagram Message Router - CRM Integration API
+  description: |
+    API for integrating a CRM system with Instagram messaging.
+    
+    **Authentication:** All endpoints require Bearer token authentication.
+    
+    **Webhooks:** The router sends webhooks to your CRM for inbound messages and status updates.
+  version: 1.0.0
+  contact:
+    name: API Support
+
+servers:
+  - url: https://api.yourdomain.com
+    description: Production
+  - url: http://localhost:8000
+    description: Local development
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ============================================
+  # OUTBOUND MESSAGING (CRM → Customer)
+  # ============================================
+  
+  /api/v1/messages/send:
+    post:
+      summary: Send message to Instagram user
+      description: |
+        Send a message from your Instagram business account to a customer.
+        Returns immediately with message_id. Delivery happens async.
+        
+        **Idempotency:** Use idempotency_key to prevent duplicate sends.
+      operationId: sendMessage
+      tags:
+        - Messages
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+            examples:
+              simple:
+                summary: Simple text message
+                value:
+                  account_id: "ig_account_123"
+                  recipient_id: "1234567890"
+                  message: "Thanks for your order! It will ship tomorrow."
+                  idempotency_key: "order_456_confirmation"
+      responses:
+        '202':
+          description: Message accepted for delivery
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendMessageResponse'
+              example:
+                message_id: "msg_abc123"
+                status: "pending"
+                created_at: "2025-11-06T10:30:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/messages/{message_id}/status:
+    get:
+      summary: Get message delivery status
+      description: Query the current delivery status of a sent message
+      operationId: getMessageStatus
+      tags:
+        - Messages
+      parameters:
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "msg_abc123"
+      responses:
+        '200':
+          description: Message status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageStatusResponse'
+              example:
+                message_id: "msg_abc123"
+                status: "delivered"
+                account_id: "ig_account_123"
+                recipient_id: "1234567890"
+                instagram_message_id: "ig_mid_xyz789"
+                created_at: "2025-11-06T10:30:00Z"
+                sent_at: "2025-11-06T10:30:02Z"
+                delivered_at: "2025-11-06T10:30:05Z"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================
+  # ACCOUNT MANAGEMENT
+  # ============================================
+  
+  /api/v1/accounts:
+    post:
+      summary: Create Instagram account configuration
+      description: Register an Instagram business account with the router
+      operationId: createAccount
+      tags:
+        - Accounts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccountRequest'
+            example:
+              instagram_account_id: "17841400000000000"
+              username: "myshop"
+              access_token: "EAABwzLixnjYBO..."
+              app_secret: "abc123def456..."
+              crm_webhook_url: "https://crm.myshop.com/webhooks/instagram"
+              webhook_secret: "shared_secret_xyz"
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/accounts/{account_id}:
+    get:
+      summary: Get account details
+      description: Retrieve account configuration (credentials not included)
+      operationId: getAccount
+      tags:
+        - Accounts
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "ig_account_123"
+      responses:
+        '200':
+          description: Account details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    
+    put:
+      summary: Update account configuration
+      description: Update webhook URL, credentials, or other settings
+      operationId: updateAccount
+      tags:
+        - Accounts
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAccountRequest'
+      responses:
+        '200':
+          description: Account updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================
+  # HEALTH CHECK
+  # ============================================
+  
+  /health:
+    get:
+      summary: Health check
+      description: Check if the service is running
+      operationId: healthCheck
+      tags:
+        - System
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  timestamp:
+                    type: string
+                    format: date-time
+
+# ============================================
+# WEBHOOK PAYLOADS (CRM receives these)
+# ============================================
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API Key
+      description: |
+        API key for authentication. Format: `Bearer router_live_abc123...`
+        
+        Get your API key from the admin dashboard.
+
+  schemas:
+    # ============================================
+    # REQUEST SCHEMAS
+    # ============================================
+    
+    SendMessageRequest:
+      type: object
+      required:
+        - account_id
+        - recipient_id
+        - message
+        - idempotency_key
+      properties:
+        account_id:
+          type: string
+          description: Instagram account ID to send from
+          example: "ig_account_123"
+        recipient_id:
+          type: string
+          description: Instagram PSID of the recipient
+          example: "1234567890"
+        message:
+          type: string
+          description: Message text to send
+          minLength: 1
+          maxLength: 1000
+          example: "Thanks for your order!"
+        idempotency_key:
+          type: string
+          description: Unique key to prevent duplicate sends
+          example: "order_456_confirmation"
+        metadata:
+          type: object
+          description: Optional CRM-specific metadata
+          additionalProperties: true
+          example:
+            order_id: "456"
+            customer_id: "789"
+
+    CreateAccountRequest:
+      type: object
+      required:
+        - instagram_account_id
+        - username
+        - access_token
+        - app_secret
+        - crm_webhook_url
+        - webhook_secret
+      properties:
+        instagram_account_id:
+          type: string
+          description: Instagram business account ID
+          example: "17841400000000000"
+        username:
+          type: string
+          description: Instagram username
+          example: "myshop"
+        access_token:
+          type: string
+          description: Instagram Page Access Token
+          example: "EAABwzLixnjYBO..."
+        app_secret:
+          type: string
+          description: Facebook App Secret
+          example: "abc123def456..."
+        crm_webhook_url:
+          type: string
+          format: uri
+          description: URL where router sends webhooks
+          example: "https://crm.myshop.com/webhooks/instagram"
+        webhook_secret:
+          type: string
+          description: Shared secret for webhook signatures
+          example: "shared_secret_xyz"
+
+    UpdateAccountRequest:
+      type: object
+      properties:
+        crm_webhook_url:
+          type: string
+          format: uri
+        webhook_secret:
+          type: string
+        access_token:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+
+    # ============================================
+    # RESPONSE SCHEMAS
+    # ============================================
+    
+    SendMessageResponse:
+      type: object
+      properties:
+        message_id:
+          type: string
+          description: Message Router's message ID
+          example: "msg_abc123"
+        status:
+          type: string
+          enum: [pending, accepted, failed]
+          example: "pending"
+        created_at:
+          type: string
+          format: date-time
+          example: "2025-11-06T10:30:00Z"
+
+    MessageStatusResponse:
+      type: object
+      properties:
+        message_id:
+          type: string
+          example: "msg_abc123"
+        status:
+          type: string
+          enum: [pending, sent, delivered, read, failed]
+          example: "delivered"
+        account_id:
+          type: string
+          example: "ig_account_123"
+        recipient_id:
+          type: string
+          example: "1234567890"
+        instagram_message_id:
+          type: string
+          nullable: true
+          example: "ig_mid_xyz789"
+        created_at:
+          type: string
+          format: date-time
+        sent_at:
+          type: string
+          format: date-time
+          nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+          nullable: true
+
+    AccountResponse:
+      type: object
+      properties:
+        account_id:
+          type: string
+          example: "ig_account_123"
+        instagram_account_id:
+          type: string
+          example: "17841400000000000"
+        username:
+          type: string
+          example: "myshop"
+        crm_webhook_url:
+          type: string
+          example: "https://crm.myshop.com/webhooks/instagram"
+        status:
+          type: string
+          enum: [active, inactive, error]
+          example: "active"
+        created_at:
+          type: string
+          format: date-time
+
+    ErrorDetail:
+      type: object
+      properties:
+        code:
+          type: string
+          example: "rate_limit"
+        message:
+          type: string
+          example: "Instagram API rate limit exceeded"
+        retryable:
+          type: boolean
+          example: true
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "invalid_request"
+        message:
+          type: string
+          example: "The recipient_id is required"
+        details:
+          type: object
+          additionalProperties: true
+        correlation_id:
+          type: string
+          example: "req_abc123"
+        timestamp:
+          type: string
+          format: date-time
+
+    # ============================================
+    # WEBHOOK PAYLOADS (sent to CRM)
+    # ============================================
+    
+    InboundMessageWebhook:
+      type: object
+      description: |
+        Webhook sent when a customer sends a message to your Instagram account.
+        
+        **Signature:** Validate using X-Hub-Signature-256 header
+      properties:
+        event:
+          type: string
+          enum: [message.received]
+          example: "message.received"
+        message_id:
+          type: string
+          description: Message Router's message ID
+          example: "msg_inbound_xyz"
+        account_id:
+          type: string
+          example: "ig_account_123"
+        sender_id:
+          type: string
+          description: Instagram PSID of sender
+          example: "1234567890"
+        sender_username:
+          type: string
+          nullable: true
+          example: "customer_john"
+        message:
+          type: string
+          example: "When will my order ship?"
+        message_type:
+          type: string
+          enum: [text, image, video, story_reply]
+          example: "text"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2025-11-06T10:30:00Z"
+        instagram_message_id:
+          type: string
+          example: "ig_mid_abc123"
+        conversation_id:
+          type: string
+          example: "conv_xyz789"
+
+    DeliveryStatusWebhook:
+      type: object
+      description: |
+        Webhook sent when message delivery status changes.
+        
+        **Events:**
+        - message.sent: Successfully sent to Instagram API
+        - message.delivered: Instagram confirmed delivery
+        - message.read: Customer read the message
+        - message.failed: Permanent delivery failure
+      properties:
+        event:
+          type: string
+          enum: [message.sent, message.delivered, message.read, message.failed]
+          example: "message.delivered"
+        message_id:
+          type: string
+          description: Original message_id from send request
+          example: "msg_abc123"
+        account_id:
+          type: string
+          example: "ig_account_123"
+        recipient_id:
+          type: string
+          example: "1234567890"
+        status:
+          type: string
+          example: "delivered"
+        timestamp:
+          type: string
+          format: date-time
+        instagram_message_id:
+          type: string
+          nullable: true
+          example: "ig_mid_xyz789"
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+          nullable: true
+
+  # ============================================
+  # REUSABLE RESPONSES
+  # ============================================
+  
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "invalid_request"
+            message: "The recipient_id is required"
+            correlation_id: "req_abc123"
+            timestamp: "2025-11-06T10:30:00Z"
+
+    Unauthorized:
+      description: Missing or invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "unauthorized"
+            message: "Invalid API key"
+            correlation_id: "req_abc123"
+            timestamp: "2025-11-06T10:30:00Z"
+
+    Forbidden:
+      description: No access to resource
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "forbidden"
+            message: "API key does not have access to this account"
+            correlation_id: "req_abc123"
+            timestamp: "2025-11-06T10:30:00Z"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "not_found"
+            message: "Message not found"
+            correlation_id: "req_abc123"
+            timestamp: "2025-11-06T10:30:00Z"
+
+tags:
+  - name: Messages
+    description: Send messages and check delivery status
+  - name: Accounts
+    description: Manage Instagram account configurations
+  - name: System
+    description: Health checks and system status
