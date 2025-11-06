@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime  # Used in AccountResponse type hint
 from typing import Optional
 import uuid
 import logging
@@ -114,22 +114,14 @@ async def create_account(
         username=request.username,
         access_token_encrypted=encoded_token,
         crm_webhook_url=request.crm_webhook_url,
-        webhook_secret=encoded_webhook_secret,
-        created_at=datetime.utcnow()  # Set explicitly for MVP
+        webhook_secret=encoded_webhook_secret
+        # created_at handled by database default (func.now())
     )
     
-    try:
-        db.add(account)
-        await db.commit()
-    except Exception as e:
-        logger.error(f"Database error creating account: {e}")
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create account: {str(e)}"
-        )
+    db.add(account)
+    await db.flush()  # Flush to catch DB errors before auto-commit
     
-    logger.info(f"Account created: {account_id} (@{request.username})")
+    logger.info(f"✅ Account created: {account_id} (@{request.username})")
     
     return AccountResponse(
         account_id=account.id,
