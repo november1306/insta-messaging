@@ -140,7 +140,6 @@ paths:
               instagram_account_id: "17841400000000000"
               username: "myshop"
               access_token: "EAABwzLixnjYBO..."
-              app_secret: "abc123def456..."
               crm_webhook_url: "https://crm.myshop.com/webhooks/instagram"
               webhook_secret: "shared_secret_xyz"
       responses:
@@ -293,12 +292,12 @@ components:
             customer_id: "789"
 
     CreateAccountRequest:
+      # Note: app_secret removed from MVP - not needed for account storage
       type: object
       required:
         - instagram_account_id
         - username
         - access_token
-        - app_secret
         - crm_webhook_url
         - webhook_secret
       properties:
@@ -314,10 +313,6 @@ components:
           type: string
           description: Instagram Page Access Token
           example: "EAABwzLixnjYBO..."
-        app_secret:
-          type: string
-          description: Facebook App Secret
-          example: "abc123def456..."
         crm_webhook_url:
           type: string
           format: uri
@@ -402,6 +397,7 @@ components:
           nullable: true
 
     AccountResponse:
+      # Note: status field removed from MVP - account status tracking deferred to Priority 2
       type: object
       properties:
         account_id:
@@ -416,10 +412,6 @@ components:
         crm_webhook_url:
           type: string
           example: "https://crm.myshop.com/webhooks/instagram"
-        status:
-          type: string
-          enum: [active, inactive, error]
-          example: "active"
         created_at:
           type: string
           format: date-time

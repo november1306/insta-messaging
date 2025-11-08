@@ -36,6 +36,11 @@ Goal: Get a working API deployed and testable ASAP. No error handling, no retrie
   - Add Authorization header requirement to endpoints
   - Return 401 if header missing
   - TODO: Replace with real auth later
+
+
+
+
+
   - _Requirements: 9.1, 9.2_
 
 - [ ] 4. Implement POST /api/v1/accounts (minimal)
