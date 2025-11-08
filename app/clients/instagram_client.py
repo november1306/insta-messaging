@@ -55,15 +55,9 @@ class InstagramClient:
             settings: Application settings containing access token
             logger_instance: Logger for tracking API calls
             
-        Raises:
-            ValueError: If instagram_page_access_token is not configured
+        Note:
+            Assumes access token is valid. Caller should validate before instantiation.
         """
-        if not settings.instagram_page_access_token:
-            raise ValueError(
-                "instagram_page_access_token is required but not configured. "
-                "Please set INSTAGRAM_PAGE_ACCESS_TOKEN in your .env file."
-            )
-        
         self._http_client = http_client
         self._settings = settings
         self._logger = logger_instance

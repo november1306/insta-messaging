@@ -11,10 +11,13 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 import uuid
 import logging
+import httpx
 
 from app.api.auth import verify_api_key
 from app.db.connection import get_db_session
 from app.db.models import OutboundMessage, Account
+from app.clients.instagram_client import InstagramClient, InstagramAPIError
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +103,7 @@ async def send_message(
     db.add(outbound_message)
     
     try:
-        await db.flush()  # Flush to catch DB errors before auto-commit
+        await db.flush()  # Flush to catch DB errors before commit
     except Exception as e:
         logger.error(f"Failed to create message: {e}")
         raise HTTPException(
@@ -110,7 +113,53 @@ async def send_message(
     
     logger.info(f"✅ Message created: {message_id} (status: pending)")
     
-    # 4. Return immediately (actual delivery happens in Task 6)
+    # 4. Check if Instagram access token is configured
+    if not settings.instagram_page_access_token or not settings.instagram_page_access_token.strip():
+        outbound_message.status = "failed"
+        outbound_message.error_code = "missing_config"
+        outbound_message.error_message = "Instagram access token not configured"
+        
+        logger.error(f"❌ Cannot send message {message_id}: Instagram access token not configured")
+    else:
+        # 5. Attempt Instagram delivery (synchronous for MVP)
+        # TODO: Move to async queue with retries in Priority 2
+        async with httpx.AsyncClient() as http_client:
+            instagram_client = InstagramClient(
+                http_client=http_client,
+                settings=settings,
+                logger_instance=logger
+            )
+            
+            try:
+                # Send message via Instagram API
+                ig_response = await instagram_client.send_message(
+                    recipient_id=request.recipient_id,
+                    message_text=request.message
+                )
+                
+                # Update message status to "sent"
+                outbound_message.status = "sent"
+                outbound_message.instagram_message_id = ig_response.message_id
+                
+                logger.info(f"✅ Message sent to Instagram: {message_id} (ig_msg_id: {ig_response.message_id})")
+                
+            except (InstagramAPIError, Exception) as e:
+                # Update message status to "failed"
+                outbound_message.status = "failed"
+                
+                if isinstance(e, InstagramAPIError):
+                    outbound_message.error_code = "instagram_api_error"
+                    outbound_message.error_message = f"HTTP {e.status_code}: {e.message}" if e.status_code else e.message
+                else:
+                    outbound_message.error_code = "unexpected_error"
+                    outbound_message.error_message = str(e)
+                
+                logger.error(f"❌ Failed to send message {message_id}: {outbound_message.error_message}")
+    
+    # 6. Single commit at the end - all state changes persisted together
+    await db.commit()
+    
+    # 7. Return response with current status
     return SendMessageResponse(
         message_id=outbound_message.id,
         status=outbound_message.status,

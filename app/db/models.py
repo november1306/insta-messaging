@@ -74,6 +74,9 @@ class OutboundMessage(Base):
     message_text = Column(Text, nullable=False)  # Message content
     idempotency_key = Column(String(100), unique=True, nullable=False)  # Prevent duplicates
     status = Column(String(20), nullable=False, default='pending', server_default='pending')  # Python + DB default
+    instagram_message_id = Column(String(100), nullable=True)  # Instagram's message ID (set after successful send)
+    error_code = Column(String(50), nullable=True)  # Error code if delivery failed
+    error_message = Column(Text, nullable=True)  # Error message if delivery failed
     created_at = Column(DateTime, nullable=False, default=func.now())  # Python + DB default (server_default in migration)
     
     __table_args__ = (
