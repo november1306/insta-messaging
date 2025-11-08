@@ -43,16 +43,14 @@ Goal: Get a working API deployed and testable ASAP. No error handling, no retrie
 
   - _Requirements: 9.1, 9.2_
 
-- [ ] 4. Implement POST /api/v1/accounts (minimal)
+- [x] 4. Implement POST /api/v1/accounts (minimal)
   - Create Pydantic models from OpenAPI spec (CreateAccountRequest, AccountResponse)
   - Store account in database (encrypt access_token with simple encryption)
-
-
   - Return 201 with account_id
   - Skip Instagram token validation for now
   - _Requirements: 5.1, 5.2_
 
-- [ ] 5. Implement POST /api/v1/messages/send (happy path only)
+- [x] 5. Implement POST /api/v1/messages/send (happy path only)
   - Create Pydantic models from OpenAPI spec (SendMessageRequest, SendMessageResponse)
   - Check idempotency_key - return existing if duplicate
   - Create outbound_messages record with status="pending"
