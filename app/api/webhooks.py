@@ -20,7 +20,6 @@ import httpx
 import hmac
 import hashlib
 import json
-import base64
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +159,8 @@ async def handle_webhook(
 
                                 # Forward to CRM webhook (Task 9 - CRITICAL for CRM chat window)
                                 # Fire-and-forget to avoid blocking Instagram webhook response
-                                # This prevents race conditions if CRM is slow (up to 10s timeout)
-                                asyncio.create_task(_forward_to_crm(message, db, http_client))
+                                # _forward_to_crm creates its own DB session and HTTP client to avoid race conditions
+                                asyncio.create_task(_forward_to_crm(message))
 
                             except ValueError:
                                 # Message already exists - this is ok for webhook retries
@@ -387,65 +386,78 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
         return None
 
 
-async def _forward_to_crm(
-    message: Message,
-    db: AsyncSession,
-    http_client: httpx.AsyncClient
-) -> None:
+async def _forward_to_crm(message: Message) -> None:
     """
     Forward inbound message to CRM webhook (Task 9).
 
     Looks up account configuration and forwards message to CRM webhook
     if configured. This enables the CRM chat window to receive customer messages.
 
+    Creates its own database session and HTTP client to avoid race conditions
+    when used as a fire-and-forget background task.
+
     Args:
         message: The inbound message to forward
-        db: Database session for account lookup
-        http_client: HTTP client for webhook delivery
 
     Note:
         - Errors are logged but don't fail the webhook handler
         - No retries in MVP (Priority 3, Task 17)
         - Instagram webhook always returns 200 regardless of CRM delivery
+        - Safe to use with asyncio.create_task() - manages its own resources
     """
+    # Import here to avoid circular dependency
+    from app.db.connection import async_session_maker
+
     try:
-        # Look up account by Instagram account ID (recipient is our business account)
-        result = await db.execute(
-            select(Account).where(Account.instagram_account_id == message.recipient_id)
-        )
-        account = result.scalar_one_or_none()
-
-        if not account:
-            logger.warning(
-                f"No account configuration found for {message.recipient_id}, "
-                f"skipping CRM webhook forwarding - message will not reach CRM"
+        # Create our own database session (request-scoped session is not available in background task)
+        async with async_session_maker() as db:
+            # Look up account by Instagram account ID (recipient is our business account)
+            result = await db.execute(
+                select(Account).where(Account.instagram_account_id == message.recipient_id)
             )
-            return
+            account = result.scalar_one_or_none()
 
-        if not account.crm_webhook_url:
-            logger.warning(
-                f"No CRM webhook URL configured for account {account.id}, "
-                f"skipping forwarding - message will not reach CRM"
-            )
-            return
+            if not account:
+                logger.warning(
+                    f"No account configuration found for {message.recipient_id}, "
+                    f"skipping CRM webhook forwarding - message will not reach CRM"
+                )
+                return
 
-        # Decode webhook secret (MVP: base64-encoded)
-        webhook_secret = decrypt_credential(account.webhook_secret)
+            if not account.crm_webhook_url:
+                logger.warning(
+                    f"No CRM webhook URL configured for account {account.id}, "
+                    f"skipping forwarding - message will not reach CRM"
+                )
+                return
 
-        # Forward message to CRM webhook
-        forwarder = WebhookForwarder(http_client)
-        success = await forwarder.forward_message(message, account, webhook_secret)
+            # Decode webhook secret (MVP: base64-encoded)
+            try:
+                webhook_secret = decrypt_credential(account.webhook_secret)
+            except Exception as decode_error:
+                logger.error(
+                    f"❌ Failed to decode webhook secret for account {account.id}: {decode_error}. "
+                    f"Webhook secret may be corrupted in database.",
+                    exc_info=True
+                )
+                return
 
-        if success:
-            logger.info(
-                f"✅ Message forwarded to CRM - "
-                f"message_id: {message.id}, account: {account.id}"
-            )
-        else:
-            logger.warning(
-                f"⚠️ Failed to forward message to CRM - "
-                f"message_id: {message.id}, account: {account.id}"
-            )
+            # Create our own HTTP client (request-scoped client is not available in background task)
+            async with httpx.AsyncClient() as http_client:
+                # Forward message to CRM webhook
+                forwarder = WebhookForwarder(http_client)
+                success = await forwarder.forward_message(message, account, webhook_secret)
+
+                if success:
+                    logger.info(
+                        f"✅ Message forwarded to CRM - "
+                        f"message_id: {message.id}, account: {account.id}"
+                    )
+                else:
+                    logger.warning(
+                        f"⚠️ Failed to forward message to CRM - "
+                        f"message_id: {message.id}, account: {account.id}"
+                    )
 
     except Exception as e:
         # Log error but don't fail webhook processing
