@@ -30,6 +30,11 @@ class Settings:
                     f"Cannot use test secret '{DEV_SECRET_PLACEHOLDER}' in production mode. "
                     "Set a real FACEBOOK_APP_SECRET from your Facebook app."
                 )
+            if self.instagram_app_secret == DEV_SECRET_PLACEHOLDER:
+                raise ValueError(
+                    f"Cannot use test secret '{DEV_SECRET_PLACEHOLDER}' in production mode. "
+                    "Set a real INSTAGRAM_APP_SECRET from your Instagram app settings."
+                )
         else:
             # Development mode: Load from .env file (never commit secrets to git)
             self.facebook_verify_token = os.getenv("FACEBOOK_VERIFY_TOKEN", "")
