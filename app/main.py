@@ -3,6 +3,7 @@ Instagram Messenger Automation - Main Application Entry Point
 """
 from contextlib import asynccontextmanager
 from functools import wraps
+from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.responses import JSONResponse
@@ -95,11 +96,17 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """
+    Health check endpoint for CRM integration API.
+    
+    Minimal implementation for MVP (Priority 1):
+    - Return status and timestamp
+    - Skip dependency checks (will add in Priority 2)
+    """
     return {
         "status": "healthy",
-        "environment": settings.environment,
-        "database": "connected"
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "environment": settings.environment
     }
 
 

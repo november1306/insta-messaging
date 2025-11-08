@@ -76,12 +76,17 @@ Goal: Get a working API deployed and testable ASAP. No error handling, no retrie
   - Skip permission checking for now
   - _Requirements: 4.1, 4.2, 4.3_
 
+
+
 - [ ] 8. Implement GET /health endpoint
   - Return {"status": "healthy", "timestamp": "..."}
   - Skip dependency checks for now
   - _Requirements: 11.5_
 
+
 - [ ] 9. Deploy and test on test environment
+
+
   - Deploy to Railway or test server
   - Test via Swagger UI at /docs
   - Create test account via POST /api/v1/accounts
