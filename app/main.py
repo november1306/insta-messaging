@@ -95,11 +95,19 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """
+    Health check endpoint for CRM integration API.
+    
+    Minimal implementation for MVP (Priority 1):
+    - Return status and timestamp
+    - Skip dependency checks (will add in Priority 2)
+    """
+    from datetime import datetime, timezone
+    
     return {
         "status": "healthy",
-        "environment": settings.environment,
-        "database": "connected"
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "environment": settings.environment
     }
 
 
