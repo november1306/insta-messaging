@@ -58,7 +58,9 @@ Goal: Get a working API deployed and testable ASAP. No error handling, no retrie
   - Skip account validation for now
   - _Requirements: 1.1, 1.3, 1.5_
 
-- [ ] 6. Implement simple Instagram delivery (synchronous for now)
+- [x] 6. Implement simple Instagram delivery (synchronous for now)
+
+
   - After creating message record, immediately call Instagram Send API
   - Use existing InstagramClient from main app
   - Update message status to "sent" or "failed"
@@ -68,7 +70,8 @@ Goal: Get a working API deployed and testable ASAP. No error handling, no retrie
 
 
 
-- [ ] 7. Implement GET /api/v1/messages/{message_id}/status (minimal)
+- [x] 7. Implement GET /api/v1/messages/{message_id}/status (minimal)
+
   - Create Pydantic model from OpenAPI spec (MessageStatusResponse)
   - Query outbound_messages by message_id
   - Return 404 if not found
@@ -78,7 +81,8 @@ Goal: Get a working API deployed and testable ASAP. No error handling, no retrie
 
 
 
-- [ ] 8. Implement GET /health endpoint
+- [x] 8. Implement GET /health endpoint
+
   - Return {"status": "healthy", "timestamp": "..."}
   - Skip dependency checks for now
   - _Requirements: 11.5_

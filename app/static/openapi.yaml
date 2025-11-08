@@ -2,36 +2,62 @@ openapi: 3.0.3
 info:
   title: Instagram Message Router - CRM Integration API
   description: |
-    ⚠️ **DOCUMENTATION ONLY - ENDPOINTS NOT YET IMPLEMENTED** ⚠️
+    API for integrating a CRM system with Instagram messaging.
     
-    This API specification documents the planned CRM integration endpoints.
-    **These endpoints are not yet available in the current deployment.**
+    ## Implementation Status
     
-    Currently implemented:
-    - ✅ Instagram webhook receiver at `/webhooks/instagram`
-    - ✅ Health check at `/health`
+    **✅ Fully Implemented:**
+    - `/health` - Health check endpoint
+    - `/api/v1/messages/send` - Send messages to Instagram users
+    - `/api/v1/messages/{message_id}/status` - Get message delivery status
+    - `/api/v1/accounts` (POST) - Create account configuration
+    - `/webhooks/instagram` - Instagram webhook receiver (not in this spec)
     
-    Coming soon (documented below):
-    - 🚧 Message sending API
-    - 🚧 Account management
-    - 🚧 Delivery status tracking
+    **🚧 Partially Implemented:**
+    - `/api/v1/accounts/{account_id}` (GET) - Documented but not implemented
+    - `/api/v1/accounts/{account_id}` (PUT) - Documented but not implemented
+    
+    **📋 Planned:**
+    - Webhook delivery to CRM systems
+    - Advanced delivery tracking
+    - Bulk messaging
     
     ---
     
-    API for integrating a CRM system with Instagram messaging.
+    ## Authentication
     
-    **Authentication:** All endpoints require Bearer token authentication.
+    All endpoints require Bearer token authentication via the `Authorization` header.
     
-    **Webhooks:** The router sends webhooks to your CRM for inbound messages and status updates.
-  version: 1.0.0-preview
+    **Development Mode:** Any Bearer token is accepted (stub authentication)
+    **Production Mode:** Real API key validation required
+    
+    Example:
+    ```
+    Authorization: Bearer your_api_key_here
+    ```
+    
+    ---
+    
+    ## Local Testing
+    
+    **For API testing (send/receive messages):**
+    - Use `http://localhost:8000` - Direct connection, faster, no ngrok overhead
+    
+    **For Instagram webhook testing (receive messages from Instagram):**
+    - Use ngrok URL (e.g., `https://xxx.ngrok-free.dev`) - Required for Instagram to reach your local server
+    - Configure webhook URL in Facebook Developer Console with your ngrok URL
+    
+  version: 1.0.0
   contact:
     name: API Support
 
 servers:
+  - url: http://localhost:8000
+    description: Local development (API testing)
+  - url: https://your-ngrok-url.ngrok-free.dev
+    description: Local development (Instagram webhooks)
   - url: https://api.yourdomain.com
     description: Production
-  - url: http://localhost:8000
-    description: Local development
 
 security:
   - BearerAuth: []
@@ -45,8 +71,13 @@ paths:
     post:
       summary: Send message to Instagram user
       description: |
+        ✅ **IMPLEMENTED**
+        
         Send a message from your Instagram business account to a customer.
-        Returns immediately with message_id. Delivery happens async.
+        Returns 202 Accepted with message_id. Delivery happens synchronously (MVP).
+        
+        **Note:** Current implementation sends immediately (not async queue).
+        Async delivery with retries planned for Priority 2.
         
         **Idempotency:** Use idempotency_key to prevent duplicate sends.
       operationId: sendMessage
@@ -87,7 +118,11 @@ paths:
   /api/v1/messages/{message_id}/status:
     get:
       summary: Get message delivery status
-      description: Query the current delivery status of a sent message
+      description: |
+        ✅ **IMPLEMENTED**
+        
+        Query the current delivery status of a sent message.
+        Returns detailed status including Instagram message ID and error details if failed.
       operationId: getMessageStatus
       tags:
         - Messages
@@ -126,7 +161,14 @@ paths:
   /api/v1/accounts:
     post:
       summary: Create Instagram account configuration
-      description: Register an Instagram business account with the router
+      description: |
+        ✅ **IMPLEMENTED**
+        
+        Register an Instagram business account with the router.
+        Returns account_id for use in other API calls.
+        
+        **Note:** Credentials are base64-encoded (NOT encrypted) in MVP.
+        Real encryption planned for Priority 2.
       operationId: createAccount
       tags:
         - Accounts
@@ -157,7 +199,11 @@ paths:
   /api/v1/accounts/{account_id}:
     get:
       summary: Get account details
-      description: Retrieve account configuration (credentials not included)
+      description: |
+        🚧 **NOT IMPLEMENTED**
+        
+        Retrieve account configuration (credentials not included).
+        This endpoint is documented but not yet implemented.
       operationId: getAccount
       tags:
         - Accounts
@@ -182,7 +228,11 @@ paths:
     
     put:
       summary: Update account configuration
-      description: Update webhook URL, credentials, or other settings
+      description: |
+        🚧 **NOT IMPLEMENTED**
+        
+        Update webhook URL, credentials, or other settings.
+        This endpoint is documented but not yet implemented.
       operationId: updateAccount
       tags:
         - Accounts
@@ -217,7 +267,11 @@ paths:
   /health:
     get:
       summary: Health check
-      description: Check if the service is running
+      description: |
+        ✅ **IMPLEMENTED**
+        
+        Check if the service is running.
+        Returns status and timestamp.
       operationId: healthCheck
       tags:
         - System
