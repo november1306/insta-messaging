@@ -67,6 +67,7 @@ Goal: Get a working API deployed and testable ASAP. No error handling, no retrie
   - _Requirements: 1.4_
 
 
+
 - [ ] 7. Implement GET /api/v1/messages/{message_id}/status (minimal)
   - Create Pydantic model from OpenAPI spec (MessageStatusResponse)
   - Query outbound_messages by message_id
