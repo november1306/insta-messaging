@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from app.api import webhooks, accounts, messages
 from app.config import settings
 from app.db import init_db, close_db
+from app.version import __version__
 import logging
 import yaml
 from pathlib import Path
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI):
     
     # Startup
     logger.info("🚀 Starting Instagram Messenger Automation")
+    logger.info(f"📦 Version: {__version__}")
     logger.info(f"📝 Environment: {settings.environment}")
     
     # Load OpenAPI spec from file (fail gracefully if missing)
@@ -68,7 +70,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Instagram Messenger Automation",
     description="Automated Instagram DM responses for e-commerce",
-    version="0.1.0",
+    version=__version__,
     lifespan=lifespan,
     docs_url=None,  # Disable default docs
     redoc_url=None,  # Disable default redoc
@@ -88,6 +90,7 @@ async def root():
     """Root endpoint"""
     return {
         "app": "Instagram Messenger Automation",
+        "version": __version__,
         "status": "running",
         "environment": settings.environment,
         "webhook_url": "/webhooks/instagram"
