@@ -46,6 +46,8 @@ Goal: Get a working API deployed and testable ASAP. No error handling, no retrie
 - [ ] 4. Implement POST /api/v1/accounts (minimal)
   - Create Pydantic models from OpenAPI spec (CreateAccountRequest, AccountResponse)
   - Store account in database (encrypt access_token with simple encryption)
+
+
   - Return 201 with account_id
   - Skip Instagram token validation for now
   - _Requirements: 5.1, 5.2_
