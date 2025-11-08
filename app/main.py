@@ -3,6 +3,7 @@ Instagram Messenger Automation - Main Application Entry Point
 """
 from contextlib import asynccontextmanager
 from functools import wraps
+from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.responses import JSONResponse
@@ -102,8 +103,6 @@ async def health_check():
     - Return status and timestamp
     - Skip dependency checks (will add in Priority 2)
     """
-    from datetime import datetime, timezone
-    
     return {
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),

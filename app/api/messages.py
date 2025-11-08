@@ -35,9 +35,15 @@ class SendMessageRequest(BaseModel):
 
 
 class SendMessageResponse(BaseModel):
-    """Response from send message endpoint"""
+    """
+    Response from send message endpoint.
+    
+    Note: OpenAPI spec defines status as [pending, accepted, failed] for async delivery.
+    MVP implementation (Task 6) does synchronous delivery and returns [pending, sent, failed].
+    This will be aligned when async queue is implemented in Priority 2.
+    """
     message_id: str = Field(..., description="Message Router's message ID")
-    status: str = Field(..., description="pending | accepted | failed")
+    status: str = Field(..., description="pending | sent | failed (MVP) | accepted (future)")
     created_at: datetime
     
     class Config:
@@ -185,6 +191,9 @@ async def get_message_status(
         )
     
     # Return status
+    # Note: account_id is not validated against accounts table for MVP.
+    # If account is deleted, this will return orphaned account_id.
+    # TODO: Add account validation in Priority 2 when adding permission checks.
     return MessageStatusResponse(
         message_id=message.id,
         status=message.status,
