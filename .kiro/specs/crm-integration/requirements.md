@@ -2,7 +2,13 @@
 
 ## Introduction
 
-This feature implements a bidirectional integration between the Instagram Messenger Automation service (message router) and a custom e-commerce CRM system. The integration enables the CRM to send messages to customers via Instagram and receive incoming messages for display in a dedicated communication tab. The architecture follows a webhook-first approach for loose coupling, with clear separation of concerns between the message router (handles Instagram API complexity) and the CRM (handles business logic and customer data).
+This feature implements a bidirectional integration between the Instagram Messenger Automation service (message router) and a custom e-commerce CRM system. The integration enables the CRM to send messages to customers via Instagram and receive incoming messages for display in a dedicated communication tab (chat window). 
+
+**Core MVP Purpose:** Enable a CRM chat window where customer service representatives can:
+1. **See customer messages** in real-time (Instagram → Router → CRM webhook)
+2. **Send replies** to customers (CRM → Router API → Instagram)
+
+The architecture follows a webhook-first approach for loose coupling, with clear separation of concerns between the message router (handles Instagram API complexity) and the CRM (handles business logic and customer data).
 
 ## Glossary
 

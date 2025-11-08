@@ -6,21 +6,27 @@ info:
     
     ## Implementation Status
     
-    **✅ Fully Implemented:**
+    **Core MVP Purpose:** Enable CRM chat window for Instagram customer communication
+    
+    **✅ Fully Implemented (Outbound Flow):**
     - `/health` - Health check endpoint
-    - `/api/v1/messages/send` - Send messages to Instagram users
+    - `/api/v1/messages/send` - Send messages to Instagram users (CRM → Instagram)
     - `/api/v1/messages/{message_id}/status` - Get message delivery status
     - `/api/v1/accounts` (POST) - Create account configuration
-    - `/webhooks/instagram` - Instagram webhook receiver (not in this spec)
+    - `/webhooks/instagram` - Instagram webhook receiver (Instagram → Router)
+    
+    **❌ CRITICAL MISSING (Inbound Flow):**
+    - Webhook forwarding to CRM (Router → CRM) - **BLOCKS CRM CHAT WINDOW**
+    - Without this, CRM cannot receive customer messages
     
     **🚧 Partially Implemented:**
     - `/api/v1/accounts/{account_id}` (GET) - Documented but not implemented
     - `/api/v1/accounts/{account_id}` (PUT) - Documented but not implemented
     
-    **📋 Planned:**
-    - Webhook delivery to CRM systems
+    **📋 Planned (Priority 2+):**
+    - Webhook retry logic and DLQ
+    - Delivery status webhooks
     - Advanced delivery tracking
-    - Bulk messaging
     
     ---
     

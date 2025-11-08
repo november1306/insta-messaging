@@ -2,7 +2,15 @@
 
 ## Overview
 
-The CRM Integration feature implements a webhook-first, bidirectional communication bridge between the Instagram Messenger Automation service (message router) and a custom e-commerce CRM system. The architecture follows industry-standard patterns used by Twilio, Stripe, and SendGrid: the CRM calls REST APIs to send messages, and receives webhooks for inbound messages and status updates. This design ensures loose coupling, independent scalability, and clear separation of concerns.
+The CRM Integration feature implements a webhook-first, bidirectional communication bridge between the Instagram Messenger Automation service (message router) and a custom e-commerce CRM system. 
+
+**Primary Use Case:** Enable a CRM chat window where customer service representatives can communicate with Instagram customers in real-time.
+
+**Critical Flows:**
+1. **Inbound (CRITICAL):** Customer sends Instagram message → Router receives → Router forwards to CRM webhook → CRM displays in chat window
+2. **Outbound (CRITICAL):** CRM user types reply → CRM calls Router API → Router sends to Instagram → Customer receives
+
+The architecture follows industry-standard patterns used by Twilio, Stripe, and SendGrid: the CRM calls REST APIs to send messages, and receives webhooks for inbound messages and status updates. This design ensures loose coupling, independent scalability, and clear separation of concerns.
 
 ### Key Design Principles
 
