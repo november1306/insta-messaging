@@ -118,54 +118,48 @@ async def send_message(
         outbound_message.status = "failed"
         outbound_message.error_code = "missing_config"
         outbound_message.error_message = "Instagram access token not configured"
-        await db.commit()
         
         logger.error(f"❌ Cannot send message {message_id}: Instagram access token not configured")
-        
-        return SendMessageResponse(
-            message_id=outbound_message.id,
-            status="failed",
-            created_at=outbound_message.created_at
-        )
-    
-    # 5. Attempt Instagram delivery (synchronous for MVP)
-    # TODO: Move to async queue with retries in Priority 2
-    async with httpx.AsyncClient() as http_client:
-        instagram_client = InstagramClient(
-            http_client=http_client,
-            settings=settings,
-            logger_instance=logger
-        )
-        
-        try:
-            # Send message via Instagram API
-            ig_response = await instagram_client.send_message(
-                recipient_id=request.recipient_id,
-                message_text=request.message
+    else:
+        # 5. Attempt Instagram delivery (synchronous for MVP)
+        # TODO: Move to async queue with retries in Priority 2
+        async with httpx.AsyncClient() as http_client:
+            instagram_client = InstagramClient(
+                http_client=http_client,
+                settings=settings,
+                logger_instance=logger
             )
             
-            # Update message status to "sent"
-            outbound_message.status = "sent"
-            outbound_message.instagram_message_id = ig_response.message_id
-            await db.commit()
-            
-            logger.info(f"✅ Message sent to Instagram: {message_id} (ig_msg_id: {ig_response.message_id})")
-            
-        except (InstagramAPIError, Exception) as e:
-            # Update message status to "failed"
-            outbound_message.status = "failed"
-            
-            if isinstance(e, InstagramAPIError):
-                outbound_message.error_code = "instagram_api_error"
-                outbound_message.error_message = f"HTTP {e.status_code}: {e.message}" if e.status_code else e.message
-            else:
-                outbound_message.error_code = "unexpected_error"
-                outbound_message.error_message = str(e)
-            
-            await db.commit()
-            logger.error(f"❌ Failed to send message {message_id}: {outbound_message.error_message}")
+            try:
+                # Send message via Instagram API
+                ig_response = await instagram_client.send_message(
+                    recipient_id=request.recipient_id,
+                    message_text=request.message
+                )
+                
+                # Update message status to "sent"
+                outbound_message.status = "sent"
+                outbound_message.instagram_message_id = ig_response.message_id
+                
+                logger.info(f"✅ Message sent to Instagram: {message_id} (ig_msg_id: {ig_response.message_id})")
+                
+            except (InstagramAPIError, Exception) as e:
+                # Update message status to "failed"
+                outbound_message.status = "failed"
+                
+                if isinstance(e, InstagramAPIError):
+                    outbound_message.error_code = "instagram_api_error"
+                    outbound_message.error_message = f"HTTP {e.status_code}: {e.message}" if e.status_code else e.message
+                else:
+                    outbound_message.error_code = "unexpected_error"
+                    outbound_message.error_message = str(e)
+                
+                logger.error(f"❌ Failed to send message {message_id}: {outbound_message.error_message}")
     
-    # 6. Return response with current status
+    # 6. Single commit at the end - all state changes persisted together
+    await db.commit()
+    
+    # 7. Return response with current status
     return SendMessageResponse(
         message_id=outbound_message.id,
         status=outbound_message.status,
