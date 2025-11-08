@@ -12,7 +12,9 @@ from app.clients import InstagramClient
 from app.clients.instagram_client import InstagramAPIError
 from app.rules.reply_rules import get_reply_text
 from app.services.webhook_forwarder import WebhookForwarder
+from app.api.accounts import decrypt_credential
 from datetime import datetime, timezone
+import asyncio
 import logging
 import httpx
 import hmac
@@ -144,12 +146,22 @@ async def handle_webhook(
                                 logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
 
                                 # Handle auto-reply ONLY for newly saved messages (not duplicates)
-                                # Reuse instagram_client for all messages in this webhook batch
-                                await _handle_auto_reply(message, message_repo, instagram_client)
+                                # Wrapped in try/except to ensure CRM forwarding happens even if auto-reply fails
+                                try:
+                                    # Reuse instagram_client for all messages in this webhook batch
+                                    await _handle_auto_reply(message, message_repo, instagram_client)
+                                except Exception as auto_reply_error:
+                                    # Log error but continue to CRM forwarding
+                                    logger.error(
+                                        f"⚠️ Auto-reply failed for message {message.id}, "
+                                        f"continuing with CRM forwarding: {auto_reply_error}",
+                                        exc_info=True
+                                    )
 
                                 # Forward to CRM webhook (Task 9 - CRITICAL for CRM chat window)
-                                # Reuse http_client for all webhooks in this batch
-                                await _forward_to_crm(message, db, http_client)
+                                # Fire-and-forget to avoid blocking Instagram webhook response
+                                # This prevents race conditions if CRM is slow (up to 10s timeout)
+                                asyncio.create_task(_forward_to_crm(message, db, http_client))
 
                             except ValueError:
                                 # Message already exists - this is ok for webhook retries
@@ -375,22 +387,6 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
         return None
 
 
-def _decode_credential(encoded_credential: str) -> str:
-    """
-    Decode base64-encoded credential.
-
-    Mirrors the encrypt_credential function in accounts.py.
-    MVP uses base64 encoding (NOT secure encryption).
-
-    Args:
-        encoded_credential: Base64-encoded credential string
-
-    Returns:
-        Decoded credential string
-    """
-    return base64.b64decode(encoded_credential.encode()).decode()
-
-
 async def _forward_to_crm(
     message: Message,
     db: AsyncSession,
@@ -420,21 +416,21 @@ async def _forward_to_crm(
         account = result.scalar_one_or_none()
 
         if not account:
-            logger.debug(
+            logger.warning(
                 f"No account configuration found for {message.recipient_id}, "
-                f"skipping CRM webhook forwarding"
+                f"skipping CRM webhook forwarding - message will not reach CRM"
             )
             return
 
         if not account.crm_webhook_url:
-            logger.debug(
+            logger.warning(
                 f"No CRM webhook URL configured for account {account.id}, "
-                f"skipping forwarding"
+                f"skipping forwarding - message will not reach CRM"
             )
             return
 
         # Decode webhook secret (MVP: base64-encoded)
-        webhook_secret = _decode_credential(account.webhook_secret)
+        webhook_secret = decrypt_credential(account.webhook_secret)
 
         # Forward message to CRM webhook
         forwarder = WebhookForwarder(http_client)

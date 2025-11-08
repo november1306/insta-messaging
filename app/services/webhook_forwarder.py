@@ -13,6 +13,7 @@ from datetime import datetime
 
 import httpx
 
+from app.config import settings
 from app.core.interfaces import Message
 from app.db.models import Account
 
@@ -89,7 +90,7 @@ class WebhookForwarder:
                     "X-Hub-Signature-256": signature_header,
                     "User-Agent": "Instagram-Message-Router/1.0"
                 },
-                timeout=10.0  # 10 second timeout for CRM response
+                timeout=settings.crm_webhook_timeout  # Configurable timeout (default: 10s)
             )
 
             # Check response status
@@ -107,15 +108,15 @@ class WebhookForwarder:
                 return False
 
         except httpx.TimeoutException:
-            logger.error(
-                f"❌ CRM webhook timeout - "
+            logger.warning(
+                f"⚠️ CRM webhook timeout - "
                 f"message_id: {message.id}, url: {account.crm_webhook_url}"
             )
             return False
 
         except httpx.RequestError as e:
-            logger.error(
-                f"❌ Failed to send webhook - "
+            logger.warning(
+                f"⚠️ Failed to send webhook - "
                 f"message_id: {message.id}, error: {e}"
             )
             return False
