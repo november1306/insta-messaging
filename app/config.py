@@ -57,10 +57,10 @@ class Settings:
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "8000"))
 
-        # Database configuration
+        # Database configuration (SQLite only - configurable path)
         self.database_url = os.getenv(
             "DATABASE_URL",
-            "sqlite+aiosqlite:///./instagram_automation.db"  # Default: SQLite for development
+            "sqlite+aiosqlite:///./instagram_automation.db"
         )
 
         # CRM webhook configuration

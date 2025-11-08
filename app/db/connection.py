@@ -1,7 +1,8 @@
 """
 Database connection management with SQLAlchemy async support.
 
-Supports SQLite (development) and MySQL/PostgreSQL (production) via DATABASE_URL.
+MVP: SQLite only with configurable path.
+TODO: Add MySQL/PostgreSQL support in Priority 2 when needed.
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -17,29 +18,19 @@ async_session_maker = None
 
 
 async def init_db():
-    """Initialize database connection and create tables."""
+    """Initialize SQLite database connection and create tables."""
     global engine, async_session_maker
 
     database_url = settings.database_url
-    logger.info(f"Initializing database: {database_url.split('://')[0]}")
+    logger.info(f"Initializing database: {database_url}")
 
-    # Create async engine with appropriate settings based on database type
-    if database_url.startswith("sqlite"):
-        # SQLite-specific configuration
-        engine = create_async_engine(
-            database_url,
-            echo=False,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-    else:
-        # MySQL/PostgreSQL configuration
-        engine = create_async_engine(
-            database_url,
-            echo=False,
-            pool_pre_ping=True,  # Verify connections before using
-            pool_recycle=3600,   # Recycle connections after 1 hour
-        )
+    # Create async engine for SQLite
+    engine = create_async_engine(
+        database_url,
+        echo=False,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     
     # Create session factory
     async_session_maker = async_sessionmaker(
