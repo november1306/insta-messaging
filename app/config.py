@@ -5,6 +5,9 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+# Development placeholder for secrets (not secure - for local testing only)
+DEV_SECRET_PLACEHOLDER = "test_secret_dev"
+
 
 class Settings:
     """Application settings - YAGNI: Only what we need right now"""
@@ -17,21 +20,30 @@ class Settings:
         if self.environment == "production":
             self.facebook_verify_token = self._get_required("FACEBOOK_VERIFY_TOKEN")
             self.facebook_app_secret = self._get_required("FACEBOOK_APP_SECRET")
+            self.instagram_app_secret = self._get_required("INSTAGRAM_APP_SECRET")
             self.instagram_page_access_token = self._get_required("INSTAGRAM_PAGE_ACCESS_TOKEN")
             self.instagram_business_account_id = self._get_required("INSTAGRAM_BUSINESS_ACCOUNT_ID")
             
             # Reject test secrets in production
-            if self.facebook_app_secret == "test_secret_dev":
+            if self.facebook_app_secret == DEV_SECRET_PLACEHOLDER:
                 raise ValueError(
-                    "Cannot use test secret 'test_secret_dev' in production mode. "
+                    f"Cannot use test secret '{DEV_SECRET_PLACEHOLDER}' in production mode. "
                     "Set a real FACEBOOK_APP_SECRET from your Facebook app."
                 )
         else:
             # Development mode: Load from .env file (never commit secrets to git)
             self.facebook_verify_token = os.getenv("FACEBOOK_VERIFY_TOKEN", "")
-            self.facebook_app_secret = os.getenv("FACEBOOK_APP_SECRET", "test_secret_dev")
+            self.facebook_app_secret = os.getenv("FACEBOOK_APP_SECRET", DEV_SECRET_PLACEHOLDER)
+            self.instagram_app_secret = os.getenv("INSTAGRAM_APP_SECRET", DEV_SECRET_PLACEHOLDER)
             self.instagram_page_access_token = os.getenv("INSTAGRAM_PAGE_ACCESS_TOKEN", "")
             self.instagram_business_account_id = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
+            
+            # Warn about default test secrets
+            if self.instagram_app_secret == DEV_SECRET_PLACEHOLDER:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "⚠️  Using default INSTAGRAM_APP_SECRET - webhook signature validation will fail with real Instagram webhooks"
+                )
             
             # Check for missing credentials and warn
             self._warn_missing_credentials()
@@ -61,7 +73,8 @@ class Settings:
         # Define required credentials with their descriptions
         required_credentials = {
             "FACEBOOK_VERIFY_TOKEN": "Required for webhook verification. Create a custom token string (e.g., 'my_webhook_token_123').",
-            "FACEBOOK_APP_SECRET": "Required for webhook signature validation. Get from: https://developers.facebook.com/apps/YOUR_APP_ID/settings/basic/",
+            "FACEBOOK_APP_SECRET": "Required for Facebook webhook signature validation. Get from: https://developers.facebook.com/apps/YOUR_APP_ID/settings/basic/",
+            "INSTAGRAM_APP_SECRET": "Required for Instagram webhook signature validation. Get from Instagram app settings.",
             "INSTAGRAM_PAGE_ACCESS_TOKEN": "Required for sending messages. Generate from Facebook App Dashboard → Instagram → User Token Generator.",
             "INSTAGRAM_BUSINESS_ACCOUNT_ID": "Required for send message API. This is your Instagram Business Account ID (recipient_id from inbound messages)."
         }

@@ -1,282 +1,347 @@
 # Instagram Messenger Automation
 
-Automated Instagram DM response system for e-commerce businesses.
+Automated Instagram DM system with CRM integration API for e-commerce businesses.
 
-## Overview
+## What It Does
 
-This system receives customer messages via Instagram Direct Messages through Facebook's webhook callbacks and automatically responds based on predefined rules.
+- **Receives Instagram messages** via webhooks from Instagram/Facebook
+- **Sends messages** to Instagram users via REST API
+- **Stores conversation history** in database
+- **Provides CRM integration** through REST API endpoints
+- **Supports auto-replies** based on configurable rules
 
-## Tech Stack
+## Features
 
-- **Backend**: Python with FastAPI (async support)
-- **Database**: MySQL (multi-account storage)
-- **ORM**: SQLAlchemy with Alembic migrations
-- **Security**: Cryptography for credential encryption
-- **Deployment**: Railway or custom Linux server
-- **Local Development**: Windows with ngrok for webhook tunneling
+### ✅ Available Now
 
-## Quick Start
+- **Webhook Integration** - Receive Instagram DMs in real-time
+- **Message Sending API** - Send messages to Instagram users programmatically
+- **Message Status Tracking** - Check delivery status of sent messages
+- **Account Management** - Configure multiple Instagram business accounts
+- **Conversation Storage** - Full message history in database
+- **Auto-Reply Rules** - Automatic responses based on message content
+- **Idempotency Protection** - Prevent duplicate message sends
+- **Health Monitoring** - Health check endpoint for uptime monitoring
+
+### 🔜 Coming Next
+
+- Async message queue with retries
+- Webhook delivery to external CRM systems
+- Advanced delivery tracking (delivered, read timestamps)
+- Bulk messaging capabilities
+
+---
+
+## Installation
 
 ### Prerequisites
 
-- **Miniconda or Anaconda** (recommended) or Python 3.12+
-- **Facebook App** with Instagram permissions configured
-- **ngrok** for local webhook testing
+- Python 3.12+ or Miniconda/Anaconda
+- Instagram Business Account
+- Facebook App with Instagram permissions
+- ngrok (for local webhook testing)
 
-### Automated Setup (Windows)
+### Quick Setup
 
-```bash
-# Run the setup script
-setup.bat
-```
-
-This will:
-1. Create conda environment with all dependencies
-2. Copy .env.example to .env
-3. Run database migrations
-
-### Manual Setup
-
-1. **Create conda environment:**
+1. **Clone and install dependencies:**
    ```bash
-   # Create environment from environment.yml
+   # Using conda (recommended)
    conda env create -f environment.yml
-   
-   # Activate environment
    conda activate insta-auto
+
+   # Or using pip
+   pip install -r requirements.txt
    ```
 
-2. **Configure environment variables:**
+2. **Configure environment:**
    ```bash
-   # Copy the example file
-   copy .env.example .env  # Windows
-   
-   # Edit .env with your credentials
+   # Copy example config
+   cp .env.example .env
+
+   # Edit .env with your credentials (see Configuration section)
    ```
 
 3. **Initialize database:**
    ```bash
-   # Run migrations to create SQLite database
    alembic upgrade head
    ```
 
-4. **Start the server:**
+4. **Start server:**
    ```bash
-   # Start FastAPI server (runs on http://localhost:8000)
    uvicorn app.main:app --reload
    ```
 
-For detailed setup instructions, see [SETUP.md](SETUP.md)
+Server runs at `http://localhost:8000`
 
-4. **Set up ngrok tunnel (in separate terminal):**
-   ```bash
-   # Create public HTTPS tunnel to your local server
-   ngrok http 8000
-   
-   # Copy the HTTPS URL (e.g., https://abc123.ngrok-free.dev)
-   ```
+---
 
-5. **Configure Facebook webhook:**
-   - Go to https://developers.facebook.com/apps/YOUR_APP_ID/webhooks
-   - **Webhook URL**: `https://your-ngrok-url.ngrok-free.dev/webhooks/instagram`
-   - **Verify Token**: Same value as `FACEBOOK_VERIFY_TOKEN` in your `.env`
-   - **Subscribe to**: `messages` events
+## Configuration
 
-6. **Test the webhook:**
-   - Use Facebook's "Send to My Server" button to test
-   - Check server logs for incoming messages
-   - Server responds at: http://localhost:8000
-
-## Token Setup (Critical)
-
-This system requires 3 specific tokens from Facebook/Instagram. **Getting the right tokens is crucial** - wrong tokens will cause authentication failures.
-
-### 1. FACEBOOK_VERIFY_TOKEN
-**What it is**: A custom string you create for webhook verification
-**Where to get**: You make this up yourself
-**Example**: `"my_webhook_token_123"`
-**Usage**: Facebook sends this back to verify your webhook endpoint
+Create a `.env` file with the following:
 
 ```env
-FACEBOOK_VERIFY_TOKEN="my_webhook_token_123"
-```
+# Instagram/Facebook Credentials
+FACEBOOK_VERIFY_TOKEN=your_custom_verify_token
+FACEBOOK_APP_SECRET=your_facebook_app_secret
+INSTAGRAM_APP_SECRET=your_instagram_app_secret
+INSTAGRAM_PAGE_ACCESS_TOKEN=your_instagram_access_token
+INSTAGRAM_BUSINESS_ACCOUNT_ID=your_business_account_id
 
-### 2. FACEBOOK_APP_SECRET  
-**What it is**: Your Facebook app's secret key for webhook signature validation
-**Where to get**: 
-1. Go to https://developers.facebook.com/apps/YOUR_APP_ID/settings/basic/
-2. Find "App Secret" section
-3. Click "Show" and copy the value
-**Format**: 32-character hex string
-**Example**: `"6fc9d415657d17e47cda9c61d44a511b"`
-
-```env
-FACEBOOK_APP_SECRET="your_32_character_app_secret"
-```
-
-### 3. INSTAGRAM_PAGE_ACCESS_TOKEN ⚠️ **Most Important**
-**What it is**: Token for sending Instagram messages via Instagram Graph API
-**Critical**: Must be an **Instagram Access Token** (starts with `IGAA`), NOT a Facebook Page token
-
-#### How to get the correct token:
-1. **Go to**: https://developers.facebook.com/apps/YOUR_APP_ID/instagram-basic-display/
-2. **Find**: "User Token Generator" section  
-3. **Select**: Your Instagram business account (@ser_bain)
-4. **Generate Token**: Click "Generate Token"
-5. **Copy**: The token (starts with `IGAA`, ~180 characters)
-
-#### ❌ **Wrong Token Types** (Don't use these):
-- Facebook Page Access Tokens (start with `EAAG`) - Won't work for Instagram
-- User Access Tokens for personal Facebook accounts - Wrong scope
-- Instagram Basic Display tokens without messaging permissions
-
-#### ✅ **Correct Token Format**:
-```env
-INSTAGRAM_PAGE_ACCESS_TOKEN="IGAALkT2BsMhxBZAFR0eUhBVXlRYVBjTVllb3ZAWQUtTQTYwcDNET1VxWXZAKaTRXYUVuNy1KeW9mTm5RYXdVOVhwTjl2NTZAJUXhSa2lobm8zMTJfZAlF2bDdPZAUg5UU9zVXE0bmFUTDUzQVoyYzdzMllIY2d1T2VycDB1Nlp3dnNzcwZDZD"
-```
-
-### Complete .env File Example (New Architecture):
-
-```env
-# Database Configuration
-MYSQL_HOST=localhost
-MYSQL_PORT=3306
-MYSQL_DATABASE=instagram_automation
-MYSQL_USERNAME=app_user
-MYSQL_PASSWORD=secure_password
-
-# Application Security
-APP_SECRET_KEY=your-secret-key-for-encryption-change-this-in-production
-
-# Server Configuration
+# Server
 HOST=0.0.0.0
 PORT=8000
 ENVIRONMENT=development
-
-# Note: Instagram account credentials are now stored in the database
-# Use the account management API to add Instagram business accounts
+LOG_LEVEL=INFO
 ```
 
-### Old .env File Example (MVP - Being Phased Out):
+### Where to Get Credentials
 
-```env
-# Facebook/Instagram Configuration (OLD - will be moved to database)
-FACEBOOK_VERIFY_TOKEN="my_webhook_token_123"
-FACEBOOK_APP_SECRET="6fc9d415657d17e47cda9c61d44a511b"
-INSTAGRAM_PAGE_ACCESS_TOKEN="IGAALkT2BsMhxBZAFR0eUhBVXlRYVBjTVllb3ZAWQUtTQTYwcDNET1VxWXZAKaTRXYUVuNy1KeW9mTm5RYXdVOVhwTjl2NTZAJUXhSa2lobm8zMTJfZAlF2bDdPZAUg5UU9zVXE0bmFUTDUzQVoyYzdzMllIY2d1T2VycDB1Nlp3dnNzcwZDZD"
+**FACEBOOK_VERIFY_TOKEN**
+- Create your own custom string (e.g., `my_webhook_token_123`)
+- Used for webhook verification
 
-# Server Configuration
-HOST=0.0.0.0
-PORT=8000
-ENVIRONMENT=development
-```
+**FACEBOOK_APP_SECRET**
+- Facebook Developer Console → Your App → Settings → Basic → App Secret
 
-### Token Troubleshooting:
+**INSTAGRAM_APP_SECRET**
+- Instagram app settings (different from Facebook app secret)
+- Used for webhook signature validation
 
-#### Problem: "Invalid OAuth access token - Cannot parse access token"
-**Solution**: You're using a Facebook token instead of Instagram token
-- ❌ Wrong: `EAAG...` (Facebook Page token)  
-- ✅ Correct: `IGAA...` (Instagram token)
+**INSTAGRAM_PAGE_ACCESS_TOKEN**
+- Facebook Developer Console → Your App → Instagram → User Token Generator
+- Must start with `IGAA` (Instagram token, not Facebook token)
 
-#### Problem: "Object with ID 'me' does not exist"
-**Solution**: Use Instagram Graph API, not Facebook Graph API
-- ❌ Wrong: `https://graph.facebook.com/v18.0/me/messages`
-- ✅ Correct: `https://graph.instagram.com/v21.0/me/messages`
+**INSTAGRAM_BUSINESS_ACCOUNT_ID**
+- Your Instagram Business Account ID
+- Found in webhook payloads or Instagram API responses
 
-#### Problem: Messages not sending
-**Solution**: Ensure your Instagram account is in Live mode
-1. Go to your Facebook App dashboard
-2. Switch from "Development" to "Live" mode
-3. Ensure privacy policy URL is set
+---
 
-### Testing Endpoints
+## Running Locally
 
-- **Root**: http://localhost:8000/ - Server status
-- **Webhook**: http://localhost:8000/webhooks/instagram - Instagram webhook endpoint
-- **ngrok Web UI**: http://127.0.0.1:4040 - Monitor tunnel traffic
-
-### Message Testing
-
-Use the test script to send messages programmatically:
+### For API Testing (localhost)
 
 ```bash
-# Send a message to @ser_bain
-py test_send_message.py "@ser_bain" "Hello from automation!"
+# Start server
+uvicorn app.main:app --reload
 
-# Send a message to @tol1306  
-py test_send_message.py "@tol1306" "Thanks for your message!"
+# Server available at http://localhost:8000
+# API docs at http://localhost:8000/docs
 ```
 
-**Available users:**
-- `@ser_bain`: Business account (ID: 1180376147344794)
-- `@tol1306`: Test user account (ID: 1558635688632972)
+### For Webhook Testing (ngrok)
 
-### Quick Resume Tomorrow
+```bash
+# Terminal 1: Start server
+uvicorn app.main:app --reload
 
-1. **Start servers:**
+# Terminal 2: Start ngrok
+ngrok http 8000
+
+# Copy ngrok URL (e.g., https://abc123.ngrok-free.dev)
+# Configure in Facebook Developer Console:
+# Webhook URL: https://your-ngrok-url.ngrok-free.dev/webhooks/instagram
+# Verify Token: (your FACEBOOK_VERIFY_TOKEN)
+```
+
+**When to use what:**
+- **localhost:8000** - Testing API endpoints (faster, direct)
+- **ngrok URL** - Testing Instagram webhooks (publicly accessible)
+
+---
+
+## Deployment
+
+### Railway (Recommended)
+
+1. **Connect repository** to Railway
+2. **Set environment variables** in Railway dashboard
+3. **Deploy** - Railway auto-detects Python and runs the app
+4. **Configure webhook** in Facebook with your Railway URL
+
+### Custom Server
+
+1. **Install dependencies** on server
+2. **Set environment variables**
+3. **Run with production server:**
    ```bash
-   # Terminal 1: Start FastAPI server
-   py -m uvicorn app.main:app --reload
-   
-   # Terminal 2: Start ngrok tunnel
-   ngrok http 8000
+   uvicorn app.main:app --host 0.0.0.0 --port 8000
    ```
+4. **Configure webhook** with your server's public URL
+5. **Use process manager** (systemd, supervisor) for auto-restart
 
-2. **Test webhook:** Send message from @tol1306 to @ser_bain on Instagram
+---
 
-3. **Test sending:** `py test_send_message.py "@ser_bain" "Test message"`
+## API Usage
 
-## Current Status
+### Authentication
 
-**Phase 1 Complete**: Minimal Viable Solution - Basic webhook and messaging working ✅  
-**Phase 2 In Progress**: Architecture Refactoring for Production Scale 🔄
+All API endpoints require Bearer token authentication:
 
-### ✅ **What's Working (MVP):**
-- **Basic webhook server** receiving Instagram messages
-- **Message sending** via Instagram Graph API  
-- **Single account** (@ser_bain) messaging capability
-- **Test script** for manual message sending
-
-### 🔄 **Current Refactoring (Phase 2):**
-- **Multi-account architecture** - Support multiple Instagram business accounts
-- **Proper interfaces** - Abstract messaging operations with clean interfaces (IMessageReceiver, IMessageSender)
-- **MySQL integration** - Replace hardcoded data with database storage
-- **Configuration management** - Move hardcoded values to database/config
-- **Account-specific routing** - Route messages to correct Instagram accounts
-
-### 🎯 **Target Architecture:**
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Webhook API   │────│  Message Router  │────│ Instagram APIs  │
-│  (per account)  │    │  (IMessageRcvr)  │    │ (IMessageSndr)  │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-         │                       │                       │
-         │              ┌─────────────────┐              │
-         └──────────────│ Account Manager │──────────────┘
-                        │  (Repository)   │
-                        └─────────────────┘
-                                 │
-                        ┌─────────────────┐
-                        │ MySQL Database  │
-                        │ - Accounts      │
-                        │ - Messages      │
-                        │ - Conversations │
-                        │ - Rules         │
-                        └─────────────────┘
+```bash
+Authorization: Bearer your_api_key_here
 ```
 
-### 📚 **Architecture Documentation:**
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Comprehensive architecture overview
-- [Design Document](.kiro/specs/instagram-messenger-automation/design.md) - Detailed component design
-- [Implementation Tasks](.kiro/specs/instagram-messenger-automation/tasks.md) - Step-by-step implementation plan
+**Development mode:** Any Bearer token is accepted (stub authentication)  
+**Production mode:** Real API key validation required
 
-See [tasks.md](.kiro/specs/instagram-messenger-automation/tasks.md) for detailed implementation progress.
+### API Documentation
+
+Interactive API docs available at:
+- **Swagger UI:** `http://localhost:8000/docs`
+- **ReDoc:** `http://localhost:8000/redoc`
+- **OpenAPI Spec:** `http://localhost:8000/openapi.json`
+
+### Quick Examples
+
+**Send a message:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/messages/send" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer test_api_key" \
+  -d '{
+    "account_id": "17841405728832526",
+    "recipient_id": "1558635688632972",
+    "message": "Hello from our system!",
+    "idempotency_key": "order_123_confirmation"
+  }'
+```
+
+**Check message status:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/messages/msg_abc123/status" \
+  -H "Authorization: Bearer test_api_key"
+```
+
+**Health check:**
+```bash
+curl -X GET "http://localhost:8000/health"
+```
+
+**Create account configuration:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/accounts" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer test_api_key" \
+  -d '{
+    "instagram_account_id": "17841405728832526",
+    "username": "myshop",
+    "access_token": "IGAA...",
+    "crm_webhook_url": "https://crm.myshop.com/webhooks",
+    "webhook_secret": "shared_secret"
+  }'
+```
+
+---
+
+## API Endpoints
+
+### Messages
+
+| Endpoint | Method | Description | Status |
+|----------|--------|-------------|--------|
+| `/api/v1/messages/send` | POST | Send message to Instagram user | ✅ Implemented |
+| `/api/v1/messages/{id}/status` | GET | Get message delivery status | ✅ Implemented |
+
+### Accounts
+
+| Endpoint | Method | Description | Status |
+|----------|--------|-------------|--------|
+| `/api/v1/accounts` | POST | Create account configuration | ✅ Implemented |
+| `/api/v1/accounts/{id}` | GET | Get account details | 🚧 Documented |
+| `/api/v1/accounts/{id}` | PUT | Update account configuration | 🚧 Documented |
+
+### System
+
+| Endpoint | Method | Description | Status |
+|----------|--------|-------------|--------|
+| `/health` | GET | Health check | ✅ Implemented |
+| `/webhooks/instagram` | POST | Instagram webhook receiver | ✅ Implemented |
+
+---
+
+## Testing
+
+### Manual Testing
+
+```bash
+# Test sending a message
+python test_send_message.py "@username" "Test message"
+
+# Test CRM endpoints
+python test_crm_endpoints.py http://localhost:8000
+
+# Check database contents
+python check_database.py
+```
+
+### Automated Tests
+
+```bash
+# Run test suite
+pytest
+
+# Run with coverage
+pytest --cov=app
+
+# Run specific test file
+pytest tests/test_webhooks.py
+```
+
+---
+
+## Troubleshooting
+
+### Webhooks Not Arriving
+
+1. Check ngrok is running and URL hasn't changed
+2. Verify webhook URL in Facebook Developer Console
+3. Check `INSTAGRAM_APP_SECRET` matches Instagram app settings
+4. Look for "Invalid signature" errors in logs
+
+### Messages Not Sending
+
+1. Verify `INSTAGRAM_PAGE_ACCESS_TOKEN` starts with `IGAA`
+2. Check token hasn't expired
+3. Ensure recipient has messaged you within 24 hours (Instagram policy)
+4. Check logs for Instagram API errors
+
+### "Invalid OAuth access token"
+
+- Using Facebook token instead of Instagram token
+- Token format should start with `IGAA`, not `EAAG`
+
+---
+
+## Tech Stack
+
+- **Backend:** Python 3.12+ with FastAPI (async)
+- **Database:** SQLite (development), MySQL (production target)
+- **ORM:** SQLAlchemy 2.0 with async support
+- **Migrations:** Alembic
+- **Security:** Cryptography for credential encryption
+- **Testing:** pytest with async support
+
+---
 
 ## Documentation
 
-- [Requirements](.kiro/specs/instagram-messenger-automation/requirements.md)
-- [Design](.kiro/specs/instagram-messenger-automation/design.md)
-- [Tasks](.kiro/specs/instagram-messenger-automation/tasks.md)
+- **[SETUP.md](SETUP.md)** - Detailed setup instructions
+- **[LOCAL_TESTING_GUIDE.md](LOCAL_TESTING_GUIDE.md)** - localhost vs ngrok guide
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture overview
+- **[API Docs](http://localhost:8000/docs)** - Interactive API documentation
+
+---
+
+## Support
+
+For issues or questions:
+1. Check the troubleshooting section above
+2. Review API documentation at `/docs`
+3. Check server logs for error messages
+4. Verify all environment variables are set correctly
+
+---
 
 ## License
 

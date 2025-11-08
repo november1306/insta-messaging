@@ -271,8 +271,20 @@ def _validate_webhook_signature(payload: bytes, signature_header: str) -> bool:
         else:
             expected_signature = signature_header[7:]  # len("sha256=") = 7
         
+        # Validate Instagram app secret is configured
+        if not settings.instagram_app_secret:
+            logger.error("INSTAGRAM_APP_SECRET not configured - cannot validate webhook signature")
+            return False
+        
+        # In development mode with test secret, log warning but allow validation to proceed
+        # This enables local testing with ngrok before getting real Instagram credentials
+        from app.config import DEV_SECRET_PLACEHOLDER
+        if settings.instagram_app_secret == DEV_SECRET_PLACEHOLDER:
+            logger.warning("Using test secret for webhook validation - this will fail with real Instagram webhooks")
+        
         # Always compute HMAC-SHA256 signature to prevent timing attacks
-        app_secret = settings.facebook_app_secret.encode('utf-8')
+        # Use Instagram app secret for Instagram webhooks
+        app_secret = settings.instagram_app_secret.encode('utf-8')
         computed_signature = hmac.new(
             app_secret,
             payload,
