@@ -517,7 +517,12 @@ components:
       description: |
         Webhook sent when a customer sends a message to your Instagram account.
         
-        **Signature:** Validate using X-Hub-Signature-256 header
+        **Security:** Validate the `X-Hub-Signature-256` header using HMAC-SHA256:
+        ```python
+        import hmac, hashlib
+        signature = hmac.new(webhook_secret.encode(), body, hashlib.sha256).hexdigest()
+        is_valid = hmac.compare_digest(f"sha256={signature}", header_value)
+        ```
       properties:
         event:
           type: string

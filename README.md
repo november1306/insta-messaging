@@ -15,6 +15,7 @@ Automated Instagram DM system with CRM integration API for e-commerce businesses
 ### ✅ Available Now
 
 - **Webhook Integration** - Receive Instagram DMs in real-time
+- **CRM Webhook Forwarding** - Forward Instagram messages to your CRM system
 - **Message Sending API** - Send messages to Instagram users programmatically
 - **Message Status Tracking** - Check delivery status of sent messages
 - **Account Management** - Configure multiple Instagram business accounts
@@ -26,8 +27,8 @@ Automated Instagram DM system with CRM integration API for e-commerce businesses
 ### 🔜 Coming Next
 
 - Async message queue with retries
-- Webhook delivery to external CRM systems
-- Advanced delivery tracking (delivered, read timestamps)
+- Webhook retry logic and dead letter queue
+- Delivery status webhooks (delivered, read timestamps)
 - Bulk messaging capabilities
 
 ---
@@ -218,7 +219,7 @@ curl -X GET "http://localhost:8000/api/v1/messages/msg_abc123/status" \
 curl -X GET "http://localhost:8000/health"
 ```
 
-**Create account configuration:**
+**Create account configuration (enables CRM webhook forwarding):**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/accounts" \
   -H "Content-Type: application/json" \
@@ -227,9 +228,20 @@ curl -X POST "http://localhost:8000/api/v1/accounts" \
     "instagram_account_id": "17841405728832526",
     "username": "myshop",
     "access_token": "IGAA...",
-    "crm_webhook_url": "https://crm.myshop.com/webhooks",
-    "webhook_secret": "shared_secret"
+    "crm_webhook_url": "https://crm.myshop.com/webhooks/instagram",
+    "webhook_secret": "shared_secret_xyz"
   }'
+```
+
+**Response:**
+```json
+{
+  "account_id": "acc_abc123def456",
+  "instagram_account_id": "17841405728832526",
+  "username": "myshop",
+  "crm_webhook_url": "https://crm.myshop.com/webhooks/instagram",
+  "created_at": "2025-11-08T10:30:00Z"
+}
 ```
 
 ---
@@ -257,6 +269,38 @@ curl -X POST "http://localhost:8000/api/v1/accounts" \
 |----------|--------|-------------|--------|
 | `/health` | GET | Health check | ✅ Implemented |
 | `/webhooks/instagram` | POST | Instagram webhook receiver | ✅ Implemented |
+
+---
+
+## CRM Webhook Integration
+
+The router forwards Instagram messages to your CRM via webhooks. Configure your CRM webhook URL when creating an account:
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/accounts" \
+  -H "Authorization: Bearer test_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "instagram_account_id": "17841405728832526",
+    "username": "myshop",
+    "access_token": "IGAA...",
+    "crm_webhook_url": "https://your-crm.com/webhooks/instagram",
+    "webhook_secret": "shared_secret_123"
+  }'
+```
+
+**Your CRM receives:**
+```json
+{
+  "event": "message.received",
+  "message_id": "mid.abc123",
+  "sender_id": "1234567890",
+  "message": "Customer message text",
+  "timestamp": "2025-11-08T10:30:00+00:00"
+}
+```
+
+**Security:** Validate the `X-Hub-Signature-256` header using HMAC-SHA256 with your webhook secret. See `/docs` for full webhook schema and signature validation examples.
 
 ---
 

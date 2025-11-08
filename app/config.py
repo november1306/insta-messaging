@@ -56,7 +56,16 @@ class Settings:
         # Server configuration
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "8000"))
-        
+
+        # Database configuration (SQLite only - configurable path)
+        self.database_url = os.getenv(
+            "DATABASE_URL",
+            "sqlite+aiosqlite:///./instagram_automation.db"
+        )
+
+        # CRM webhook configuration
+        self.crm_webhook_timeout = float(os.getenv("CRM_WEBHOOK_TIMEOUT", "10.0"))  # seconds
+
         # Logging
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
     

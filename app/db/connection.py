@@ -1,11 +1,13 @@
 """
 Database connection management with SQLAlchemy async support.
 
-YAGNI: SQLite only for now. Add MySQL when deploying to production.
+MVP: SQLite only with configurable path.
+TODO: Add MySQL/PostgreSQL support in Priority 2 when needed.
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
 from app.db.models import Base
+from app.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -14,19 +16,17 @@ logger = logging.getLogger(__name__)
 engine = None
 async_session_maker = None
 
-# SQLite database file
-DATABASE_URL = "sqlite+aiosqlite:///./instagram_automation.db"
-
 
 async def init_db():
     """Initialize SQLite database connection and create tables."""
     global engine, async_session_maker
-    
-    logger.info(f"Initializing database: SQLite")
-    
+
+    database_url = settings.database_url
+    logger.info(f"Initializing database: {database_url}")
+
     # Create async engine for SQLite
     engine = create_async_engine(
-        DATABASE_URL,
+        database_url,
         echo=False,
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,

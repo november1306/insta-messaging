@@ -2,14 +2,19 @@
 from fastapi import APIRouter, Request, Query, HTTPException, status, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.config import settings
 from app.db.connection import get_db_session
+from app.db.models import Account
 from app.repositories.message_repository import MessageRepository
 from app.core.interfaces import Message
 from app.clients import InstagramClient
 from app.clients.instagram_client import InstagramAPIError
 from app.rules.reply_rules import get_reply_text
+from app.services.webhook_forwarder import WebhookForwarder
+from app.api.accounts import decrypt_credential
 from datetime import datetime, timezone
+import asyncio
 import logging
 import httpx
 import hmac
@@ -138,11 +143,25 @@ async def handle_webhook(
                                 await message_repo.save(message)
                                 messages_processed += 1
                                 logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
-                                
+
                                 # Handle auto-reply ONLY for newly saved messages (not duplicates)
-                                # Reuse instagram_client for all messages in this webhook batch
-                                await _handle_auto_reply(message, message_repo, instagram_client)
-                                
+                                # Wrapped in try/except to ensure CRM forwarding happens even if auto-reply fails
+                                try:
+                                    # Reuse instagram_client for all messages in this webhook batch
+                                    await _handle_auto_reply(message, message_repo, instagram_client)
+                                except Exception as auto_reply_error:
+                                    # Log error but continue to CRM forwarding
+                                    logger.error(
+                                        f"⚠️ Auto-reply failed for message {message.id}, "
+                                        f"continuing with CRM forwarding: {auto_reply_error}",
+                                        exc_info=True
+                                    )
+
+                                # Forward to CRM webhook (Task 9 - CRITICAL for CRM chat window)
+                                # Fire-and-forget to avoid blocking Instagram webhook response
+                                # _forward_to_crm creates its own DB session and HTTP client to avoid race conditions
+                                asyncio.create_task(_forward_to_crm(message))
+
                             except ValueError:
                                 # Message already exists - this is ok for webhook retries
                                 # Rollback the failed transaction to clean up session state
@@ -365,6 +384,89 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
     except Exception as e:
         logger.error(f"Error extracting message data: {e}", exc_info=True)
         return None
+
+
+async def _forward_to_crm(message: Message) -> None:
+    """
+    Forward inbound message to CRM webhook (Task 9).
+
+    Looks up account configuration and forwards message to CRM webhook
+    if configured. This enables the CRM chat window to receive customer messages.
+
+    Creates its own database session and HTTP client to avoid race conditions
+    when used as a fire-and-forget background task.
+
+    Args:
+        message: The inbound message to forward
+
+    Note:
+        - Errors are logged but don't fail the webhook handler
+        - No retries in MVP (Priority 3, Task 17)
+        - Instagram webhook always returns 200 regardless of CRM delivery
+        - Safe to use with asyncio.create_task() - manages its own resources
+    """
+    # Import here to avoid circular dependency
+    from app.db.connection import async_session_maker
+
+    try:
+        # Create our own database session (request-scoped session is not available in background task)
+        async with async_session_maker() as db:
+            # Look up account by Instagram account ID (recipient is our business account)
+            result = await db.execute(
+                select(Account).where(Account.instagram_account_id == message.recipient_id)
+            )
+            account = result.scalar_one_or_none()
+
+            if not account:
+                logger.warning(
+                    f"No account configuration found for {message.recipient_id}, "
+                    f"skipping CRM webhook forwarding - message will not reach CRM"
+                )
+                return
+
+            if not account.crm_webhook_url:
+                logger.warning(
+                    f"No CRM webhook URL configured for account {account.id}, "
+                    f"skipping forwarding - message will not reach CRM"
+                )
+                return
+
+            # Decode webhook secret (MVP: base64-encoded)
+            try:
+                webhook_secret = decrypt_credential(account.webhook_secret)
+            except Exception as decode_error:
+                logger.error(
+                    f"❌ Failed to decode webhook secret for account {account.id}: {decode_error}. "
+                    f"Webhook secret may be corrupted in database.",
+                    exc_info=True
+                )
+                return
+
+            # Create our own HTTP client (request-scoped client is not available in background task)
+            async with httpx.AsyncClient() as http_client:
+                # Forward message to CRM webhook
+                forwarder = WebhookForwarder(http_client)
+                success = await forwarder.forward_message(message, account, webhook_secret)
+
+                if success:
+                    logger.info(
+                        f"✅ Message forwarded to CRM - "
+                        f"message_id: {message.id}, account: {account.id}"
+                    )
+                else:
+                    logger.warning(
+                        f"⚠️ Failed to forward message to CRM - "
+                        f"message_id: {message.id}, account: {account.id}"
+                    )
+
+    except Exception as e:
+        # Log error but don't fail webhook processing
+        # Instagram webhook should always return 200
+        logger.error(
+            f"❌ Error forwarding message to CRM - "
+            f"message_id: {message.id}, error: {e}",
+            exc_info=True
+        )
 
 
 # ============================================================================

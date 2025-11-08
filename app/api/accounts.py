@@ -57,11 +57,30 @@ class AccountResponse(BaseModel):
 def encrypt_credential(credential: str) -> str:
     """
     Simple encoding for MVP - just base64 for now.
-    
+
     WARNING: This is NOT secure encryption. Do not use in production.
     TODO: Replace with real encryption (Fernet) in Priority 2.
     """
     return base64.b64encode(credential.encode()).decode()
+
+
+def decrypt_credential(encoded_credential: str) -> str:
+    """
+    Decode base64-encoded credential.
+
+    Mirrors the encrypt_credential function above.
+    MVP uses base64 encoding (NOT secure encryption).
+
+    Args:
+        encoded_credential: Base64-encoded credential string
+
+    Returns:
+        Decoded credential string
+
+    WARNING: This is NOT secure decryption. Do not use in production.
+    TODO: Replace with real decryption (Fernet) in Priority 2.
+    """
+    return base64.b64decode(encoded_credential.encode()).decode()
 
 
 # ============================================
@@ -119,8 +138,8 @@ async def create_account(
     )
     
     db.add(account)
-    await db.flush()  # Flush to catch DB errors before auto-commit
-    
+    await db.commit()  # Explicitly commit to ensure account is persisted
+
     logger.info(f"✅ Account created: {account_id} (@{request.username})")
     
     return AccountResponse(
