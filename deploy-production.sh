@@ -1,0 +1,299 @@
+#!/bin/bash
+# Production Deployment Script for Instagram Messenger Automation
+# Target: DigitalOcean Droplet (Ubuntu/Debian)
+# Usage: sudo bash deploy-production.sh
+
+set -e  # Exit on error
+
+echo "=============================================="
+echo "Instagram Messenger - Production Deployment"
+echo "=============================================="
+echo ""
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+# Configuration
+APP_NAME="insta-messaging"
+INSTALL_DIR="/opt/${APP_NAME}"
+APP_USER="${APP_NAME}"
+SERVICE_NAME="${APP_NAME}"
+REPO_URL="https://github.com/november1306/insta-messaging.git"
+BRANCH="main"
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+   echo -e "${RED}ERROR: This script must be run as root${NC}"
+   echo "Usage: sudo bash deploy-production.sh"
+   exit 1
+fi
+
+echo -e "${GREEN}[1/12] Checking system...${NC}"
+echo "OS: $(lsb_release -d 2>/dev/null | cut -f2 || cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)"
+echo "Architecture: $(uname -m)"
+echo ""
+
+echo -e "${GREEN}[2/12] Updating system packages...${NC}"
+apt-get update -qq
+DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq
+
+echo -e "${GREEN}[3/12] Installing system dependencies...${NC}"
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    software-properties-common \
+    git \
+    nginx \
+    curl \
+    ufw \
+    sqlite3 \
+    build-essential \
+    libssl-dev \
+    libffi-dev \
+    python3-dev
+
+# Install Python 3.12
+echo -e "${GREEN}[4/12] Installing Python 3.12...${NC}"
+if ! command -v python3.12 &> /dev/null; then
+    echo "Adding deadsnakes PPA for Python 3.12..."
+    add-apt-repository -y ppa:deadsnakes/ppa > /dev/null 2>&1
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12 python3.12-venv python3.12-dev python3-pip
+    echo "Python 3.12 installed successfully"
+else
+    echo "Python 3.12 already installed: $(python3.12 --version)"
+fi
+
+echo -e "${GREEN}[5/12] Creating application user...${NC}"
+if ! id -u ${APP_USER} > /dev/null 2>&1; then
+    useradd -r -s /bin/bash -d ${INSTALL_DIR} -m ${APP_USER}
+    echo "Created user: ${APP_USER}"
+else
+    echo "User ${APP_USER} already exists"
+fi
+
+echo -e "${GREEN}[6/12] Setting up application directory...${NC}"
+if [ -d "${INSTALL_DIR}/.git" ]; then
+    echo "Repository exists, updating..."
+    cd ${INSTALL_DIR}
+    sudo -u ${APP_USER} git fetch origin
+    sudo -u ${APP_USER} git checkout ${BRANCH}
+    sudo -u ${APP_USER} git pull origin ${BRANCH}
+else
+    echo "Cloning repository..."
+    if [ -d "${INSTALL_DIR}" ]; then
+        rm -rf ${INSTALL_DIR}
+    fi
+    sudo -u ${APP_USER} git clone -b ${BRANCH} ${REPO_URL} ${INSTALL_DIR}
+    cd ${INSTALL_DIR}
+fi
+
+echo -e "${GREEN}[7/12] Running application deployment script...${NC}"
+chmod +x ${INSTALL_DIR}/deploy.sh
+sudo -u ${APP_USER} bash ${INSTALL_DIR}/deploy.sh
+
+echo -e "${GREEN}[8/12] Configuring environment...${NC}"
+if [ ! -f "${INSTALL_DIR}/.env" ]; then
+    echo -e "${YELLOW}No .env file found. Creating from template...${NC}"
+    sudo -u ${APP_USER} cp ${INSTALL_DIR}/.env.example ${INSTALL_DIR}/.env
+    chmod 600 ${INSTALL_DIR}/.env
+    chown ${APP_USER}:${APP_USER} ${INSTALL_DIR}/.env
+
+    echo ""
+    echo -e "${YELLOW}========================================${NC}"
+    echo -e "${YELLOW}⚠️  IMPORTANT: Configure .env file${NC}"
+    echo -e "${YELLOW}========================================${NC}"
+    echo "Edit ${INSTALL_DIR}/.env and add your Instagram API credentials"
+    echo ""
+    echo "Required variables:"
+    echo "  - FACEBOOK_VERIFY_TOKEN"
+    echo "  - FACEBOOK_APP_SECRET"
+    echo "  - INSTAGRAM_APP_SECRET"
+    echo "  - INSTAGRAM_PAGE_ACCESS_TOKEN"
+    echo "  - INSTAGRAM_BUSINESS_ACCOUNT_ID"
+    echo "  - ENVIRONMENT=production"
+    echo ""
+    read -p "Press ENTER to edit .env now (or Ctrl+C to cancel): "
+    nano ${INSTALL_DIR}/.env
+else
+    echo ".env file exists, skipping configuration"
+    # Ensure production environment
+    if ! grep -q "ENVIRONMENT=production" ${INSTALL_DIR}/.env; then
+        echo "Setting ENVIRONMENT=production in .env"
+        echo "ENVIRONMENT=production" >> ${INSTALL_DIR}/.env
+    fi
+fi
+
+echo -e "${GREEN}[9/12] Creating systemd service...${NC}"
+cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
+[Unit]
+Description=Instagram Messenger Automation API
+Documentation=https://github.com/november1306/insta-messaging
+After=network.target
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${INSTALL_DIR}
+Environment="PATH=${INSTALL_DIR}/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=${INSTALL_DIR}/.env
+
+# Start command
+ExecStart=${INSTALL_DIR}/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitInterval=5min
+StartLimitBurst=5
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=${INSTALL_DIR}
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=${SERVICE_NAME}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable ${SERVICE_NAME}
+echo "Systemd service created: ${SERVICE_NAME}.service"
+
+echo -e "${GREEN}[10/12] Configuring Nginx reverse proxy...${NC}"
+
+# Remove default site
+rm -f /etc/nginx/sites-enabled/default
+
+# Create nginx config
+cat > /etc/nginx/sites-available/${APP_NAME} <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name _;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # Client body size
+    client_max_body_size 10M;
+
+    # Logging
+    access_log /var/log/nginx/insta-messaging-access.log;
+    error_log /var/log/nginx/insta-messaging-error.log;
+
+    # Proxy to application
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+
+        # Proxy headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket support (for future use)
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # Health check endpoint
+    location /health {
+        proxy_pass http://127.0.0.1:8000/health;
+        access_log off;
+    }
+}
+EOF
+
+# Enable site
+ln -sf /etc/nginx/sites-available/${APP_NAME} /etc/nginx/sites-enabled/
+
+# Test nginx config
+nginx -t
+
+echo -e "${GREEN}[11/12] Configuring firewall (UFW)...${NC}"
+# Allow SSH, HTTP, HTTPS
+ufw --force disable
+ufw allow 22/tcp comment 'SSH'
+ufw allow 80/tcp comment 'HTTP'
+ufw allow 443/tcp comment 'HTTPS (future SSL)'
+
+# Set default policies
+ufw default deny incoming
+ufw default allow outgoing
+
+# Enable firewall
+echo "y" | ufw enable
+
+echo -e "${GREEN}[12/12] Starting services...${NC}"
+
+# Start nginx
+systemctl restart nginx
+systemctl status nginx --no-pager -l | head -5
+
+echo ""
+
+# Start application
+systemctl restart ${SERVICE_NAME}
+sleep 3
+systemctl status ${SERVICE_NAME} --no-pager -l | head -10
+
+echo ""
+echo -e "${GREEN}=============================================${NC}"
+echo -e "${GREEN}✅ Production Deployment Complete!${NC}"
+echo -e "${GREEN}=============================================${NC}"
+echo ""
+
+# Get public IP
+PUBLIC_IP=$(curl -s ifconfig.me || echo "your-droplet-ip")
+
+echo "Your application is now running!"
+echo ""
+echo "📍 Access URLs:"
+echo -e "   API Docs:      ${GREEN}http://${PUBLIC_IP}/docs${NC}"
+echo -e "   Health Check:  ${GREEN}http://${PUBLIC_IP}/health${NC}"
+echo -e "   Webhook URL:   ${GREEN}http://${PUBLIC_IP}/webhooks/instagram${NC}"
+echo ""
+echo "🔧 Management Commands:"
+echo "   Service status:   sudo systemctl status ${SERVICE_NAME}"
+echo "   Restart service:  sudo systemctl restart ${SERVICE_NAME}"
+echo "   View logs:        sudo journalctl -u ${SERVICE_NAME} -f"
+echo "   Nginx logs:       sudo tail -f /var/log/nginx/insta-messaging-*.log"
+echo ""
+echo "📝 Configuration:"
+echo "   Edit .env:        sudo nano ${INSTALL_DIR}/.env"
+echo "   After editing:    sudo systemctl restart ${SERVICE_NAME}"
+echo ""
+echo "🔒 Security:"
+echo "   Firewall status:  sudo ufw status"
+echo "   SSH port 22:      ✅ Allowed"
+echo "   HTTP port 80:     ✅ Allowed"
+echo ""
+echo "⚠️  Next Steps:"
+echo "1. Configure Instagram webhook in Facebook Developer Console:"
+echo "   URL: http://${PUBLIC_IP}/webhooks/instagram"
+echo "   Verify Token: (use your FACEBOOK_VERIFY_TOKEN from .env)"
+echo ""
+echo "2. Test your API:"
+echo "   curl http://${PUBLIC_IP}/health"
+echo ""
+echo "3. Monitor logs for any errors:"
+echo "   sudo journalctl -u ${SERVICE_NAME} -f"
+echo ""
