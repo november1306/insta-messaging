@@ -102,7 +102,9 @@ Goal: Get bidirectional messaging working - CRM can send AND receive messages. N
   - _Requirements: 11.5_
 
 
-- [ ] 9. Implement simple webhook forwarding to CRM (CRITICAL - moved from Priority 3)
+- [x] 9. Implement simple webhook forwarding to CRM (CRITICAL - moved from Priority 3)
+
+
   - Add CRM_WEBHOOK_URL to config (from account or global setting)
   - When Instagram message received, forward to CRM webhook immediately
   - Generate HMAC-SHA256 signature using webhook_secret
@@ -111,8 +113,18 @@ Goal: Get bidirectional messaging working - CRM can send AND receive messages. N
   - Log success/failure (no retries yet)
   - _Requirements: 2.1, 2.2, 2.6, 6.1, 6.2_
 
-- [ ] 10. Test end-to-end CRM chat flow
-  - Deploy to Railway or test server
+- [x] 10. Test Gentoo deployment compatibility
+
+
+  - Create Docker container with Gentoo base or use local Gentoo VM
+  - Test fresh deployment using deploy.sh (pip + venv, no conda)
+  - Verify all dependencies install correctly on Gentoo
+  - Test uvicorn server starts and serves /docs
+  - Document any Gentoo-specific setup requirements
+  - _Requirements: All Priority 1_
+
+- [ ] 11. Deploy and test end-to-end CRM chat flow on 1gb remote
+  - Deploy to 1gb remote server (Gentoo)
   - Test via Swagger UI at /docs
   - Create test account via POST /api/v1/accounts
   - Send test message via POST /api/v1/messages/send (CRM → Instagram)
@@ -126,7 +138,7 @@ Goal: Get bidirectional messaging working - CRM can send AND receive messages. N
 
 Goal: Add error handling, retries, proper auth, and edge cases. Test each addition on deployment.
 
-- [ ] 10. Implement proper API key authentication
+- [ ] 12. Implement proper API key authentication
   - Create api_keys table with key_hash and account_ids
   - Implement bcrypt hashing for API keys
   - Update verify_api_key to check database
@@ -134,20 +146,20 @@ Goal: Add error handling, retries, proper auth, and edge cases. Test each additi
   - Generate admin API key for testing
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7_
 
-- [ ] 11. Add Instagram token validation to account creation
+- [ ] 13. Add Instagram token validation to account creation
   - Call Instagram API to validate access_token
   - Return 400 if token invalid
   - Store validation result
   - _Requirements: 5.3, 5.4_
 
-- [ ] 12. Implement async message delivery with queue
+- [ ] 14. Implement async message delivery with queue
   - Create background worker that polls pending messages
   - Move Instagram API call to background task
   - Add retry logic with exponential backoff (3 attempts)
   - Update message status after each attempt
   - _Requirements: 1.6, 1.7_
 
-- [ ] 13. Add comprehensive error handling
+- [ ] 15. Add comprehensive error handling
   - Create ErrorResponse model from OpenAPI spec
   - Add error handling middleware
   - Return proper HTTP status codes (400, 401, 403, 404)
@@ -155,12 +167,12 @@ Goal: Add error handling, retries, proper auth, and edge cases. Test each additi
   - Log all errors
   - _Requirements: 11.1, 11.2, 11.7_
 
-- [ ] 14. Implement GET /api/v1/accounts/{account_id}
+- [ ] 16. Implement GET /api/v1/accounts/{account_id}
   - Return account details without credentials
   - Verify API key has access
   - _Requirements: 5.7_
 
-- [ ] 15. Implement PUT /api/v1/accounts/{account_id}
+- [ ] 17. Implement PUT /api/v1/accounts/{account_id}
   - Allow updating crm_webhook_url and webhook_secret
   - Support access_token rotation
   - Re-encrypt credentials if updated
@@ -170,26 +182,26 @@ Goal: Add error handling, retries, proper auth, and edge cases. Test each additi
 
 Goal: Add robustness to webhook forwarding - retries, DLQ, tracking.
 
-- [ ] 16. Create webhook delivery tracking system
+- [ ] 18. Create webhook delivery tracking system
   - Create webhook_deliveries table
   - Create WebhookDelivery SQLAlchemy model
   - Track delivery attempts and status
   - _Requirements: 6.1, 6.2, 7.1, 7.3_
 
-- [ ] 17. Implement webhook retry logic
+- [ ] 19. Implement webhook retry logic
   - Create WebhookDeliveryService with retry queue
   - Implement exponential backoff (5 retries)
   - Create background worker for retries
   - Don't retry on 401 errors
   - _Requirements: 2.3, 2.4, 6.5, 8.2, 8.6_
 
-- [ ] 18. Add delivery status webhooks
+- [ ] 20. Add delivery status webhooks
   - Create DeliveryStatusWebhook payload from OpenAPI spec
   - Send webhook when outbound message status changes
   - Include message_id, status, timestamp
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.7_
 
-- [ ] 19. Implement dead letter queue for failed webhooks
+- [ ] 21. Implement dead letter queue for failed webhooks
   - Move failed webhooks to DLQ after 24 hours
   - Create GET /api/v1/admin/dlq/webhooks endpoint
   - Create POST /api/v1/admin/dlq/webhooks/{id}/retry endpoint
@@ -199,27 +211,27 @@ Goal: Add robustness to webhook forwarding - retries, DLQ, tracking.
 
 Goal: Add monitoring, admin features, and documentation.
 
-- [ ] 20. Add structured logging
+- [ ] 22. Add structured logging
   - Log all API requests
   - Log message send/receive events
   - Log webhook delivery attempts
   - Never log message content or credentials
   - _Requirements: 11.1, 11.2, 11.3, 11.6_
 
-- [ ] 21. Add performance monitoring
+- [ ] 23. Add performance monitoring
   - Track API response times
   - Track webhook delivery latency
   - Warn if latency > 5 seconds
   - _Requirements: 11.4_
 
-- [ ]* 22. Create integration tests
+- [ ]* 24. Create integration tests
   - Test outbound message flow
   - Test inbound webhook forwarding
   - Test idempotency
   - Test webhook retry logic
   - _Requirements: All_
 
-- [ ]* 23. Create deployment documentation
+- [ ]* 25. Create deployment documentation
   - Document environment variables
   - Document API key generation
   - Create curl examples
@@ -229,10 +241,10 @@ Goal: Add monitoring, admin features, and documentation.
 ## Notes
 
 **Approach:**
-- **Priority 1 (Tasks 1-10)**: Minimal bidirectional flow - CRM can send AND receive messages
-- **Priority 2 (Tasks 11-15)**: Add robustness to outbound - proper auth, retries, error handling
-- **Priority 3 (Tasks 16-19)**: Add robustness to inbound - webhook retries, DLQ, status updates
-- **Priority 4 (Tasks 20-23)**: Advanced features - monitoring, logging, docs
+- **Priority 1 (Tasks 1-11)**: Minimal bidirectional flow - CRM can send AND receive messages, test Gentoo deployment
+- **Priority 2 (Tasks 12-17)**: Add robustness to outbound - proper auth, retries, error handling
+- **Priority 3 (Tasks 18-21)**: Add robustness to inbound - webhook retries, DLQ, status updates
+- **Priority 4 (Tasks 22-25)**: Advanced features - monitoring, logging, docs
 
 **Key Principles:**
 - OpenAPI spec (`api-spec.yaml`) is the contract - implement to match it
