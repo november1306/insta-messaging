@@ -69,7 +69,7 @@ get_python_version() {
     $1 --version 2>&1 | awk '{print $2}'
 }
 
-# Check if we already have Python 3.11+
+# Check if we already have Python 3.11 or 3.12 (not 3.13+ due to pydantic compatibility)
 PYTHON_BIN=""
 for py in python3.12 python3.11 python3; do
     if command -v $py &> /dev/null; then
@@ -77,37 +77,41 @@ for py in python3.12 python3.11 python3; do
         major=$(echo $version | cut -d. -f1)
         minor=$(echo $version | cut -d. -f2)
 
-        if [ "$major" -eq 3 ] && [ "$minor" -ge 11 ]; then
+        # Accept Python 3.11 or 3.12 only (3.13+ has compatibility issues with pydantic 2.5.0)
+        if [ "$major" -eq 3 ] && [ "$minor" -ge 11 ] && [ "$minor" -le 12 ]; then
             PYTHON_BIN=$py
             echo "Found suitable Python: $py (version $version)"
             break
+        elif [ "$major" -eq 3 ] && [ "$minor" -ge 13 ]; then
+            echo "Found $py (version $version) - too new, need Python 3.11 or 3.12"
         fi
     fi
 done
 
 # If no suitable Python found, try to install from repos
 if [ -z "$PYTHON_BIN" ]; then
-    echo "No Python 3.11+ found. Checking available Python versions..."
+    echo "No Python 3.11 or 3.12 found. Checking available Python versions..."
 
-    # First, try python3.11 from standard repos (works on Ubuntu 22.04+)
-    if apt-cache show python3.11 &> /dev/null; then
-        echo "Installing python3.11 from standard repositories..."
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.11 python3.11-venv python3.11-dev
-        PYTHON_BIN="python3.11"
-    # Try python3.12 from standard repos
-    elif apt-cache show python3.12 &> /dev/null; then
+    # Prioritize Python 3.12, then 3.11 (avoid 3.13+ due to pydantic compatibility)
+    if apt-cache show python3.12 &> /dev/null; then
         echo "Installing python3.12 from standard repositories..."
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12 python3.12-venv python3.12-dev
         PYTHON_BIN="python3.12"
+    elif apt-cache show python3.11 &> /dev/null; then
+        echo "Installing python3.11 from standard repositories..."
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.11 python3.11-venv python3.11-dev
+        PYTHON_BIN="python3.11"
     else
         # Last resort: try deadsnakes PPA (may fail on newer Ubuntu versions)
         echo "Attempting to add deadsnakes PPA..."
         if add-apt-repository -y ppa:deadsnakes/ppa 2>&1 | grep -q "does not have a Release file"; then
-            echo -e "${RED}Error: Cannot install Python 3.11+${NC}"
-            echo "Your Ubuntu version does not have Python 3.11+ in standard repos,"
+            echo -e "${RED}Error: Cannot install Python 3.11 or 3.12${NC}"
+            echo "Your Ubuntu version does not have Python 3.11/3.12 in standard repos,"
             echo "and the deadsnakes PPA is not yet available for this release."
             echo ""
-            echo "Please install Python 3.11 or higher manually and re-run this script."
+            echo "Please install Python 3.11 or 3.12 manually and re-run this script."
+            echo ""
+            echo "Note: Python 3.13+ is not yet supported due to pydantic compatibility."
             exit 1
         else
             # PPA added successfully
