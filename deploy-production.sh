@@ -141,7 +141,7 @@ echo "Using Python: $PYTHON_BIN ($(get_python_version $PYTHON_BIN))"
 
 echo -e "${GREEN}[5/12] Creating application user...${NC}"
 if ! id -u ${APP_USER} > /dev/null 2>&1; then
-    useradd -r -s /bin/bash -d ${INSTALL_DIR} -m ${APP_USER}
+    useradd -r -s /bin/bash -d ${INSTALL_DIR} ${APP_USER}
     echo "Created user: ${APP_USER}"
 else
     echo "User ${APP_USER} already exists"
@@ -159,7 +159,9 @@ else
     if [ -d "${INSTALL_DIR}" ]; then
         rm -rf ${INSTALL_DIR}
     fi
-    sudo -u ${APP_USER} git clone -b ${BRANCH} ${REPO_URL} ${INSTALL_DIR}
+    # Clone as root, then change ownership
+    git clone -b ${BRANCH} ${REPO_URL} ${INSTALL_DIR}
+    chown -R ${APP_USER}:${APP_USER} ${INSTALL_DIR}
     cd ${INSTALL_DIR}
 fi
 
