@@ -37,7 +37,15 @@ echo "Architecture: $(uname -m)"
 echo ""
 
 echo -e "${GREEN}[2/12] Updating system packages...${NC}"
-apt-get update -qq
+
+# Remove potentially broken PPAs from previous attempts
+if ls /etc/apt/sources.list.d/deadsnakes-ubuntu-ppa-*.list 2>/dev/null; then
+    echo "Removing previously added deadsnakes PPA..."
+    rm -f /etc/apt/sources.list.d/deadsnakes-ubuntu-ppa-*.list
+fi
+
+# Update package lists (ignore PPA errors if any)
+apt-get update -qq 2>&1 | grep -v "does not have a Release file" | grep -v "deadsnakes" || true
 DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq
 
 echo -e "${GREEN}[3/12] Installing system dependencies...${NC}"
@@ -53,21 +61,64 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     libffi-dev \
     python3-dev
 
-# Install Python 3.12
-echo -e "${GREEN}[4/12] Installing Python 3.12...${NC}"
-if ! command -v python3.12 &> /dev/null; then
-    echo "Adding deadsnakes PPA for Python 3.12..."
-    add-apt-repository -y ppa:deadsnakes/ppa > /dev/null 2>&1
-    apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12 python3.12-venv python3.12-dev python3-pip
-    echo "Python 3.12 installed successfully"
-else
-    echo "Python 3.12 already installed: $(python3.12 --version)"
+# Install Python 3.12 (required)
+echo -e "${GREEN}[4/12] Checking for Python 3.12...${NC}"
+
+# Function to get Python version
+get_python_version() {
+    $1 --version 2>&1 | awk '{print $2}'
+}
+
+# Check if Python 3.12 is already installed
+PYTHON_BIN=""
+if command -v python3.12 &> /dev/null; then
+    version=$(get_python_version python3.12)
+    echo "Found Python 3.12 (version $version)"
+    PYTHON_BIN="python3.12"
 fi
+
+# If Python 3.12 not found, install it
+if [ -z "$PYTHON_BIN" ]; then
+    echo "Python 3.12 not found. Installing..."
+
+    # Try to install from standard repositories first
+    if apt-cache show python3.12 &> /dev/null; then
+        echo "Installing python3.12 from standard repositories..."
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12 python3.12-venv python3.12-dev
+        PYTHON_BIN="python3.12"
+    else
+        # Try deadsnakes PPA
+        echo "Python 3.12 not in standard repos, trying deadsnakes PPA..."
+        if add-apt-repository -y ppa:deadsnakes/ppa 2>&1 | grep -q "does not have a Release file"; then
+            echo -e "${RED}Error: Cannot install Python 3.12${NC}"
+            echo "Your Ubuntu version does not have Python 3.12 in standard repos,"
+            echo "and the deadsnakes PPA is not yet available for this release."
+            echo ""
+            echo "Please install Python 3.12 manually and re-run this script."
+            exit 1
+        else
+            # PPA added successfully
+            apt-get update -qq 2>&1 | grep -v "does not have a Release file" || true
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12 python3.12-venv python3.12-dev python3-pip
+            PYTHON_BIN="python3.12"
+            echo "Python 3.12 installed successfully from deadsnakes PPA"
+        fi
+    fi
+else
+    # Make sure venv and dev packages are installed for python3.12
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12-venv python3.12-dev 2>/dev/null || true
+fi
+
+# Ensure pip is installed
+if ! command -v pip3 &> /dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-pip
+fi
+
+echo "Using Python: $PYTHON_BIN ($(get_python_version $PYTHON_BIN))"
 
 echo -e "${GREEN}[5/12] Creating application user...${NC}"
 if ! id -u ${APP_USER} > /dev/null 2>&1; then
-    useradd -r -s /bin/bash -d ${INSTALL_DIR} -m ${APP_USER}
+    useradd -r -s /bin/bash -d ${INSTALL_DIR} ${APP_USER}
     echo "Created user: ${APP_USER}"
 else
     echo "User ${APP_USER} already exists"
@@ -85,7 +136,9 @@ else
     if [ -d "${INSTALL_DIR}" ]; then
         rm -rf ${INSTALL_DIR}
     fi
-    sudo -u ${APP_USER} git clone -b ${BRANCH} ${REPO_URL} ${INSTALL_DIR}
+    # Clone as root, then change ownership
+    git clone -b ${BRANCH} ${REPO_URL} ${INSTALL_DIR}
+    chown -R ${APP_USER}:${APP_USER} ${INSTALL_DIR}
     cd ${INSTALL_DIR}
 fi
 
