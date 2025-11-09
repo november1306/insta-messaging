@@ -53,17 +53,77 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     libffi-dev \
     python3-dev
 
-# Install Python 3.12
-echo -e "${GREEN}[4/12] Installing Python 3.12...${NC}"
-if ! command -v python3.12 &> /dev/null; then
-    echo "Adding deadsnakes PPA for Python 3.12..."
-    add-apt-repository -y ppa:deadsnakes/ppa > /dev/null 2>&1
-    apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12 python3.12-venv python3.12-dev python3-pip
-    echo "Python 3.12 installed successfully"
+# Install Python 3.11+
+echo -e "${GREEN}[4/12] Checking Python version...${NC}"
+
+# Function to get Python version
+get_python_version() {
+    $1 --version 2>&1 | awk '{print $2}'
+}
+
+# Check if we already have Python 3.11+
+PYTHON_BIN=""
+for py in python3.12 python3.11 python3; do
+    if command -v $py &> /dev/null; then
+        version=$(get_python_version $py)
+        major=$(echo $version | cut -d. -f1)
+        minor=$(echo $version | cut -d. -f2)
+
+        if [ "$major" -eq 3 ] && [ "$minor" -ge 11 ]; then
+            PYTHON_BIN=$py
+            echo "Found suitable Python: $py (version $version)"
+            break
+        fi
+    fi
+done
+
+# If no suitable Python found, try to install Python 3.12
+if [ -z "$PYTHON_BIN" ]; then
+    echo "No Python 3.11+ found. Attempting to install Python 3.12..."
+
+    # Try deadsnakes PPA
+    if add-apt-repository -y ppa:deadsnakes/ppa 2>&1 | grep -q "does not have a Release file"; then
+        echo -e "${YELLOW}Warning: deadsnakes PPA not available for this Ubuntu version${NC}"
+        echo "Trying alternative installation methods..."
+
+        # Check if python3.11 is available in standard repos
+        if apt-cache show python3.11 &> /dev/null; then
+            echo "Installing python3.11 from standard repositories..."
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.11 python3.11-venv python3.11-dev
+            PYTHON_BIN="python3.11"
+        else
+            echo -e "${RED}Error: Cannot install Python 3.11+${NC}"
+            echo "Please install Python 3.11 or higher manually and re-run this script."
+            exit 1
+        fi
+    else
+        # PPA added successfully
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12 python3.12-venv python3.12-dev python3-pip
+        PYTHON_BIN="python3.12"
+        echo "Python 3.12 installed successfully"
+    fi
 else
-    echo "Python 3.12 already installed: $(python3.12 --version)"
+    # Make sure venv and dev packages are installed
+    case $PYTHON_BIN in
+        python3.12)
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12-venv python3.12-dev 2>/dev/null || true
+            ;;
+        python3.11)
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.11-venv python3.11-dev 2>/dev/null || true
+            ;;
+        python3)
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-venv python3-dev 2>/dev/null || true
+            ;;
+    esac
 fi
+
+# Ensure pip is installed
+if ! command -v pip3 &> /dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-pip
+fi
+
+echo "Using Python: $PYTHON_BIN ($(get_python_version $PYTHON_BIN))"
 
 echo -e "${GREEN}[5/12] Creating application user...${NC}"
 if ! id -u ${APP_USER} > /dev/null 2>&1; then
