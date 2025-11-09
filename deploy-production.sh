@@ -37,7 +37,15 @@ echo "Architecture: $(uname -m)"
 echo ""
 
 echo -e "${GREEN}[2/12] Updating system packages...${NC}"
-apt-get update -qq
+
+# Remove potentially broken PPAs from previous attempts
+if ls /etc/apt/sources.list.d/deadsnakes-ubuntu-ppa-*.list 2>/dev/null; then
+    echo "Removing previously added deadsnakes PPA..."
+    rm -f /etc/apt/sources.list.d/deadsnakes-ubuntu-ppa-*.list
+fi
+
+# Update package lists (ignore PPA errors if any)
+apt-get update -qq 2>&1 | grep -v "does not have a Release file" | grep -v "deadsnakes" || true
 DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq
 
 echo -e "${GREEN}[3/12] Installing system dependencies...${NC}"
@@ -77,31 +85,37 @@ for py in python3.12 python3.11 python3; do
     fi
 done
 
-# If no suitable Python found, try to install Python 3.12
+# If no suitable Python found, try to install from repos
 if [ -z "$PYTHON_BIN" ]; then
-    echo "No Python 3.11+ found. Attempting to install Python 3.12..."
+    echo "No Python 3.11+ found. Checking available Python versions..."
 
-    # Try deadsnakes PPA
-    if add-apt-repository -y ppa:deadsnakes/ppa 2>&1 | grep -q "does not have a Release file"; then
-        echo -e "${YELLOW}Warning: deadsnakes PPA not available for this Ubuntu version${NC}"
-        echo "Trying alternative installation methods..."
-
-        # Check if python3.11 is available in standard repos
-        if apt-cache show python3.11 &> /dev/null; then
-            echo "Installing python3.11 from standard repositories..."
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.11 python3.11-venv python3.11-dev
-            PYTHON_BIN="python3.11"
-        else
+    # First, try python3.11 from standard repos (works on Ubuntu 22.04+)
+    if apt-cache show python3.11 &> /dev/null; then
+        echo "Installing python3.11 from standard repositories..."
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.11 python3.11-venv python3.11-dev
+        PYTHON_BIN="python3.11"
+    # Try python3.12 from standard repos
+    elif apt-cache show python3.12 &> /dev/null; then
+        echo "Installing python3.12 from standard repositories..."
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12 python3.12-venv python3.12-dev
+        PYTHON_BIN="python3.12"
+    else
+        # Last resort: try deadsnakes PPA (may fail on newer Ubuntu versions)
+        echo "Attempting to add deadsnakes PPA..."
+        if add-apt-repository -y ppa:deadsnakes/ppa 2>&1 | grep -q "does not have a Release file"; then
             echo -e "${RED}Error: Cannot install Python 3.11+${NC}"
+            echo "Your Ubuntu version does not have Python 3.11+ in standard repos,"
+            echo "and the deadsnakes PPA is not yet available for this release."
+            echo ""
             echo "Please install Python 3.11 or higher manually and re-run this script."
             exit 1
+        else
+            # PPA added successfully
+            apt-get update -qq 2>&1 | grep -v "does not have a Release file" || true
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12 python3.12-venv python3.12-dev python3-pip
+            PYTHON_BIN="python3.12"
+            echo "Python 3.12 installed successfully from deadsnakes PPA"
         fi
-    else
-        # PPA added successfully
-        apt-get update -qq
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12 python3.12-venv python3.12-dev python3-pip
-        PYTHON_BIN="python3.12"
-        echo "Python 3.12 installed successfully"
     fi
 else
     # Make sure venv and dev packages are installed
