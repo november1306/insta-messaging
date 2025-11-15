@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
-from app.db import get_db
+from app.db.connection import get_db_session
 from app.db.models import Message
 from typing import List, Dict, Any
 from datetime import datetime
@@ -18,7 +18,7 @@ router = APIRouter()
 
 @router.get("/ui/conversations")
 async def get_conversations(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Get list of all conversations grouped by sender.
@@ -71,7 +71,7 @@ async def get_conversations(
 @router.get("/ui/messages/{sender_id}")
 async def get_messages(
     sender_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Get all messages for a specific sender (conversation thread).
