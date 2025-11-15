@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from app.db.connection import get_db_session
-from app.db.models import Message
+from app.db.models import MessageModel
 from typing import List, Dict, Any
 from datetime import datetime
 
@@ -28,23 +28,23 @@ async def get_conversations(
         # Subquery to get the latest message ID for each sender
         subq = (
             select(
-                Message.sender_id,
-                func.max(Message.id).label('latest_message_id')
+                MessageModel.sender_id,
+                func.max(MessageModel.id).label('latest_message_id')
             )
-            .where(Message.direction == 'inbound')
-            .group_by(Message.sender_id)
+            .where(MessageModel.direction == 'inbound')
+            .group_by(MessageModel.sender_id)
             .subquery()
         )
 
         # Join to get full message details
         stmt = (
-            select(Message)
+            select(MessageModel)
             .join(
                 subq,
-                (Message.sender_id == subq.c.sender_id) &
-                (Message.id == subq.c.latest_message_id)
+                (MessageModel.sender_id == subq.c.sender_id) &
+                (MessageModel.id == subq.c.latest_message_id)
             )
-            .order_by(desc(Message.timestamp))
+            .order_by(desc(MessageModel.timestamp))
         )
 
         result = await db.execute(stmt)
@@ -54,11 +54,11 @@ async def get_conversations(
         for msg in messages:
             conversations.append({
                 "sender_id": msg.sender_id,
-                "sender_name": msg.sender_name or msg.sender_id,
-                "last_message": msg.text or "",
+                "sender_name": msg.sender_id,  # MessageModel doesn't have sender_name field
+                "last_message": msg.message_text or "",
                 "last_message_time": msg.timestamp.isoformat() if msg.timestamp else None,
                 "unread_count": 0,  # TODO: Implement read/unread tracking
-                "instagram_account_id": msg.instagram_account_id
+                "instagram_account_id": msg.sender_id  # MessageModel doesn't have instagram_account_id field
             })
 
         return {"conversations": conversations}
@@ -80,9 +80,9 @@ async def get_messages(
     try:
         # Get all messages for this sender
         stmt = (
-            select(Message)
-            .where(Message.sender_id == sender_id)
-            .order_by(Message.timestamp)
+            select(MessageModel)
+            .where(MessageModel.sender_id == sender_id)
+            .order_by(MessageModel.timestamp)
         )
 
         result = await db.execute(stmt)
@@ -94,17 +94,17 @@ async def get_messages(
         for msg in messages:
             message_list.append({
                 "id": msg.id,
-                "text": msg.text or "",
+                "text": msg.message_text or "",
                 "direction": msg.direction,
                 "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
                 "status": getattr(msg, 'status', None)
             })
 
             # Capture sender info from first message
-            if sender_info is None and msg.sender_name:
+            if sender_info is None:
                 sender_info = {
                     "id": msg.sender_id,
-                    "name": msg.sender_name
+                    "name": msg.sender_id  # MessageModel doesn't have sender_name field
                 }
 
         if sender_info is None:
