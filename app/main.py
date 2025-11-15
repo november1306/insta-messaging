@@ -6,8 +6,9 @@ from functools import wraps
 from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
-from fastapi.responses import JSONResponse
-from app.api import webhooks, accounts, messages
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from app.api import webhooks, accounts, messages, ui, events
 from app.config import settings
 from app.db import init_db, close_db
 from app.version import __version__
@@ -83,6 +84,10 @@ app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 # Register CRM integration API routes
 app.include_router(accounts.router, prefix="/api/v1", tags=["accounts"])
 app.include_router(messages.router, prefix="/api/v1", tags=["messages"])
+
+# Register UI API routes (for web frontend)
+app.include_router(ui.router, prefix="/api/v1", tags=["ui"])
+app.include_router(events.router, prefix="/api/v1", tags=["events"])
 
 
 @app.get("/")
@@ -166,8 +171,37 @@ async def redoc_html():
     """Alternative API documentation with ReDoc"""
     # Extract title from spec, fallback to default
     title = openapi_spec.get('info', {}).get('title', 'API Documentation') if openapi_spec else 'API Documentation'
-    
+
     return get_redoc_html(
         openapi_url="/openapi.json",
         title=title
+    )
+
+
+# ============================================
+# Frontend Web UI (Vue.js SPA)
+# ============================================
+
+# Serve frontend static files (after npm run build)
+frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+
+if frontend_dist.exists():
+    # Mount static assets
+    app.mount(
+        "/chat/assets",
+        StaticFiles(directory=str(frontend_dist / "assets")),
+        name="chat-assets"
+    )
+
+    logger.info(f"✅ Frontend assets mounted at /chat/assets")
+
+    @app.get("/chat", include_in_schema=False)
+    @app.get("/chat/{full_path:path}", include_in_schema=False)
+    async def serve_frontend(full_path: str = ""):
+        """Serve the Vue.js frontend SPA"""
+        return FileResponse(frontend_dist / "index.html")
+else:
+    logger.warning(
+        f"⚠️  Frontend not built. Run 'cd frontend && npm run build' to enable /chat UI. "
+        f"For development, run 'cd frontend && npm run dev' separately."
     )

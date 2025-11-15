@@ -9,6 +9,7 @@ Automated Instagram DM system with CRM integration API for e-commerce businesses
 - **Stores conversation history** in database
 - **Provides CRM integration** through REST API endpoints
 - **Supports auto-replies** based on configurable rules
+- **Web UI for live testing** - Instagram-like chat interface with real-time updates
 
 ## Features
 
@@ -23,6 +24,7 @@ Automated Instagram DM system with CRM integration API for e-commerce businesses
 - **Auto-Reply Rules** - Automatic responses based on message content
 - **Idempotency Protection** - Prevent duplicate message sends
 - **Health Monitoring** - Health check endpoint for uptime monitoring
+- **Web Chat UI** - Instagram-like interface with real-time updates via SSE
 
 ### 🔜 Coming Next
 
@@ -148,6 +150,48 @@ ngrok http 8000
 **When to use what:**
 - **localhost:8000** - Testing API endpoints (faster, direct)
 - **ngrok URL** - Testing Instagram webhooks (publicly accessible)
+
+---
+
+## Web UI (Chat Interface)
+
+The project includes an Instagram-like chat interface for live testing and demonstration.
+
+### Quick Start
+
+**Development mode** (with hot reload):
+```bash
+./dev.sh
+```
+- Frontend (dev): http://localhost:5173
+- Backend: http://localhost:8000
+- API docs: http://localhost:8000/docs
+
+**Production mode** (single server):
+```bash
+./build.sh  # Build frontend
+uvicorn app.main:app --port 8000
+```
+- Chat UI: http://localhost:8000/chat
+- API: http://localhost:8000/api/v1
+
+### Features
+
+- ✅ Real-time message updates (Server-Sent Events)
+- ✅ Instagram-style 3-column layout
+- ✅ Conversation list with unread counts
+- ✅ Message sending and receiving
+- ✅ Delivery status indicators (✓✓)
+- ✅ Auto-scroll and message animations
+- ✅ Responsive design
+
+### Tech Stack
+
+- **Frontend**: Vue 3 + Vite + Tailwind CSS
+- **Real-time**: Server-Sent Events (SSE)
+- **Backend**: FastAPI (existing)
+
+📖 **See [UI_SETUP.md](UI_SETUP.md) for detailed setup instructions and API documentation.**
 
 ---
 
