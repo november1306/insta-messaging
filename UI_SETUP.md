@@ -24,8 +24,19 @@ The UI web layer provides an Instagram-style chat interface for:
 
 Run both backend and frontend with hot reload:
 
+**Linux/Mac:**
 ```bash
 ./dev.sh
+```
+
+**Windows (CMD):**
+```cmd
+dev.bat
+```
+
+**Windows (PowerShell):**
+```powershell
+.\dev.ps1
 ```
 
 **Access:**
@@ -37,9 +48,28 @@ Run both backend and frontend with hot reload:
 
 Build frontend and run from single server:
 
+**Linux/Mac:**
 ```bash
 # Build frontend
 ./build.sh
+
+# Run server
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+**Windows (CMD):**
+```cmd
+REM Build frontend
+build.bat
+
+REM Run server
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+**Windows (PowerShell):**
+```powershell
+# Build frontend
+.\build.ps1
 
 # Run server
 uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -75,6 +105,7 @@ cd ..
 
 ### Starting Development
 
+**Linux/Mac:**
 ```bash
 # Start both servers
 ./dev.sh
@@ -85,6 +116,20 @@ uvicorn app.main:app --reload --port 8000
 
 # Terminal 2: Frontend
 cd frontend && npm run dev
+```
+
+**Windows:**
+```cmd
+REM Start both servers
+dev.bat
+
+REM OR manually:
+REM Terminal 1: Backend
+uvicorn app.main:app --reload --port 8000
+
+REM Terminal 2: Frontend
+cd frontend
+npm run dev
 ```
 
 ### Making Changes

@@ -161,7 +161,11 @@ The project includes an Instagram-like chat interface for live testing and demon
 
 **Development mode** (with hot reload):
 ```bash
+# Linux/Mac
 ./dev.sh
+
+# Windows
+dev.bat          # or dev.ps1
 ```
 - Frontend (dev): http://localhost:5173
 - Backend: http://localhost:8000
@@ -169,7 +173,12 @@ The project includes an Instagram-like chat interface for live testing and demon
 
 **Production mode** (single server):
 ```bash
+# Linux/Mac
 ./build.sh  # Build frontend
+uvicorn app.main:app --port 8000
+
+# Windows
+build.bat   # or build.ps1
 uvicorn app.main:app --port 8000
 ```
 - Chat UI: http://localhost:8000/chat
