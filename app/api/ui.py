@@ -3,17 +3,58 @@ UI API endpoints for the web frontend
 Provides conversation lists and message retrieval for the Vue chat interface
 """
 import logging
+import httpx
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from app.db.connection import get_db_session
 from app.db.models import MessageModel
+from app.clients.instagram_client import InstagramClient
+from app.config import settings
 from typing import List, Dict, Any
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Cache for Instagram usernames (in-memory for MVP)
+# In production, use Redis or database
+username_cache: Dict[str, str] = {}
+
+
+async def _get_instagram_username(sender_id: str) -> str:
+    """
+    Get Instagram username for a sender ID.
+    Uses cache to avoid repeated API calls.
+    """
+    # Check if this is the business account
+    if sender_id == settings.instagram_business_account_id:
+        return f"{sender_id} (me)"
+    
+    # Check cache first
+    if sender_id in username_cache:
+        return username_cache[sender_id]
+    
+    # Fetch from Instagram API
+    try:
+        async with httpx.AsyncClient() as http_client:
+            instagram_client = InstagramClient(
+                http_client=http_client,
+                settings=settings,
+                logger_instance=logger
+            )
+            profile = await instagram_client.get_user_profile(sender_id)
+            
+            if profile and "username" in profile:
+                username = f"@{profile['username']}"
+                username_cache[sender_id] = username
+                return username
+    except Exception as e:
+        logger.warning(f"Failed to fetch username for {sender_id}: {e}")
+    
+    # Fallback to sender_id
+    return sender_id
 
 
 @router.get("/ui/conversations")
@@ -22,7 +63,7 @@ async def get_conversations(
 ):
     """
     Get list of all conversations grouped by sender.
-    Returns the latest message from each sender.
+    Returns the latest message from each sender with Instagram usernames.
     """
     try:
         # Subquery to get the latest message ID for each sender
@@ -52,13 +93,16 @@ async def get_conversations(
 
         conversations = []
         for msg in messages:
+            # Fetch Instagram username
+            sender_name = await _get_instagram_username(msg.sender_id)
+            
             conversations.append({
                 "sender_id": msg.sender_id,
-                "sender_name": msg.sender_id,  # MessageModel doesn't have sender_name field
+                "sender_name": sender_name,
                 "last_message": msg.message_text or "",
                 "last_message_time": msg.timestamp.isoformat() if msg.timestamp else None,
                 "unread_count": 0,  # TODO: Implement read/unread tracking
-                "instagram_account_id": msg.sender_id  # MessageModel doesn't have instagram_account_id field
+                "instagram_account_id": msg.recipient_id  # The business account that received the message
             })
 
         return {"conversations": conversations}
@@ -75,7 +119,7 @@ async def get_messages(
 ):
     """
     Get all messages for a specific sender (conversation thread).
-    Returns both inbound and outbound messages.
+    Returns both inbound and outbound messages with Instagram username.
     """
     try:
         # Get all messages for this sender
@@ -102,15 +146,17 @@ async def get_messages(
 
             # Capture sender info from first message
             if sender_info is None:
+                sender_name = await _get_instagram_username(msg.sender_id)
                 sender_info = {
                     "id": msg.sender_id,
-                    "name": msg.sender_id  # MessageModel doesn't have sender_name field
+                    "name": sender_name
                 }
 
         if sender_info is None:
+            sender_name = await _get_instagram_username(sender_id)
             sender_info = {
                 "id": sender_id,
-                "name": sender_id
+                "name": sender_name
             }
 
         return {
@@ -120,7 +166,8 @@ async def get_messages(
 
     except Exception as e:
         logger.error(f"Failed to fetch messages for {sender_id}: {e}")
+        sender_name = await _get_instagram_username(sender_id)
         return {
             "messages": [],
-            "sender_info": {"id": sender_id, "name": sender_id}
+            "sender_info": {"id": sender_id, "name": sender_name}
         }

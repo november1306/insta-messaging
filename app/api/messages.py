@@ -18,6 +18,7 @@ from app.db.connection import get_db_session
 from app.db.models import OutboundMessage, Account
 from app.clients.instagram_client import InstagramClient, InstagramAPIError
 from app.config import settings
+from app.api.events import broadcast_new_message, broadcast_message_status
 
 logger = logging.getLogger(__name__)
 
@@ -172,18 +173,53 @@ async def send_message(
                 
                 logger.info(f"✅ Message sent to Instagram: {message_id} (ig_msg_id: {ig_response.message_id})")
                 
+                # Broadcast to SSE clients for real-time UI update
+                try:
+                    await broadcast_new_message({
+                        "id": message_id,
+                        "sender_id": request.account_id,
+                        "recipient_id": request.recipient_id,
+                        "text": request.message,
+                        "direction": "outbound",
+                        "timestamp": outbound_message.created_at.isoformat(),
+                        "status": "sent",
+                        "instagram_account_id": request.account_id
+                    })
+                except Exception as sse_error:
+                    logger.error(f"Failed to broadcast SSE message: {sse_error}")
+                
             except (InstagramAPIError, Exception) as e:
                 # Update message status to "failed"
                 outbound_message.status = "failed"
                 
                 if isinstance(e, InstagramAPIError):
                     outbound_message.error_code = "instagram_api_error"
-                    outbound_message.error_message = f"HTTP {e.status_code}: {e.message}" if e.status_code else e.message
+                    error_msg = e.message
+                    
+                    # Provide helpful error messages for common issues
+                    if "не знайдено користувача" in error_msg.lower() or "user not found" in error_msg.lower():
+                        error_msg = (
+                            f"{error_msg}. This recipient may not exist or hasn't messaged your account yet. "
+                            "Instagram requires users to message you first before you can send them messages."
+                        )
+                    elif "24 hour" in error_msg.lower() or "messaging window" in error_msg.lower():
+                        error_msg = (
+                            f"{error_msg}. The 24-hour messaging window has expired. "
+                            "You can only send messages within 24 hours of the user's last message."
+                        )
+                    
+                    outbound_message.error_message = f"HTTP {e.status_code}: {error_msg}" if e.status_code else error_msg
                 else:
                     outbound_message.error_code = "unexpected_error"
                     outbound_message.error_message = str(e)
                 
                 logger.error(f"❌ Failed to send message {message_id}: {outbound_message.error_message}")
+                
+                # Broadcast failure to SSE clients
+                try:
+                    await broadcast_message_status(message_id, "failed")
+                except Exception as sse_error:
+                    logger.error(f"Failed to broadcast SSE status: {sse_error}")
     
     # 6. Single commit at the end - all state changes persisted together
     await db.commit()

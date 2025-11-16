@@ -4,10 +4,11 @@ Instagram Messenger Automation - Main Application Entry Point
 from contextlib import asynccontextmanager
 from functools import wraps
 from datetime import datetime, timezone
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.exceptions import RequestValidationError
 from app.api import webhooks, accounts, messages, ui, events
 from app.config import settings
 from app.db import init_db, close_db
@@ -77,6 +78,23 @@ app = FastAPI(
     redoc_url=None,  # Disable default redoc
     openapi_url=None  # We'll serve custom OpenAPI
 )
+
+
+# Add validation error handler for debugging
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Log validation errors for debugging"""
+    logger.error(f"Validation error for {request.method} {request.url.path}")
+    logger.error(f"Request body: {await request.body()}")
+    logger.error(f"Validation errors: {exc.errors()}")
+    
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "detail": exc.errors(),
+            "body": exc.body
+        }
+    )
 
 # Register webhook routes
 app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])

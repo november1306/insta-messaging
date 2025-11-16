@@ -10,7 +10,7 @@
           <h2 class="font-semibold text-gray-900">
             {{ conversation?.sender_name || conversation?.sender_id }}
           </h2>
-          <p class="text-xs text-gray-500">Instagram User</p>
+          <p class="text-xs text-gray-500">{{ conversation?.sender_id }}</p>
         </div>
       </div>
     </div>

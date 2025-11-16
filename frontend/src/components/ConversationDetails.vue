@@ -8,7 +8,7 @@
       <h3 class="font-semibold text-lg text-gray-900">
         {{ conversation?.sender_name || 'Unknown User' }}
       </h3>
-      <p class="text-sm text-gray-500">Instagram User</p>
+      <p class="text-sm text-gray-500">{{ conversation?.sender_id }}</p>
     </div>
 
     <!-- Details -->

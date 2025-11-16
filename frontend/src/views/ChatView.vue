@@ -89,10 +89,16 @@ function handleSSEMessage(data) {
 
   switch (data.event) {
     case 'new_message':
-      store.addIncomingMessage(data.data)
+      // Handle both inbound and outbound messages
+      if (data.data.direction === 'inbound') {
+        store.addIncomingMessage(data.data)
+      } else if (data.data.direction === 'outbound') {
+        // Update sent message status in real-time
+        store.updateMessageStatus(data.data.id, data.data.status)
+      }
       break
     case 'message_status':
-      store.updateMessageStatus(data.message_id, data.status)
+      store.updateMessageStatus(data.data.message_id, data.data.status, data.data.error)
       break
     default:
       console.warn('Unknown SSE event:', data.event)

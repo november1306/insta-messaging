@@ -54,17 +54,18 @@ export const useMessagesStore = defineStore('messages', () => {
     try {
       const response = await apiClient.post('/messages/send', {
         recipient_id: recipientId,
-        text: text,
-        account_id: accountId
+        message: text,  // API expects 'message', not 'text'
+        account_id: accountId,
+        idempotency_key: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`  // Required field
       })
 
-      // Add sent message to local state
+      // Add sent message to local state (optimistic update)
       const sentMessage = {
         id: response.data.message_id,
         text: text,
         direction: 'outbound',
         timestamp: new Date().toISOString(),
-        status: response.data.status
+        status: response.data.status || 'pending'
       }
 
       if (!messages.value[recipientId]) {
@@ -72,6 +73,7 @@ export const useMessagesStore = defineStore('messages', () => {
       }
       messages.value[recipientId].push(sentMessage)
 
+      // Note: SSE will update the status to 'sent' or 'failed' in real-time
       return response.data
     } catch (err) {
       error.value = err.message
@@ -107,12 +109,15 @@ export const useMessagesStore = defineStore('messages', () => {
     messages.value[senderId].push(message)
   }
 
-  function updateMessageStatus(messageId, status) {
+  function updateMessageStatus(messageId, status, errorMessage = null) {
     // Find and update message status across all conversations
     for (const senderId in messages.value) {
       const msgIndex = messages.value[senderId].findIndex(m => m.id === messageId)
       if (msgIndex >= 0) {
         messages.value[senderId][msgIndex].status = status
+        if (errorMessage) {
+          messages.value[senderId][msgIndex].error = errorMessage
+        }
         break
       }
     }
