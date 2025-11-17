@@ -31,12 +31,12 @@ JWT_EXPIRATION_HOURS = 24
 # To add new users, generate hash with: bcrypt.hashpw("password".encode(), bcrypt.gensalt())
 HARDCODED_USERS = {
     "admin": {
-        "password_hash": "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYuZrKMhxU2",  # "admin123"
+        "password_hash": "$2b$12$Dih5efRthforbcBOnewDsuQkAkWQipG0snJmNElF4Q6juJqZ5LP9q",  # "admin123"
         "role": "admin",
         "display_name": "Administrator"
     },
     "demo": {
-        "password_hash": "$2b$12$8Hq3qY4zP9mYZKxLXKGKZeQNv5J5zJ5J5J5J5J5J5J5J5J5J5J5Jm",  # "demo123"
+        "password_hash": "$2b$12$/oII2hpemHIg0ir/FsbMAuy46zpe227j/kpniUq3OJKB2c6wEHOKq",  # "demo123"
         "role": "viewer",
         "display_name": "Demo User"
     }
