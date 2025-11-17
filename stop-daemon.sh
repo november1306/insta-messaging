@@ -10,6 +10,7 @@ if [ ! -f "$PID_FILE" ]; then
 fi
 
 PID=$(cat "$PID_FILE")
+echo abc
 
 if ! ps -p "$PID" > /dev/null 2>&1; then
     echo "Server is not running (process $PID not found)"

@@ -13,6 +13,7 @@ from app.clients.instagram_client import InstagramAPIError
 from app.rules.reply_rules import get_reply_text
 from app.services.webhook_forwarder import WebhookForwarder
 from app.api.accounts import decrypt_credential
+from app.api.events import broadcast_new_message
 from datetime import datetime, timezone
 import asyncio
 import logging
@@ -143,6 +144,20 @@ async def handle_webhook(
                                 await message_repo.save(message)
                                 messages_processed += 1
                                 logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
+
+                                # Broadcast to SSE clients (real-time UI update)
+                                try:
+                                    await broadcast_new_message({
+                                        "id": message.id,
+                                        "sender_id": message.sender_id,
+                                        "sender_name": message.sender_id,  # TODO: Fetch actual name
+                                        "text": message.message_text,
+                                        "direction": "inbound",
+                                        "timestamp": message.timestamp.isoformat() if message.timestamp else None,
+                                        "instagram_account_id": message.recipient_id
+                                    })
+                                except Exception as sse_error:
+                                    logger.error(f"Failed to broadcast SSE message: {sse_error}")
 
                                 # Handle auto-reply ONLY for newly saved messages (not duplicates)
                                 # Wrapped in try/except to ensure CRM forwarding happens even if auto-reply fails
