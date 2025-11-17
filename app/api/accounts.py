@@ -15,7 +15,8 @@ import base64
 
 from app.api.auth import verify_api_key
 from app.db.connection import get_db_session
-from app.db.models import Account
+from app.db.models import Account, APIKey
+from app.services.api_key_service import APIKeyService
 
 logger = logging.getLogger(__name__)
 
@@ -90,20 +91,31 @@ def decrypt_credential(encoded_credential: str) -> str:
 @router.post("/accounts", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
 async def create_account(
     request: CreateAccountRequest,
-    api_key: str = Depends(verify_api_key),
+    api_key: APIKey = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
     Create a new Instagram account configuration.
-    
+
+    Requires admin API key - account-scoped keys cannot create new accounts.
+
     Minimal implementation for MVP:
     - Store account with encoded credentials (NOT secure - see warning)
     - Skip Instagram token validation (will add in Priority 2)
     - Return 201 with account_id
-    
-    WARNING: Credentials are base64-encoded, NOT encrypted. 
+
+    WARNING: Credentials are base64-encoded, NOT encrypted.
     Do not use in production without implementing real encryption (Task 10).
     """
+    # Only admin keys can create new accounts
+    from app.db.models import APIKeyType
+    if api_key.type != APIKeyType.ADMIN:
+        logger.warning(f"Permission denied: Non-admin key {api_key.id} attempted to create account")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin API keys can create new accounts"
+        )
+
     logger.info(f"Creating account for Instagram user: {request.username}")
     
     # Check if account already exists

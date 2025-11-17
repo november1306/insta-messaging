@@ -4,13 +4,17 @@ Provides conversation lists and message retrieval for the Vue chat interface
 """
 import logging
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from app.db.connection import get_db_session
 from app.db.models import MessageModel
 from app.clients.instagram_client import InstagramClient
 from app.config import settings
+from app.api.ui_auth import (
+    LoginRequest, LoginResponse,
+    authenticate_user, create_jwt_token
+)
 from typing import List, Dict, Any
 from datetime import datetime
 
@@ -21,6 +25,46 @@ router = APIRouter()
 # Cache for Instagram usernames (in-memory for MVP)
 # In production, use Redis or database
 username_cache: Dict[str, str] = {}
+
+
+# ============================================
+# Authentication Endpoints
+# ============================================
+
+@router.post("/login", response_model=LoginResponse)
+async def login(request: LoginRequest):
+    """
+    Login to the UI with username and password.
+
+    Returns a JWT token for subsequent requests.
+
+    Default credentials:
+    - Username: admin, Password: admin123
+    - Username: demo, Password: demo123
+    """
+    user = await authenticate_user(request.username, request.password)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password"
+        )
+
+    # Generate JWT token
+    token, expires_in = create_jwt_token(user["username"], user["role"])
+
+    return LoginResponse(
+        token=token,
+        expires_in=expires_in,
+        username=user["username"],
+        role=user["role"],
+        display_name=user["display_name"]
+    )
+
+
+# ============================================
+# UI Data Endpoints
+# ============================================
 
 
 async def _get_instagram_username(sender_id: str) -> str:

@@ -15,10 +15,11 @@ import httpx
 
 from app.api.auth import verify_api_key
 from app.db.connection import get_db_session
-from app.db.models import OutboundMessage, Account
+from app.db.models import OutboundMessage, Account, APIKey
 from app.clients.instagram_client import InstagramClient, InstagramAPIError
 from app.config import settings
 from app.api.events import broadcast_new_message, broadcast_message_status
+from app.services.api_key_service import APIKeyService
 
 logger = logging.getLogger(__name__)
 
@@ -84,23 +85,36 @@ class MessageStatusResponse(BaseModel):
 @router.post("/messages/send", response_model=SendMessageResponse, status_code=status.HTTP_202_ACCEPTED)
 async def send_message(
     request: SendMessageRequest,
-    api_key: str = Depends(verify_api_key),
+    api_key: APIKey = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
     Send a message from Instagram business account to a customer.
-    
+
+    Requires permission to access the specified account_id.
+
     Minimal implementation for MVP (Priority 1):
     - Check idempotency - return existing if duplicate
     - Create outbound_messages record with status="pending"
     - Return 202 Accepted immediately
     - Skip account validation (will add in Priority 2)
     - Skip actual Instagram delivery (will add in Task 6)
-    
+
     Returns:
         202 Accepted with message_id
     """
     logger.info(f"Send message request - account: {request.account_id}, recipient: {request.recipient_id}")
+
+    # Check if API key has permission to access this account
+    has_permission = await APIKeyService.check_account_permission(db, api_key, request.account_id)
+    if not has_permission:
+        logger.warning(
+            f"Permission denied: API key {api_key.id} attempted to send message for account {request.account_id}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"API key does not have permission to access account {request.account_id}"
+        )
     
     # 1. Check idempotency - return existing if duplicate
     result = await db.execute(
@@ -235,17 +249,19 @@ async def send_message(
 @router.get("/messages/{message_id}/status", response_model=MessageStatusResponse)
 async def get_message_status(
     message_id: str,
-    api_key: str = Depends(verify_api_key),
+    api_key: APIKey = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
     Get the delivery status of a sent message.
-    
+
+    Requires permission to access the account associated with the message.
+
     Minimal implementation for MVP (Priority 1):
     - Query outbound_messages by message_id
     - Return 404 if not found
     - Return current status
-    - Skip permission checking (will add in Priority 2)
+    - Check permission for the associated account
     
     Returns:
         200 OK with message status
@@ -266,7 +282,19 @@ async def get_message_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Message '{message_id}' not found"
         )
-    
+
+    # Check if API key has permission to access this message's account
+    has_permission = await APIKeyService.check_account_permission(db, api_key, message.account_id)
+    if not has_permission:
+        logger.warning(
+            f"Permission denied: API key {api_key.id} attempted to access message {message_id} "
+            f"from account {message.account_id}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"API key does not have permission to access this message"
+        )
+
     # Build error detail if message failed
     error_detail = None
     if message.status == "failed" and message.error_message:
