@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from functools import wraps
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -78,6 +79,41 @@ app = FastAPI(
     redoc_url=None,  # Disable default redoc
     openapi_url=None  # We'll serve custom OpenAPI
 )
+
+
+# ============================================
+# CORS Middleware Configuration
+# ============================================
+# Required for frontend development (different port) and production deployments
+# where frontend may be served from different domain/CDN
+
+# Development origins (local frontend dev server)
+dev_origins = [
+    "http://localhost:5173",  # Vite dev server
+    "http://127.0.0.1:5173",
+]
+
+# Production origins (will be overridden by environment variable)
+# Set CORS_ORIGINS env var as comma-separated list: "https://example.com,https://www.example.com"
+production_origins = settings.cors_origins.split(",") if hasattr(settings, 'cors_origins') and settings.cors_origins else []
+
+# Combine dev and production origins
+allowed_origins = dev_origins + production_origins
+
+# Add current host for built frontend
+allowed_origins.append("http://localhost:8000")
+allowed_origins.append("http://127.0.0.1:8000")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],  # Allow all headers
+    expose_headers=["*"],  # Expose all headers to frontend
+)
+
+logger.info(f"✅ CORS configured for origins: {allowed_origins}")
 
 
 # Add validation error handler for debugging
