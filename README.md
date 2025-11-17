@@ -230,10 +230,7 @@ uvicorn app.main:app --port 8000
 
 ### Authentication
 
-The project uses two authentication systems:
-
-1. **API Keys** - For CRM integration (`/api/v1/*` endpoints)
-2. **JWT Tokens** - For web UI access (`/ui/*` endpoints)
+All endpoints use **API Key Authentication** (both CRM API and UI).
 
 #### Quick Start
 
@@ -244,12 +241,17 @@ python -m app.cli.generate_api_key --name "My Key" --type admin --env test
 
 **Use the API key:**
 ```bash
-curl -H "Authorization: Bearer <your-api-key-here>" http://localhost:8000/api/v1/messages/send
+# For CRM endpoints
+curl -H "Authorization: Bearer <your-api-key-here>" \
+     http://localhost:8000/api/v1/messages/send
+
+# For UI endpoints
+curl -H "Authorization: Bearer <your-api-key-here>" \
+     http://localhost:8000/ui/conversations
 ```
 
-**UI Login:**
-- Username: `admin` / Password: `admin123`
-- Username: `demo` / Password: `demo123`
+**Development mode:** Set `USE_STUB_AUTH=true` to accept any Bearer token
+**Production mode:** Generate proper API keys (required)
 
 📖 **See [AUTHENTICATION.md](AUTHENTICATION.md) for complete authentication documentation.**
 

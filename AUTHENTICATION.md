@@ -4,10 +4,12 @@ This document explains how to use the authentication system in the Instagram Mes
 
 ## Overview
 
-The project uses two separate authentication systems:
+The project uses **API Key Authentication** for all endpoints (both CRM API and UI).
 
-1. **API Key Authentication** - For CRM integration and programmatic access
-2. **UI Authentication** - For web chat interface access
+- Single authentication method for consistency
+- Bcrypt-hashed API keys stored in database
+- Two permission levels: admin and account-scoped
+- Generate keys via CLI tool
 
 ---
 
@@ -175,92 +177,32 @@ account_ids = await APIKeyService.get_permitted_account_ids(db, api_key)
 
 ---
 
-## UI Authentication
+## UI Endpoints
 
-Simple JWT-based authentication for the web chat interface.
+The web chat UI endpoints (`/ui/conversations`, `/ui/messages/*`) use the **same API key authentication** as the CRM API.
 
-### Default Credentials
-
-**Admin User:**
-- Username: `admin`
-- Password: `admin123`
-- Role: `admin` (full access)
-
-**Demo User:**
-- Username: `demo`
-- Password: `demo123`
-- Role: `viewer` (view-only)
-
-### Login Flow
-
-1. **POST to `/ui/login`:**
+### Accessing UI Endpoints
 
 ```bash
-curl -X POST "http://localhost:8000/ui/login" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "admin",
-    "password": "admin123"
-  }'
-```
+# Generate an API key for UI access
+python -m app.cli.generate_api_key \
+  --name "UI Access" \
+  --type admin \
+  --env test
 
-2. **Receive JWT token:**
-
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "expires_in": 86400,
-  "username": "admin",
-  "role": "admin",
-  "display_name": "Administrator"
-}
-```
-
-3. **Use token in subsequent requests:**
-
-```bash
+# Use the API key with UI endpoints
 curl "http://localhost:8000/ui/conversations" \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  -H "Authorization: Bearer <your-api-key>"
 ```
 
-### Token Expiration
+### Frontend Integration
 
-- Default: 24 hours
-- Configurable via `JWT_EXPIRATION_HOURS` environment variable
-- After expiration, users must log in again
+If you're building a frontend application:
 
-### Adding New Users (Hardcoded)
-
-To add new hardcoded users, edit `app/api/ui_auth.py`:
-
-```python
-# Generate password hash
-from app.api.ui_auth import generate_password_hash
-hash = generate_password_hash("newpassword123")
-print(hash)  # Copy this hash
-
-# Add to HARDCODED_USERS dict
-HARDCODED_USERS = {
-    "newuser": {
-        "password_hash": "$2b$12$...",  # Paste hash here
-        "role": "viewer",
-        "display_name": "New User"
-    }
-}
-```
-
-### Security Configuration
-
-#### JWT Secret Key
-
-Set a strong secret key in production:
-
-```bash
-# .env file
-JWT_SECRET_KEY=your-secret-key-change-in-production-12345
-```
-
-⚠️ **Important:** Change the default secret key before deploying to production!
+1. **Generate an API key** for the frontend to use
+2. **Store securely** (never expose in client-side code)
+3. **Use from backend** - make API calls from your backend server
+4. **Or use stub auth** in development (see below)
 
 ---
 
@@ -285,13 +227,8 @@ When enabled:
 
 ```bash
 # Enable stub auth (development only)
+# WARNING: Set to false or remove in production!
 USE_STUB_AUTH=false
-
-# JWT secret for UI authentication
-JWT_SECRET_KEY=your-secret-key-change-in-production-12345
-
-# JWT token expiration (hours)
-JWT_EXPIRATION_HOURS=24
 ```
 
 ---
@@ -333,13 +270,12 @@ Before deploying to production:
 
 - [ ] Generate production API keys with `--env live`
 - [ ] Disable stub authentication (`USE_STUB_AUTH=false` or remove)
-- [ ] Change JWT secret key (`JWT_SECRET_KEY`)
 - [ ] Review and restrict account permissions
 - [ ] Set API key expiration dates where appropriate
-- [ ] Remove or change default UI passwords
 - [ ] Enable HTTPS for all API requests
 - [ ] Implement rate limiting (recommended)
 - [ ] Monitor API key usage via `last_used_at` field
+- [ ] Run database migrations (`alembic upgrade head`)
 
 ---
 
@@ -358,12 +294,6 @@ Before deploying to production:
 2. Check which accounts your key has access to
 3. Create a new admin key if needed
 
-### "Invalid or expired token" (UI)
-
-1. Token has expired (default: 24 hours)
-2. JWT secret key changed
-3. Log in again to get a new token
-
 ---
 
 ## API Reference
@@ -372,4 +302,4 @@ See the interactive API documentation:
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 
-All CRM endpoints require API key authentication. UI endpoints require JWT authentication.
+All endpoints (CRM API and UI) require API key authentication.
