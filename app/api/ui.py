@@ -1,6 +1,9 @@
 """
 UI API endpoints for the web frontend
 Provides conversation lists and message retrieval for the Vue chat interface
+
+Authentication: Uses API key authentication (same as CRM endpoints).
+Generate an API key with: python -m app.cli.generate_api_key --name "UI Access" --type admin --env test
 """
 import logging
 import httpx
@@ -8,9 +11,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from app.db.connection import get_db_session
-from app.db.models import MessageModel
+from app.db.models import MessageModel, APIKey
 from app.clients.instagram_client import InstagramClient
 from app.config import settings
+from app.api.auth import verify_api_key
 from typing import List, Dict, Any
 from datetime import datetime
 
@@ -21,6 +25,11 @@ router = APIRouter()
 # Cache for Instagram usernames (in-memory for MVP)
 # In production, use Redis or database
 username_cache: Dict[str, str] = {}
+
+
+# ============================================
+# UI Data Endpoints (API Key Protected)
+# ============================================
 
 
 async def _get_instagram_username(sender_id: str) -> str:
@@ -59,11 +68,14 @@ async def _get_instagram_username(sender_id: str) -> str:
 
 @router.get("/ui/conversations")
 async def get_conversations(
+    api_key: APIKey = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
     Get list of all conversations grouped by sender.
     Returns the latest message from each sender with Instagram usernames.
+
+    Requires API key authentication.
     """
     try:
         # Subquery to get the latest message ID for each sender
@@ -115,11 +127,14 @@ async def get_conversations(
 @router.get("/ui/messages/{sender_id}")
 async def get_messages(
     sender_id: str,
+    api_key: APIKey = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
     Get all messages for a specific sender (conversation thread).
     Returns both inbound and outbound messages with Instagram username.
+
+    Requires API key authentication.
     """
     try:
         # Get all messages for this sender

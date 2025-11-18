@@ -230,14 +230,30 @@ uvicorn app.main:app --port 8000
 
 ### Authentication
 
-All API endpoints require Bearer token authentication:
+All endpoints use **API Key Authentication** (both CRM API and UI).
 
+#### Quick Start
+
+**Generate an API key:**
 ```bash
-Authorization: Bearer your_api_key_here
+python -m app.cli.generate_api_key --name "My Key" --type admin --env test
 ```
 
-**Development mode:** Any Bearer token is accepted (stub authentication)  
-**Production mode:** Real API key validation required
+**Use the API key:**
+```bash
+# For CRM endpoints
+curl -H "Authorization: Bearer <your-api-key-here>" \
+     http://localhost:8000/api/v1/messages/send
+
+# For UI endpoints
+curl -H "Authorization: Bearer <your-api-key-here>" \
+     http://localhost:8000/ui/conversations
+```
+
+**Development mode:** Set `USE_STUB_AUTH=true` to accept any Bearer token
+**Production mode:** Generate proper API keys (required)
+
+📖 **See [AUTHENTICATION.md](AUTHENTICATION.md) for complete authentication documentation.**
 
 ### API Documentation
 
