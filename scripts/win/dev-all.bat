@@ -39,18 +39,22 @@ if errorlevel 1 (
     echo Please install from: https://ngrok.com/download
     echo.
     echo After installation, add ngrok to your PATH or place it in the project directory.
+    echo Then authenticate with:
+    echo   ngrok config add-authtoken YOUR_TOKEN
+    echo   (Get your token from: https://dashboard.ngrok.com/get-started/your-authtoken)
+    echo.
     exit /b 1
 )
 
 REM Check if ports are available
-netstat -ano | findstr ":8000" >nul 2>&1
+netstat -ano | findstr ":8000.*LISTENING" >nul 2>&1
 if not errorlevel 1 (
     echo [ERROR] Port 8000 is already in use
     echo Please stop any services using this port
     exit /b 1
 )
 
-netstat -ano | findstr ":5173" >nul 2>&1
+netstat -ano | findstr ":5173.*LISTENING" >nul 2>&1
 if not errorlevel 1 (
     echo [ERROR] Port 5173 is already in use
     echo Please stop any services using this port
@@ -92,8 +96,9 @@ call npm run dev
 REM When frontend stops, inform user
 echo.
 echo [INFO] Frontend stopped
-echo Please manually close the backend and ngrok windows
-echo Or use Task Manager to kill: uvicorn, ngrok, node
+echo.
+echo To stop all services, run: scripts\win\stop-all.bat
+echo Or manually close the backend and ngrok windows
 
 cd ..
 endlocal

@@ -59,10 +59,6 @@ if [ -d "venv" ]; then
     print_success "Virtual environment already exists"
 else
     python3 -m venv venv
-    if [ $? -ne 0 ]; then
-        print_error "Failed to create virtual environment"
-        exit 1
-    fi
     print_success "Virtual environment created"
 fi
 
@@ -70,17 +66,10 @@ fi
 echo ""
 echo "[3/6] Installing Python dependencies..."
 source venv/bin/activate
-if [ $? -ne 0 ]; then
-    print_error "Failed to activate virtual environment"
-    exit 1
-fi
 
-python -m pip install --upgrade pip > /dev/null 2>&1
+print_info "Upgrading pip..."
+python -m pip install --upgrade pip
 pip install -r requirements.txt
-if [ $? -ne 0 ]; then
-    print_error "Failed to install Python dependencies"
-    exit 1
-fi
 print_success "Python dependencies installed"
 
 # Create .env file if it doesn't exist
@@ -104,10 +93,6 @@ fi
 echo ""
 echo "[5/6] Running database migrations..."
 alembic upgrade head
-if [ $? -ne 0 ]; then
-    print_error "Database migration failed"
-    exit 1
-fi
 print_success "Database migrations completed"
 
 # Install frontend dependencies
@@ -123,10 +108,6 @@ if [ -d "node_modules" ]; then
     print_success "Frontend dependencies already installed"
 else
     npm install
-    if [ $? -ne 0 ]; then
-        print_error "Failed to install frontend dependencies"
-        exit 1
-    fi
     print_success "Frontend dependencies installed"
 fi
 cd ..

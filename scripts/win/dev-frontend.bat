@@ -23,7 +23,7 @@ if not exist "frontend\node_modules\" (
 )
 
 REM Check if port 5173 is available
-netstat -ano | findstr ":5173" >nul 2>&1
+netstat -ano | findstr ":5173.*LISTENING" >nul 2>&1
 if not errorlevel 1 (
     echo [WARNING] Port 5173 is already in use
     echo Please stop any services using this port

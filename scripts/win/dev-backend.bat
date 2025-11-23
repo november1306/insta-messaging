@@ -31,7 +31,7 @@ if errorlevel 1 (
 )
 
 REM Check if port 8000 is available
-netstat -ano | findstr ":8000" >nul 2>&1
+netstat -ano | findstr ":8000.*LISTENING" >nul 2>&1
 if not errorlevel 1 (
     echo [WARNING] Port 8000 is already in use
     echo Please stop any services using this port or change PORT in .env

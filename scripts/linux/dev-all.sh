@@ -33,20 +33,36 @@ cleanup() {
     echo ""
     print_info "Shutting down services..."
 
+    # Gracefully stop backend
     if [ ! -z "$BACKEND_PID" ]; then
         kill $BACKEND_PID 2>/dev/null || true
+        sleep 1
+        # Only force kill if still running
+        if ps -p $BACKEND_PID > /dev/null 2>&1; then
+            kill -9 $BACKEND_PID 2>/dev/null || true
+        fi
         print_info "Backend stopped"
     fi
 
+    # Gracefully stop ngrok
     if [ ! -z "$NGROK_PID" ]; then
         kill $NGROK_PID 2>/dev/null || true
+        sleep 1
+        # Only force kill if still running
+        if ps -p $NGROK_PID > /dev/null 2>&1; then
+            kill -9 $NGROK_PID 2>/dev/null || true
+        fi
         print_info "ngrok stopped"
     fi
 
-    # Kill any remaining processes on our ports
-    lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+    # Clean up any orphaned processes on our ports (only if PIDs weren't tracked)
+    if [ -z "$BACKEND_PID" ] && lsof -ti:8000 > /dev/null 2>&1; then
+        lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+    fi
+    if [ -z "$NGROK_PID" ] && lsof -ti:4040 > /dev/null 2>&1; then
+        lsof -ti:4040 | xargs kill -9 2>/dev/null || true
+    fi
     lsof -ti:5173 | xargs kill -9 2>/dev/null || true
-    lsof -ti:4040 | xargs kill -9 2>/dev/null || true
 
     print_info "All services stopped"
     exit 0
@@ -92,6 +108,10 @@ if ! command -v ngrok &> /dev/null; then
     echo "  brew install ngrok  (macOS)"
     echo "  snap install ngrok  (Linux)"
     echo ""
+    echo "After installation, authenticate with:"
+    echo "  ngrok config add-authtoken YOUR_TOKEN"
+    echo "  (Get your token from: https://dashboard.ngrok.com/get-started/your-authtoken)"
+    echo ""
     exit 1
 fi
 
@@ -110,16 +130,19 @@ fi
 
 # Activate virtual environment
 source venv/bin/activate
-if [ $? -ne 0 ]; then
-    print_error "Failed to activate virtual environment"
-    exit 1
-fi
 
 # Start ngrok
 echo "[1/3] Starting ngrok tunnel..."
 ngrok http 8000 > /dev/null 2>&1 &
 NGROK_PID=$!
 sleep 2
+
+# Verify ngrok started
+if ! ps -p $NGROK_PID > /dev/null 2>&1; then
+    print_error "ngrok failed to start"
+    echo "Check if ngrok is authenticated: ngrok config add-authtoken YOUR_TOKEN"
+    exit 1
+fi
 print_success "ngrok started (UI at http://localhost:4040)"
 
 # Start backend
@@ -128,6 +151,16 @@ echo "[2/3] Starting backend server..."
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 > /dev/null 2>&1 &
 BACKEND_PID=$!
 sleep 3
+
+# Verify backend started
+if ! ps -p $BACKEND_PID > /dev/null 2>&1; then
+    print_error "Backend failed to start"
+    echo "Check logs for errors. Common issues:"
+    echo "  - Port 8000 already in use"
+    echo "  - Missing dependencies in venv"
+    echo "  - Database connection errors"
+    exit 1
+fi
 print_success "Backend started (http://localhost:8000)"
 
 # Start frontend

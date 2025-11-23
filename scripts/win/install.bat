@@ -60,7 +60,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
-python -m pip install --upgrade pip >nul 2>&1
+echo [INFO] Upgrading pip...
+python -m pip install --upgrade pip
+if errorlevel 1 (
+    echo [WARNING] pip upgrade failed, continuing with existing pip version
+)
 pip install -r requirements.txt
 if errorlevel 1 (
     echo [ERROR] Failed to install Python dependencies
