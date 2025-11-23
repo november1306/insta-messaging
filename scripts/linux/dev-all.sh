@@ -97,57 +97,11 @@ if [ ! -d "frontend/node_modules" ]; then
     exit 1
 fi
 
-# Check if ngrok is installed
-if ! command -v ngrok &> /dev/null; then
-    print_error "ngrok is not installed or not in PATH"
-    echo ""
-    echo "ngrok is required for Instagram webhook testing."
-    echo "Please install from: https://ngrok.com/download"
-    echo ""
-    echo "On Linux/Mac:"
-    echo "  brew install ngrok  (macOS)"
-    echo "  snap install ngrok  (Linux)"
-    echo ""
-    echo "After installation, authenticate with:"
-    echo "  ngrok config add-authtoken YOUR_TOKEN"
-    echo "  (Get your token from: https://dashboard.ngrok.com/get-started/your-authtoken)"
-    echo ""
-    exit 1
-fi
-
-# Check if ports are available
-if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
-    print_error "Port 8000 is already in use"
-    echo "Please stop any services using this port"
-    exit 1
-fi
-
-if lsof -Pi :5173 -sTCP:LISTEN -t >/dev/null 2>&1; then
-    print_error "Port 5173 is already in use"
-    echo "Please stop any services using this port"
-    exit 1
-fi
-
 # Activate virtual environment
 source venv/bin/activate
 
-# Start ngrok
-echo "[1/3] Starting ngrok tunnel..."
-ngrok http 8000 > /dev/null 2>&1 &
-NGROK_PID=$!
-sleep 2
-
-# Verify ngrok started
-if ! ps -p $NGROK_PID > /dev/null 2>&1; then
-    print_error "ngrok failed to start"
-    echo "Check if ngrok is authenticated: ngrok config add-authtoken YOUR_TOKEN"
-    exit 1
-fi
-print_success "ngrok started (UI at http://localhost:4040)"
-
-# Start backend
-echo ""
-echo "[2/3] Starting backend server..."
+# Start backend first
+echo "[1/3] Starting backend server..."
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 > /dev/null 2>&1 &
 BACKEND_PID=$!
 sleep 3
@@ -162,6 +116,27 @@ if ! ps -p $BACKEND_PID > /dev/null 2>&1; then
     exit 1
 fi
 print_success "Backend started (http://localhost:8000)"
+
+# Start ngrok (check if installed first, but don't fail if not found)
+echo ""
+echo "[2/3] Starting ngrok tunnel..."
+if command -v ngrok &> /dev/null; then
+    ngrok http 8000 > /dev/null 2>&1 &
+    NGROK_PID=$!
+    sleep 2
+
+    # Verify ngrok started
+    if ps -p $NGROK_PID > /dev/null 2>&1; then
+        print_success "ngrok started (UI at http://localhost:4040)"
+    else
+        print_warning "ngrok failed to start (not critical for local development)"
+        NGROK_PID=""
+    fi
+else
+    print_warning "ngrok not installed (optional for Instagram webhooks)"
+    echo "Install from: https://ngrok.com/download"
+    NGROK_PID=""
+fi
 
 # Start frontend
 echo ""

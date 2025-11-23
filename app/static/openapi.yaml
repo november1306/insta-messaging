@@ -58,12 +58,10 @@ info:
     name: API Support
 
 servers:
+  - url: https://charli-futureless-compositionally.ngrok-free.dev
+    description: HTTPS via ngrok
   - url: http://localhost:8000
-    description: Local development (API testing)
-  - url: https://your-ngrok-url.ngrok-free.dev
-    description: Local development (Instagram webhooks)
-  - url: https://api.yourdomain.com
-    description: Production
+    description: Local development server
 
 security:
   - BearerAuth: []
