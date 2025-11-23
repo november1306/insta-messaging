@@ -110,7 +110,7 @@ async def handle_webhook(
         logger.info(f"📨 Webhook POST request received - object: {object_type}, entries: {entry_count}")
 
         # Initialize repository
-        message_repo = MessageRepository(db)
+        message_repo = MessageRepository(db, request.app.state.crm_pool)
 
         # Create HTTP client and Instagram client once for all auto-replies
         async with httpx.AsyncClient() as http_client:
@@ -502,19 +502,20 @@ class SendMessageResponse(BaseModel):
 
 @router.post("/send", response_model=SendMessageResponse)
 async def send_message_api(
-    request: SendMessageRequest,
+    send_request: SendMessageRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db_session)
 ):
     """
     API endpoint to send a message from the business account to a user.
-    
+
     Usage:
         POST /webhooks/send
         {
             "recipient_id": "1558635688632972",
             "message_text": "Hello from the business!"
         }
-    
+
     Returns:
         {
             "success": true,
@@ -522,7 +523,7 @@ async def send_message_api(
             "error": null
         }
     """
-    logger.info(f"📤 API request to send message to {request.recipient_id}")
+    logger.info(f"📤 API request to send message to {send_request.recipient_id}")
     
     try:
         # Create Instagram client (MVP: one client per request)
@@ -535,19 +536,19 @@ async def send_message_api(
             
             # Send message via Instagram API
             response = await instagram_client.send_message(
-                recipient_id=request.recipient_id,
-                message_text=request.message_text
+                recipient_id=send_request.recipient_id,
+                message_text=send_request.message_text
             )
-            
+
             if response.success:
                 # Store outbound message in database
-                message_repo = MessageRepository(db)
-                
+                message_repo = MessageRepository(db, request.app.state.crm_pool)
+
                 outbound_message = Message(
                     id=response.message_id,
                     sender_id=settings.instagram_business_account_id,
-                    recipient_id=request.recipient_id,
-                    message_text=request.message_text,
+                    recipient_id=send_request.recipient_id,
+                    message_text=send_request.message_text,
                     direction="outbound",
                     timestamp=datetime.now(timezone.utc)
                 )

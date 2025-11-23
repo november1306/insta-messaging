@@ -66,6 +66,13 @@ class Settings:
         # CRM webhook configuration
         self.crm_webhook_timeout = float(os.getenv("CRM_WEBHOOK_TIMEOUT", "10.0"))  # seconds
 
+        # CRM MySQL configuration (dual storage)
+        self.crm_mysql_enabled = os.getenv("CRM_MYSQL_ENABLED", "false").lower() == "true"
+        self.crm_mysql_host = os.getenv("CRM_MYSQL_HOST", "")
+        self.crm_mysql_user = os.getenv("CRM_MYSQL_USER", "")
+        self.crm_mysql_password = os.getenv("CRM_MYSQL_PASSWORD", "")
+        self.crm_mysql_database = os.getenv("CRM_MYSQL_DATABASE", "")
+
         # Logging
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
     
