@@ -22,15 +22,6 @@ if not exist "frontend\node_modules\" (
     exit /b 1
 )
 
-REM Check if port 5173 is available
-netstat -ano | findstr ":5173.*LISTENING" >nul 2>&1
-if not errorlevel 1 (
-    echo [WARNING] Port 5173 is already in use
-    echo Please stop any services using this port
-    pause
-    exit /b 1
-)
-
 echo [OK] Starting Vite frontend on http://localhost:5173
 echo [OK] Make sure backend is running on port 8000 for API calls
 echo.

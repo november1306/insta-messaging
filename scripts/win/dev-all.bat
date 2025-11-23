@@ -36,55 +36,25 @@ if not exist "frontend\node_modules\" (
 )
 echo [OK] Frontend dependencies installed
 
-REM Check if ngrok is installed (optional for local development)
-ngrok version >nul 2>&1
-if errorlevel 1 (
-    echo [WARNING] ngrok is not installed - webhook testing will not be available
-    echo [INFO] Install from: https://ngrok.com/download
-    set SKIP_NGROK=1
-) else (
-    echo [OK] ngrok found
-    set SKIP_NGROK=0
-)
-
-REM Check if ports are available
-netstat -ano | findstr ":8000.*LISTENING" >nul 2>&1
-if not errorlevel 1 (
-    echo [ERROR] Port 8000 is already in use
-    echo Please run 'scripts\win\stop-all.bat' to stop existing services
-    exit /b 1
-)
-echo [OK] Port 8000 is available
-
-netstat -ano | findstr ":5173.*LISTENING" >nul 2>&1
-if not errorlevel 1 (
-    echo [ERROR] Port 5173 is already in use
-    echo Please run 'scripts\win\stop-all.bat' to stop existing services
-    exit /b 1
-)
-echo [OK] Port 5173 is available
-
 echo.
 
-if %SKIP_NGROK%==0 (
-    echo [1/3] Starting ngrok tunnel...
-    start "ngrok" ngrok http 8000
-    timeout /t 2 /nobreak >nul
-    echo [OK] ngrok started (UI at http://localhost:4040)
-) else (
-    echo [1/3] Skipping ngrok (not installed)
-)
-
-echo.
-echo [2/3] Starting backend server...
+echo [1/3] Starting backend server...
 call venv\Scripts\activate.bat
 start "backend" cmd /k "venv\Scripts\activate.bat && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
 timeout /t 3 /nobreak >nul
 echo [OK] Backend started (http://localhost:8000)
 
 echo.
+echo [2/3] Starting ngrok tunnel...
+start "ngrok" ngrok http 8000
+timeout /t 2 /nobreak >nul
+echo [OK] ngrok started (UI at http://localhost:4040)
+
+echo.
 echo [3/3] Starting frontend server...
-echo [OK] Frontend will start on http://localhost:5173
+start "frontend" cmd /k "cd frontend && npm run dev"
+timeout /t 2 /nobreak >nul
+echo [OK] Frontend started (http://localhost:5173)
 echo.
 echo ========================================
 echo  All Services Running
@@ -95,19 +65,11 @@ echo  API Docs: http://localhost:8000/docs
 echo  ngrok UI: http://localhost:4040
 echo ========================================
 echo.
-echo Press Ctrl+C to stop all services
-echo NOTE: You may need to manually close backend/ngrok windows
-echo.
-
-cd frontend
-call npm run dev
-
-REM When frontend stops, inform user
-echo.
-echo [INFO] Frontend stopped
-echo.
+echo All services are running in separate windows.
 echo To stop all services, run: scripts\win\stop-all.bat
-echo Or manually close the backend and ngrok windows
+echo Or manually close the backend, ngrok, and frontend windows.
+echo.
+echo Press any key to exit...
+pause >nul
 
-cd ..
 endlocal
