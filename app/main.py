@@ -17,6 +17,7 @@ from app.version import __version__
 import logging
 import yaml
 from pathlib import Path
+import aiomysql
 
 # Configure logging
 logging.basicConfig(
@@ -59,14 +60,46 @@ async def lifespan(app: FastAPI):
     
     # Initialize database
     await init_db()
-    
+
+    # Initialize CRM MySQL connection pool (if enabled)
+    crm_pool = None
+    if settings.crm_mysql_enabled:
+        if not settings.crm_mysql_user or not settings.crm_mysql_password:
+            logger.warning("⚠️  CRM_MYSQL_ENABLED=true but credentials missing. CRM sync disabled.")
+        else:
+            try:
+                crm_pool = await aiomysql.create_pool(
+                    host=settings.crm_mysql_host,
+                    user=settings.crm_mysql_user,
+                    password=settings.crm_mysql_password,
+                    db=settings.crm_mysql_database,
+                    minsize=1,
+                    maxsize=5,
+                    pool_recycle=3600,  # Recycle connections after 1 hour
+                    connect_timeout=30,  # 30 second connection timeout
+                    ssl=None  # Explicitly disable SSL (as per test command)
+                )
+                logger.info(f"✅ CRM MySQL connected: {settings.crm_mysql_host}/{settings.crm_mysql_database}")
+            except Exception as e:
+                logger.error(f"❌ CRM MySQL connection failed: {e}. CRM sync disabled.")
+                crm_pool = None
+
+    app.state.crm_pool = crm_pool
+
     logger.info("✅ Configuration loaded successfully")
     logger.info("🔗 Webhook endpoint: /webhooks/instagram")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down...")
+
+    # Close CRM pool
+    if crm_pool:
+        crm_pool.close()
+        await crm_pool.wait_closed()
+        logger.info("✅ CRM MySQL pool closed")
+
     await close_db()
 
 

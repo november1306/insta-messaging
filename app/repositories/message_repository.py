@@ -10,6 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from app.core.interfaces import IMessageRepository, Message
 from app.db.models import MessageModel
 import logging
+import asyncio
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +23,16 @@ class MessageRepository(IMessageRepository):
     Handles conversion between domain Message objects and MessageModel ORM objects.
     """
     
-    def __init__(self, db_session: AsyncSession) -> None:
+    def __init__(self, db_session: AsyncSession, crm_pool=None) -> None:
         """
-        Initialize repository with database session.
-        
+        Initialize repository with database session and optional CRM pool.
+
         Args:
             db_session: SQLAlchemy async session for database operations
+            crm_pool: aiomysql connection pool for CRM MySQL sync (optional)
         """
         self._db = db_session
+        self._crm_pool = crm_pool
     
     async def save(self, message: Message) -> Message:
         """
@@ -61,9 +65,13 @@ class MessageRepository(IMessageRepository):
             # in get_db_session() (app/db/connection.py)
             self._db.add(db_message)
             await self._db.flush()
-            
+
             logger.info(f"Saved message {message.id} ({message.direction})")
-            
+
+            # Sync to CRM MySQL (fire-and-forget, non-blocking)
+            if self._crm_pool:
+                asyncio.create_task(self._sync_to_crm(message))
+
             return message
             
         except IntegrityError as e:
@@ -111,3 +119,75 @@ class MessageRepository(IMessageRepository):
         except Exception as e:
             logger.error(f"Failed to retrieve message {message_id}: {e}")
             raise
+
+    async def _sync_to_crm(self, message: Message) -> None:
+        """
+        Sync message to CRM MySQL database (fire-and-forget).
+
+        Args:
+            message: Domain Message object to sync
+
+        Note:
+            This is a best-effort sync - errors are logged but not raised.
+            CRM failures don't affect local storage.
+        """
+        try:
+            # Determine user_id based on direction (inbound = sender, outbound = recipient)
+            user_id = message.sender_id if message.direction == 'inbound' else message.recipient_id
+
+            # Fetch username from Instagram API
+            username = await self._get_instagram_username(user_id)
+
+            # Map direction to CRM format ('inbound' -> 'in', 'outbound' -> 'out')
+            direction = 'in' if message.direction == 'inbound' else 'out'
+
+            # Insert into CRM MySQL
+            async with self._crm_pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "INSERT INTO messages (user_id, username, direction, message, created_at) "
+                        "VALUES (%s, %s, %s, %s, %s)",
+                        (user_id, username, direction, message.message_text, message.timestamp)
+                    )
+                    await conn.commit()
+
+            logger.info(f"✅ CRM sync OK: {message.id}")
+
+        except Exception as e:
+            # TODO: CRM table missing fields (instagram_message_id, sender/recipient, conversation_id, status)
+            # TODO: Add retry logic for transient failures
+            # TODO: Add performance monitoring (track sync duration)
+            logger.error(f"❌ CRM sync failed for message {message.id}: {e}")
+
+    async def _get_instagram_username(self, user_id: str) -> str:
+        """
+        Fetch Instagram username from Graph API.
+
+        Args:
+            user_id: Instagram user PSID
+
+        Returns:
+            Instagram username, or user_id if API call fails
+
+        Note:
+            Falls back to user_id if API call fails (best-effort).
+        """
+        try:
+            from app.config import settings
+
+            # Instagram Graph API endpoint for user info
+            url = f"https://graph.instagram.com/{user_id}"
+            params = {
+                "fields": "username",
+                "access_token": settings.instagram_page_access_token
+            }
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+                return data.get("username", user_id)
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch username for {user_id}: {e}. Using user_id as fallback.")
+            return user_id
