@@ -327,3 +327,6 @@ postman_environment.json
 # Project-specific temporary files
 verify_interfaces.py.bak
 SETUP_NOTES.local.md
+
+# Daemon process files
+server.pid
