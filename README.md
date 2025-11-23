@@ -39,40 +39,49 @@ Automated Instagram DM system with CRM integration API for e-commerce businesses
 
 ### Prerequisites
 
-- Python 3.12+ or Miniconda/Anaconda
+- Python 3.11+
+- Node.js 18+ and npm
 - Instagram Business Account
 - Facebook App with Instagram permissions
-- ngrok (for local webhook testing)
+- ngrok (for Instagram webhook testing)
+  - **Important:** After installing ngrok, authenticate it with:
+    ```bash
+    ngrok config add-authtoken YOUR_TOKEN
+    ```
+    Get your token from [ngrok dashboard](https://dashboard.ngrok.com/get-started/your-authtoken)
 
 ### Quick Setup
 
-1. **Clone and install dependencies:**
-   ```bash
-   # Using conda (recommended)
-   conda env create -f environment.yml
-   conda activate insta-auto
+**Windows:**
+```bash
+# Run the installation script (idempotent, safe to run multiple times)
+scripts\win\install.bat
 
-   # Or using pip
-   pip install -r requirements.txt
-   ```
+# Edit .env with your credentials
+notepad .env
 
-2. **Configure environment:**
-   ```bash
-   # Copy example config
-   cp .env.example .env
+# Start all services (backend + frontend + ngrok)
+scripts\win\dev-all.bat
+```
 
-   # Edit .env with your credentials (see Configuration section)
-   ```
+**Linux/Mac:**
+```bash
+# Run the installation script (idempotent, safe to run multiple times)
+scripts/linux/install.sh
 
-3. **Initialize database:**
-   ```bash
-   alembic upgrade head
-   ```
+# Edit .env with your credentials
+nano .env
 
-4. **Start server:**
-   ```bash
-   uvicorn app.main:app --reload
-   ```
+# Start all services (backend + frontend + ngrok)
+scripts/linux/dev-all.sh
+```
+
+The installation script will:
+- Create Python virtual environment (`venv/`)
+- Install Python dependencies from `requirements.txt`
+- Create `.env` from `.env.example`
+- Run database migrations
+- Install frontend dependencies
 
 Server runs at `http://localhost:8000`
 
@@ -122,34 +131,70 @@ LOG_LEVEL=INFO
 
 ## Running Locally
 
+### Available Scripts
+
+**Windows:**
+- `scripts\win\install.bat` - First-time setup
+- `scripts\win\dev-all.bat` - Start all services (backend + frontend + ngrok)
+- `scripts\win\dev-backend.bat` - Start backend only
+- `scripts\win\dev-frontend.bat` - Start frontend only
+- `scripts\win\build.bat` - Build production frontend
+- `scripts\win\start.bat` - Start production server
+- `scripts\win\stop-all.bat` - Stop all running services (ngrok, backend, frontend)
+
+**Linux/Mac:**
+- `scripts/linux/install.sh` - First-time setup
+- `scripts/linux/dev-all.sh` - Start all services (backend + frontend + ngrok)
+- `scripts/linux/dev-backend.sh` - Start backend only
+- `scripts/linux/dev-frontend.sh` - Start frontend only
+- `scripts/linux/build.sh` - Build production frontend
+- `scripts/linux/start.sh` - Start production server
+- `scripts/linux/start-daemon.sh` - Start as background daemon
+- `scripts/linux/stop-daemon.sh` - Stop daemon
+- `scripts/linux/status-daemon.sh` - Check daemon status
+
 ### For API Testing (localhost)
 
 ```bash
-# Start server
-uvicorn app.main:app --reload
+# Windows
+scripts\win\dev-backend.bat
+
+# Linux/Mac
+scripts/linux/dev-backend.sh
 
 # Server available at http://localhost:8000
 # API docs at http://localhost:8000/docs
 ```
 
-### For Webhook Testing (ngrok)
+### For Full Development (with UI and ngrok)
 
 ```bash
-# Terminal 1: Start server
-uvicorn app.main:app --reload
+# Windows
+scripts\win\dev-all.bat
 
-# Terminal 2: Start ngrok
-ngrok http 8000
+# Linux/Mac
+scripts/linux/dev-all.sh
 
-# Copy ngrok URL (e.g., https://abc123.ngrok-free.dev)
-# Configure in Facebook Developer Console:
-# Webhook URL: https://your-ngrok-url.ngrok-free.dev/webhooks/instagram
-# Verify Token: (your FACEBOOK_VERIFY_TOKEN)
+# Backend: http://localhost:8000
+# Frontend: http://localhost:5173
+# API docs: http://localhost:8000/docs
+# ngrok UI: http://localhost:4040
+```
+
+**To stop all services:**
+```bash
+# Windows
+scripts\win\stop-all.bat
+
+# Linux/Mac
+# Press Ctrl+C in the terminal running dev-all.sh
 ```
 
 **When to use what:**
-- **localhost:8000** - Testing API endpoints (faster, direct)
-- **ngrok URL** - Testing Instagram webhooks (publicly accessible)
+- **dev-backend** - API testing only (faster startup)
+- **dev-frontend** - UI development only
+- **dev-all** - Full development with Instagram webhook testing (requires ngrok)
+- **stop-all** (Windows) - Clean shutdown of all services
 
 ---
 
@@ -161,25 +206,26 @@ The project includes an Instagram-like chat interface for live testing and demon
 
 **Development mode** (with hot reload):
 ```bash
-# Linux/Mac
-./dev.sh
-
 # Windows
-dev.bat          # or dev.ps1
+scripts\win\dev-all.bat
+
+# Linux/Mac
+scripts/linux/dev-all.sh
 ```
 - Frontend (dev): http://localhost:5173
 - Backend: http://localhost:8000
 - API docs: http://localhost:8000/docs
+- ngrok UI: http://localhost:4040
 
 **Production mode** (single server):
 ```bash
-# Linux/Mac
-./build.sh  # Build frontend
-uvicorn app.main:app --port 8000
-
 # Windows
-build.bat   # or build.ps1
-uvicorn app.main:app --port 8000
+scripts\win\build.bat    # Build frontend
+scripts\win\start.bat    # Start server
+
+# Linux/Mac
+scripts/linux/build.sh   # Build frontend
+scripts/linux/start.sh   # Start server
 ```
 - Chat UI: http://localhost:8000/chat
 - API: http://localhost:8000/api/v1
@@ -428,12 +474,14 @@ pytest tests/test_webhooks.py
 
 ## Tech Stack
 
-- **Backend:** Python 3.12+ with FastAPI (async)
+- **Backend:** Python 3.11+ with FastAPI (async)
+- **Frontend:** Vue 3 + Vite + Tailwind CSS
 - **Database:** SQLite (development), MySQL (production target)
 - **ORM:** SQLAlchemy 2.0 with async support
 - **Migrations:** Alembic
 - **Security:** Cryptography for credential encryption
 - **Testing:** pytest with async support
+- **Environment:** Python venv (standard virtual environment)
 
 ---
 
