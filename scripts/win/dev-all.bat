@@ -9,12 +9,16 @@ echo  Starting All Development Services
 echo ========================================
 echo.
 
+echo [CHECK] Verifying environment...
+echo.
+
 REM Check if venv exists
 if not exist "venv\" (
     echo [ERROR] Virtual environment not found
     echo Please run 'scripts\win\install.bat' first
     exit /b 1
 )
+echo [OK] Virtual environment found
 
 REM Check if .env exists
 if not exist ".env" (
@@ -22,6 +26,7 @@ if not exist ".env" (
     echo Please run 'scripts\win\install.bat' or copy .env.example to .env
     exit /b 1
 )
+echo [OK] .env file found
 
 REM Check if frontend dependencies are installed
 if not exist "frontend\node_modules\" (
@@ -29,42 +34,46 @@ if not exist "frontend\node_modules\" (
     echo Please run 'scripts\win\install.bat' first
     exit /b 1
 )
+echo [OK] Frontend dependencies installed
 
-REM Check if ngrok is installed
-where ngrok >nul 2>&1
+REM Check if ngrok is installed (optional for local development)
+ngrok version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] ngrok is not installed or not in PATH
-    echo.
-    echo ngrok is required for Instagram webhook testing.
-    echo Please install from: https://ngrok.com/download
-    echo.
-    echo After installation, add ngrok to your PATH or place it in the project directory.
-    echo Then authenticate with:
-    echo   ngrok config add-authtoken YOUR_TOKEN
-    echo   (Get your token from: https://dashboard.ngrok.com/get-started/your-authtoken)
-    echo.
-    exit /b 1
+    echo [WARNING] ngrok is not installed - webhook testing will not be available
+    echo [INFO] Install from: https://ngrok.com/download
+    set SKIP_NGROK=1
+) else (
+    echo [OK] ngrok found
+    set SKIP_NGROK=0
 )
 
 REM Check if ports are available
 netstat -ano | findstr ":8000.*LISTENING" >nul 2>&1
 if not errorlevel 1 (
     echo [ERROR] Port 8000 is already in use
-    echo Please stop any services using this port
+    echo Please run 'scripts\win\stop-all.bat' to stop existing services
     exit /b 1
 )
+echo [OK] Port 8000 is available
 
 netstat -ano | findstr ":5173.*LISTENING" >nul 2>&1
 if not errorlevel 1 (
     echo [ERROR] Port 5173 is already in use
-    echo Please stop any services using this port
+    echo Please run 'scripts\win\stop-all.bat' to stop existing services
     exit /b 1
 )
+echo [OK] Port 5173 is available
 
-echo [1/3] Starting ngrok tunnel...
-start "ngrok" ngrok http 8000
-timeout /t 2 /nobreak >nul
-echo [OK] ngrok started (UI at http://localhost:4040)
+echo.
+
+if %SKIP_NGROK%==0 (
+    echo [1/3] Starting ngrok tunnel...
+    start "ngrok" ngrok http 8000
+    timeout /t 2 /nobreak >nul
+    echo [OK] ngrok started (UI at http://localhost:4040)
+) else (
+    echo [1/3] Skipping ngrok (not installed)
+)
 
 echo.
 echo [2/3] Starting backend server...
