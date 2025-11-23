@@ -38,7 +38,7 @@ Simple dual storage: write messages to both local SQLite and CRM MySQL. Keep it 
   - Start app with `CRM_MYSQL_ENABLED=true` and valid credentials
   - Send test message via webhook or API
   - Verify message in local SQLite: `sqlite3 instagram_automation.db "SELECT * FROM messages ORDER BY created_at DESC LIMIT 1;"`
-  - Verify message in CRM MySQL: `mysql -h mysql314.1gb.ua -u gbua_zag -p --ssl-mode=DISABLED gbua_zag -e "SELECT * FROM messages ORDER BY created_at DESC LIMIT 1;"`
+  - Verify message in CRM MySQL: `mysql -h YOUR_HOST -u YOUR_USER -p --ssl-mode=DISABLED YOUR_DATABASE -e "SELECT * FROM messages ORDER BY created_at DESC LIMIT 1;"`
   - Check logs for "✅ CRM sync OK" or "❌ CRM sync failed"
   - Test with CRM disabled: set `CRM_MYSQL_ENABLED=false`, verify local storage still works
   - Test with invalid CRM credentials: verify app starts and local storage works

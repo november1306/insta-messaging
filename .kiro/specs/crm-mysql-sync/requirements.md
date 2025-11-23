@@ -7,7 +7,7 @@ This feature adds dual storage capability to the Instagram messenger automation 
 ## Glossary
 
 - **Local Database**: The SQLite database used by the Instagram automation system for storing messages, accounts, and application data
-- **CRM Database**: The external MySQL database (mysql314.1gb.ua) owned by the CRM system, specifically the `messages` table
+- **CRM Database**: The external MySQL database owned by the CRM system, specifically the `messages` table
 - **Dual Storage**: Writing message data to both local and CRM databases simultaneously
 - **One-Way Sync**: Data flows from automation system to CRM database only; no reading from CRM database
 - **Message Repository**: The data access layer responsible for storing and retrieving messages
@@ -25,7 +25,7 @@ This feature adds dual storage capability to the Instagram messenger automation 
 2. WHEN an outbound message is sent via the API THEN the system SHALL store the message in both local SQLite and CRM MySQL databases
 3. WHEN storing to CRM MySQL THEN the system SHALL map local message fields to CRM table schema (user_id, username, direction, message, created_at)
 4. WHEN the CRM MySQL connection fails THEN the system SHALL log the error and continue operation with local storage only
-5. WHEN storing to CRM MySQL THEN the system SHALL use the provided credentials (host: mysql314.1gb.ua, user: gbua_zag, database: gbua_zag)
+5. WHEN storing to CRM MySQL THEN the system SHALL use the credentials configured in environment variables
 
 ### Requirement 2
 

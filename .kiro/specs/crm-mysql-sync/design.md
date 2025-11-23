@@ -71,20 +71,20 @@ class MessageRepository(IMessageRepository):
 Add to `.env`:
 ```bash
 CRM_MYSQL_ENABLED=true
-CRM_MYSQL_HOST=mysql314.1gb.ua
-CRM_MYSQL_USER=gbua_zag
-CRM_MYSQL_PASSWORD=az3abdc5z2
-CRM_MYSQL_DATABASE=gbua_zag
+CRM_MYSQL_HOST=your_mysql_host_here
+CRM_MYSQL_USER=your_mysql_user_here
+CRM_MYSQL_PASSWORD=your_mysql_password_here
+CRM_MYSQL_DATABASE=your_mysql_database_here
 ```
 
 Add to `app/config.py`:
 ```python
 class Settings(BaseSettings):
     crm_mysql_enabled: bool = False
-    crm_mysql_host: str = "mysql314.1gb.ua"
+    crm_mysql_host: str = ""
     crm_mysql_user: str = ""
     crm_mysql_password: str = ""
-    crm_mysql_database: str = "gbua_zag"
+    crm_mysql_database: str = ""
 ```
 
 ### Startup
@@ -193,10 +193,10 @@ pip install aiomysql
 **Configuration (.env):**
 ```bash
 CRM_MYSQL_ENABLED=true
-CRM_MYSQL_HOST=mysql314.1gb.ua
-CRM_MYSQL_USER=gbua_zag
-CRM_MYSQL_PASSWORD=az3abdc5z2
-CRM_MYSQL_DATABASE=gbua_zag
+CRM_MYSQL_HOST=your_mysql_host_here
+CRM_MYSQL_USER=your_mysql_user_here
+CRM_MYSQL_PASSWORD=your_mysql_password_here
+CRM_MYSQL_DATABASE=your_mysql_database_here
 ```
 
 **Rollback:**
