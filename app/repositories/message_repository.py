@@ -19,10 +19,14 @@ logger = logging.getLogger(__name__)
 class MessageRepository(IMessageRepository):
     """
     SQLAlchemy implementation of IMessageRepository.
-    
+
     Handles conversion between domain Message objects and MessageModel ORM objects.
     """
-    
+
+    # Class-level username cache (shared across all instances)
+    # Maps Instagram user_id -> username
+    _username_cache: dict[str, str] = {}
+
     def __init__(self, db_session: AsyncSession, crm_pool=None) -> None:
         """
         Initialize repository with database session and optional CRM pool.
@@ -133,6 +137,11 @@ class MessageRepository(IMessageRepository):
             This is a best-effort sync - errors are logged but not raised.
             CRM failures don't affect local storage.
         """
+        # Safety check: ensure pool is available
+        if self._crm_pool is None:
+            logger.warning(f"CRM sync skipped for message {message.id}: pool is None")
+            return
+
         try:
             # Determine user_id based on direction (inbound = sender, outbound = recipient)
             user_id = message.sender_id if message.direction == 'inbound' else message.recipient_id
@@ -182,7 +191,7 @@ class MessageRepository(IMessageRepository):
 
     async def _get_instagram_username(self, user_id: str) -> str:
         """
-        Fetch Instagram username from Graph API.
+        Fetch Instagram username from Graph API with caching.
 
         Args:
             user_id: Instagram user PSID
@@ -191,8 +200,16 @@ class MessageRepository(IMessageRepository):
             Instagram username, or user_id if API call fails
 
         Note:
-            Falls back to user_id if API call fails (best-effort).
+            - Uses class-level cache to avoid redundant API calls
+            - Only fetches username once per user_id
+            - Falls back to user_id if API call fails (best-effort)
         """
+        # Check cache first
+        if user_id in self._username_cache:
+            logger.debug(f"Username cache hit for {user_id}: {self._username_cache[user_id]}")
+            return self._username_cache[user_id]
+
+        # Not in cache, fetch from API
         try:
             from app.config import settings
 
@@ -207,8 +224,15 @@ class MessageRepository(IMessageRepository):
                 response = await client.get(url, params=params)
                 response.raise_for_status()
                 data = response.json()
-                return data.get("username", user_id)
+                username = data.get("username", user_id)
+
+                # Cache the result
+                self._username_cache[user_id] = username
+                logger.info(f"Fetched and cached username for {user_id}: {username}")
+                return username
 
         except Exception as e:
             logger.warning(f"Failed to fetch username for {user_id}: {e}. Using user_id as fallback.")
+            # Cache the fallback to avoid repeated failed API calls
+            self._username_cache[user_id] = user_id
             return user_id
