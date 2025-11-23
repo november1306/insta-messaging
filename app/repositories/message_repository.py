@@ -70,7 +70,9 @@ class MessageRepository(IMessageRepository):
 
             # Sync to CRM MySQL (fire-and-forget, non-blocking)
             if self._crm_pool:
-                asyncio.create_task(self._sync_to_crm(message))
+                task = asyncio.create_task(self._sync_to_crm(message))
+                # Ensure task exceptions are logged, not silently dropped
+                task.add_done_callback(self._handle_crm_task_done)
 
             return message
             
@@ -158,6 +160,25 @@ class MessageRepository(IMessageRepository):
             # TODO: Add retry logic for transient failures
             # TODO: Add performance monitoring (track sync duration)
             logger.error(f"❌ CRM sync failed for message {message.id}: {e}")
+
+    def _handle_crm_task_done(self, task: asyncio.Task) -> None:
+        """
+        Handle completion of CRM sync background task.
+
+        This callback ensures that any unhandled exceptions in the fire-and-forget
+        task are properly logged rather than silently dropped.
+
+        Args:
+            task: The completed asyncio Task
+        """
+        try:
+            # Check if task raised an exception
+            if not task.cancelled() and task.exception() is not None:
+                exc = task.exception()
+                logger.error(f"❌ Unhandled exception in CRM sync task: {exc}")
+        except Exception as e:
+            # This should never happen, but log it just in case
+            logger.error(f"❌ Error in CRM task callback: {e}")
 
     async def _get_instagram_username(self, user_id: str) -> str:
         """
