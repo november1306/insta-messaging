@@ -40,10 +40,15 @@ Automated Instagram DM system with CRM integration API for e-commerce businesses
 ### Prerequisites
 
 - Python 3.11+
-- Node.js and npm
+- Node.js 18+ and npm
 - Instagram Business Account
 - Facebook App with Instagram permissions
 - ngrok (for Instagram webhook testing)
+  - **Important:** After installing ngrok, authenticate it with:
+    ```bash
+    ngrok config add-authtoken YOUR_TOKEN
+    ```
+    Get your token from [ngrok dashboard](https://dashboard.ngrok.com/get-started/your-authtoken)
 
 ### Quick Setup
 
@@ -135,6 +140,7 @@ LOG_LEVEL=INFO
 - `scripts\win\dev-frontend.bat` - Start frontend only
 - `scripts\win\build.bat` - Build production frontend
 - `scripts\win\start.bat` - Start production server
+- `scripts\win\stop-all.bat` - Stop all running services (ngrok, backend, frontend)
 
 **Linux/Mac:**
 - `scripts/linux/install.sh` - First-time setup
@@ -175,10 +181,20 @@ scripts/linux/dev-all.sh
 # ngrok UI: http://localhost:4040
 ```
 
+**To stop all services:**
+```bash
+# Windows
+scripts\win\stop-all.bat
+
+# Linux/Mac
+# Press Ctrl+C in the terminal running dev-all.sh
+```
+
 **When to use what:**
 - **dev-backend** - API testing only (faster startup)
 - **dev-frontend** - UI development only
 - **dev-all** - Full development with Instagram webhook testing (requires ngrok)
+- **stop-all** (Windows) - Clean shutdown of all services
 
 ---
 
