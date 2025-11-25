@@ -1,0 +1,193 @@
+name: Deploy to Production VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  deploy:
+    name: Deploy to Ubuntu VPS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🚀 Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+
+            echo "======================================"
+            echo "🚀 Starting Deployment"
+            echo "======================================"
+
+            # Check if first-time deployment or update
+            if [ -d "/opt/insta-messaging" ]; then
+              echo "📦 Existing deployment detected - performing update"
+
+              cd /opt/insta-messaging
+
+              # Pull latest code
+              echo "⬇️  Pulling latest code from main..."
+              sudo -u insta-messaging git fetch origin
+              sudo -u insta-messaging git reset --hard origin/main
+
+              # Update secrets in .env if they changed
+              echo "🔐 Updating secrets..."
+              sudo bash -c "cat > /opt/insta-messaging/.env.temp << 'ENVEOF'
+            # Instagram/Facebook Credentials
+            FACEBOOK_VERIFY_TOKEN=${{ secrets.FACEBOOK_VERIFY_TOKEN }}
+            FACEBOOK_APP_SECRET=${{ secrets.FACEBOOK_APP_SECRET }}
+            INSTAGRAM_APP_SECRET=${{ secrets.INSTAGRAM_APP_SECRET }}
+            INSTAGRAM_PAGE_ACCESS_TOKEN=${{ secrets.INSTAGRAM_PAGE_ACCESS_TOKEN }}
+            INSTAGRAM_BUSINESS_ACCOUNT_ID=${{ secrets.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
+
+            # Server Configuration
+            HOST=0.0.0.0
+            PORT=8000
+            ENVIRONMENT=production
+
+            # Database Configuration
+            DATABASE_URL=sqlite+aiosqlite:////opt/insta-messaging/data/production.db
+
+            # CRM MySQL Configuration (optional)
+            CRM_MYSQL_ENABLED=${{ secrets.CRM_MYSQL_ENABLED || 'false' }}
+            CRM_MYSQL_HOST=${{ secrets.CRM_MYSQL_HOST || '' }}
+            CRM_MYSQL_USER=${{ secrets.CRM_MYSQL_USER || '' }}
+            CRM_MYSQL_PASSWORD=${{ secrets.CRM_MYSQL_PASSWORD || '' }}
+            CRM_MYSQL_DATABASE=${{ secrets.CRM_MYSQL_DATABASE || '' }}
+
+            # Logging
+            LOG_LEVEL=INFO
+
+            # Authentication - MUST be false in production
+            USE_STUB_AUTH=false
+
+            # Ngrok (not used in production, but keeping for reference)
+            # NGROK_AUTHTOKEN is only for development/testing
+            ENVEOF"
+
+              # Move new .env into place
+              sudo mv /opt/insta-messaging/.env.temp /opt/insta-messaging/.env
+              sudo chmod 600 /opt/insta-messaging/.env
+              sudo chown insta-messaging:insta-messaging /opt/insta-messaging/.env
+
+              # Update Python dependencies
+              echo "📚 Updating Python dependencies..."
+              sudo -u insta-messaging /opt/insta-messaging/venv/bin/pip install -q --upgrade pip
+              sudo -u insta-messaging /opt/insta-messaging/venv/bin/pip install -q -r requirements.txt
+
+              # Run database migrations
+              echo "🗄️  Running database migrations..."
+              cd /opt/insta-messaging
+              sudo -u insta-messaging /opt/insta-messaging/venv/bin/alembic upgrade head
+
+              # Build frontend
+              echo "🎨 Building frontend..."
+              cd /opt/insta-messaging/frontend
+              sudo -u insta-messaging npm install --silent
+              sudo -u insta-messaging npm run build
+
+              # Restart services
+              echo "🔄 Restarting services..."
+              sudo systemctl restart insta-messaging
+              sudo systemctl restart nginx
+
+              # Wait for service to start
+              sleep 3
+
+              # Check service status
+              if systemctl is-active --quiet insta-messaging; then
+                echo "✅ Service is running"
+                sudo systemctl status insta-messaging --no-pager -l | head -20
+              else
+                echo "❌ Service failed to start!"
+                sudo journalctl -u insta-messaging -n 50 --no-pager
+                exit 1
+              fi
+
+            else
+              echo "🆕 First-time deployment detected"
+
+              # Clone repository
+              echo "📥 Cloning repository..."
+              sudo git clone https://github.com/november1306/insta-messaging.git /opt/insta-messaging
+              cd /opt/insta-messaging
+              sudo git checkout main
+
+              # Create .env file with secrets
+              echo "🔐 Creating .env file..."
+              sudo bash -c "cat > /opt/insta-messaging/.env << 'ENVEOF'
+            # Instagram/Facebook Credentials
+            FACEBOOK_VERIFY_TOKEN=${{ secrets.FACEBOOK_VERIFY_TOKEN }}
+            FACEBOOK_APP_SECRET=${{ secrets.FACEBOOK_APP_SECRET }}
+            INSTAGRAM_APP_SECRET=${{ secrets.INSTAGRAM_APP_SECRET }}
+            INSTAGRAM_PAGE_ACCESS_TOKEN=${{ secrets.INSTAGRAM_PAGE_ACCESS_TOKEN }}
+            INSTAGRAM_BUSINESS_ACCOUNT_ID=${{ secrets.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
+
+            # Server Configuration
+            HOST=0.0.0.0
+            PORT=8000
+            ENVIRONMENT=production
+
+            # Database Configuration
+            DATABASE_URL=sqlite+aiosqlite:////opt/insta-messaging/data/production.db
+
+            # CRM MySQL Configuration (optional)
+            CRM_MYSQL_ENABLED=${{ secrets.CRM_MYSQL_ENABLED || 'false' }}
+            CRM_MYSQL_HOST=${{ secrets.CRM_MYSQL_HOST || '' }}
+            CRM_MYSQL_USER=${{ secrets.CRM_MYSQL_USER || '' }}
+            CRM_MYSQL_PASSWORD=${{ secrets.CRM_MYSQL_PASSWORD || '' }}
+            CRM_MYSQL_DATABASE=${{ secrets.CRM_MYSQL_DATABASE || '' }}
+
+            # Logging
+            LOG_LEVEL=INFO
+
+            # Authentication - MUST be false in production
+            USE_STUB_AUTH=false
+            ENVEOF"
+
+              sudo chmod 600 /opt/insta-messaging/.env
+
+              # Run full deployment script
+              echo "🔧 Running full deployment script..."
+              sudo bash /opt/insta-messaging/deploy-production.sh
+            fi
+
+            echo ""
+            echo "======================================"
+            echo "✅ Deployment Complete!"
+            echo "======================================"
+            echo ""
+            echo "Service Status:"
+            sudo systemctl status insta-messaging --no-pager | head -10
+            echo ""
+            echo "Health Check:"
+            curl -s http://localhost:8000/health || echo "Health check failed (may need to wait a moment)"
+            echo ""
+            echo "Nginx Status:"
+            sudo systemctl status nginx --no-pager | head -5
+            echo ""
+            echo "🌐 Your app should be available at: https://${{ secrets.VPS_HOST }}"
+
+      - name: 🔔 Deployment Success
+        if: success()
+        run: |
+          echo "✅ Deployment to ${{ secrets.VPS_HOST }} completed successfully!"
+          echo "🌐 App URL: https://${{ secrets.VPS_HOST }}"
+          echo "📊 API Docs: https://${{ secrets.VPS_HOST }}/docs"
+          echo "💬 Frontend: https://${{ secrets.VPS_HOST }}/chat"
+
+      - name: ❌ Deployment Failed
+        if: failure()
+        run: |
+          echo "::error::Deployment failed! Check the logs above for details."
+          echo "Common issues:"
+          echo "  - SSH connection failed (check VPS_HOST, VPS_USER, VPS_SSH_KEY)"
+          echo "  - Missing GitHub Secrets (check repository settings)"
+          echo "  - Service failed to start (check systemd logs)"
