@@ -39,16 +39,15 @@ Automated Instagram DM system with CRM integration API for e-commerce businesses
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+ (required for full async support)
 - Node.js 18+ and npm
 - Instagram Business Account
 - Facebook App with Instagram permissions
-- ngrok (for Instagram webhook testing)
-  - **Important:** After installing ngrok, authenticate it with:
-    ```bash
-    ngrok config add-authtoken YOUR_TOKEN
-    ```
-    Get your token from [ngrok dashboard](https://dashboard.ngrok.com/get-started/your-authtoken)
+- ngrok (for Instagram webhook testing - **mandatory until you have a real domain**)
+  - Download from: https://ngrok.com/download
+  - Get your auth token from: https://dashboard.ngrok.com/get-started/your-authtoken
+  - Add `NGROK_AUTHTOKEN=your_token_here` to your `.env` file
+  - The install script will automatically configure ngrok with your token
 
 ### Quick Setup
 
@@ -474,7 +473,7 @@ pytest tests/test_webhooks.py
 
 ## Tech Stack
 
-- **Backend:** Python 3.11+ with FastAPI (async)
+- **Backend:** Python 3.12+ with FastAPI (async)
 - **Frontend:** Vue 3 + Vite + Tailwind CSS
 - **Database:** SQLite (development), MySQL (production target)
 - **ORM:** SQLAlchemy 2.0 with async support

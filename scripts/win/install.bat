@@ -14,11 +14,11 @@ echo [1/6] Checking Python installation...
 python --version >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Python is not installed or not in PATH
-    echo Please install Python 3.11 or higher from python.org
+    echo Please install Python 3.12 or higher from python.org
     exit /b 1
 )
 
-REM Check Python version (3.11+)
+REM Check Python version (3.12+)
 for /f "tokens=2" %%i in ('python --version 2^>^&1') do set PYTHON_VERSION=%%i
 for /f "tokens=1,2 delims=." %%a in ("%PYTHON_VERSION%") do (
     set MAJOR=%%a
@@ -27,12 +27,14 @@ for /f "tokens=1,2 delims=." %%a in ("%PYTHON_VERSION%") do (
 
 if %MAJOR% LSS 3 (
     echo [ERROR] Python version is too old: %PYTHON_VERSION%
-    echo Please install Python 3.11 or higher
+    echo Please install Python 3.12 or higher
+    echo This application requires Python 3.12+ for full async support
     exit /b 1
 )
-if %MAJOR% EQU 3 if %MINOR% LSS 11 (
+if %MAJOR% EQU 3 if %MINOR% LSS 12 (
     echo [ERROR] Python version is too old: %PYTHON_VERSION%
-    echo Please install Python 3.11 or higher
+    echo Please install Python 3.12 or higher
+    echo This application requires Python 3.12+ for full async support
     exit /b 1
 )
 echo [OK] Python %PYTHON_VERSION% detected
