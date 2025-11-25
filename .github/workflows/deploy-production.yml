@@ -56,11 +56,12 @@ jobs:
             DATABASE_URL=sqlite+aiosqlite:////opt/insta-messaging/data/production.db
 
             # CRM MySQL Configuration (optional)
-            CRM_MYSQL_ENABLED=${{ secrets.CRM_MYSQL_ENABLED || 'false' }}
-            CRM_MYSQL_HOST=${{ secrets.CRM_MYSQL_HOST || '' }}
-            CRM_MYSQL_USER=${{ secrets.CRM_MYSQL_USER || '' }}
-            CRM_MYSQL_PASSWORD=${{ secrets.CRM_MYSQL_PASSWORD || '' }}
-            CRM_MYSQL_DATABASE=${{ secrets.CRM_MYSQL_DATABASE || '' }}
+            # Non-sensitive config is committed to repo, only password is secret
+            CRM_MYSQL_ENABLED=false
+            CRM_MYSQL_HOST=
+            CRM_MYSQL_USER=
+            CRM_MYSQL_PASSWORD=${{ secrets.CRM_MYSQL_PASSWORD }}
+            CRM_MYSQL_DATABASE=
 
             # Logging
             LOG_LEVEL=INFO
@@ -139,11 +140,12 @@ jobs:
             DATABASE_URL=sqlite+aiosqlite:////opt/insta-messaging/data/production.db
 
             # CRM MySQL Configuration (optional)
-            CRM_MYSQL_ENABLED=${{ secrets.CRM_MYSQL_ENABLED || 'false' }}
-            CRM_MYSQL_HOST=${{ secrets.CRM_MYSQL_HOST || '' }}
-            CRM_MYSQL_USER=${{ secrets.CRM_MYSQL_USER || '' }}
-            CRM_MYSQL_PASSWORD=${{ secrets.CRM_MYSQL_PASSWORD || '' }}
-            CRM_MYSQL_DATABASE=${{ secrets.CRM_MYSQL_DATABASE || '' }}
+            # Non-sensitive config is committed to repo, only password is secret
+            CRM_MYSQL_ENABLED=false
+            CRM_MYSQL_HOST=
+            CRM_MYSQL_USER=
+            CRM_MYSQL_PASSWORD=${{ secrets.CRM_MYSQL_PASSWORD }}
+            CRM_MYSQL_DATABASE=
 
             # Logging
             LOG_LEVEL=INFO
