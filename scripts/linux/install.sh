@@ -33,28 +33,29 @@ print_info() {
 }
 
 # Check Python installation
-echo "[1/6] Checking Python installation..."
+echo "[1/7] Checking Python installation..."
 if ! command -v python3 &> /dev/null; then
     print_error "Python 3 is not installed"
-    echo "Please install Python 3.11 or higher"
+    echo "Please install Python 3.12 or higher"
     exit 1
 fi
 
-# Check Python version (3.11+)
+# Check Python version (3.12+)
 PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
 MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
 MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
 
-if [ "$MAJOR" -lt 3 ] || ([ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 11 ]); then
+if [ "$MAJOR" -lt 3 ] || ([ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 12 ]); then
     print_error "Python version is too old: $PYTHON_VERSION"
-    echo "Please install Python 3.11 or higher"
+    echo "Please install Python 3.12 or higher"
+    echo "This application requires Python 3.12+ for full async support"
     exit 1
 fi
 print_success "Python $PYTHON_VERSION detected"
 
 # Create virtual environment
 echo ""
-echo "[2/6] Setting up Python virtual environment..."
+echo "[2/7] Setting up Python virtual environment..."
 if [ -d "venv" ]; then
     print_success "Virtual environment already exists"
 else
@@ -64,7 +65,7 @@ fi
 
 # Activate virtual environment and install dependencies
 echo ""
-echo "[3/6] Installing Python dependencies..."
+echo "[3/7] Installing Python dependencies..."
 source venv/bin/activate
 
 print_info "Upgrading pip..."
@@ -74,7 +75,7 @@ print_success "Python dependencies installed"
 
 # Create .env file if it doesn't exist
 echo ""
-echo "[4/6] Setting up environment configuration..."
+echo "[4/7] Setting up environment configuration..."
 if [ -f ".env" ]; then
     print_success ".env file already exists"
 else
@@ -89,15 +90,45 @@ else
     fi
 fi
 
+# Configure ngrok (if auth token is available)
+echo ""
+echo "[5/7] Configuring ngrok..."
+if command -v ngrok &> /dev/null; then
+    print_success "ngrok is already installed"
+
+    # Check if NGROK_AUTHTOKEN is set in environment or .env file
+    if [ -f ".env" ]; then
+        source .env 2>/dev/null || true
+    fi
+
+    if [ ! -z "$NGROK_AUTHTOKEN" ]; then
+        print_info "Configuring ngrok with auth token..."
+        ngrok config add-authtoken "$NGROK_AUTHTOKEN" > /dev/null 2>&1
+        if [ $? -eq 0 ]; then
+            print_success "ngrok configured successfully"
+        else
+            print_warning "Failed to configure ngrok auth token"
+        fi
+    else
+        print_warning "NGROK_AUTHTOKEN not found in .env"
+        echo "ngrok will work but with limitations (60 min sessions, random URLs)"
+        echo "Add NGROK_AUTHTOKEN to .env for persistent URLs and longer sessions"
+    fi
+else
+    print_warning "ngrok not installed (optional but recommended for Instagram webhooks)"
+    echo "Install from: https://ngrok.com/download"
+    echo "Then add NGROK_AUTHTOKEN to .env file"
+fi
+
 # Run database migrations
 echo ""
-echo "[5/6] Running database migrations..."
+echo "[6/7] Running database migrations..."
 alembic upgrade head
 print_success "Database migrations completed"
 
 # Install frontend dependencies
 echo ""
-echo "[6/6] Installing frontend dependencies..."
+echo "[7/7] Installing frontend dependencies..."
 if [ ! -d "frontend" ]; then
     print_error "Frontend directory not found"
     exit 1
