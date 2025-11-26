@@ -156,6 +156,9 @@ jobs:
               cd /opt/insta-messaging
               sudo git checkout main
 
+              # Fix git ownership for future operations
+              sudo git config --global --add safe.directory /opt/insta-messaging
+
               # Create .env file with secrets
               echo "🔐 Creating .env file..."
               sudo bash -c "cat > /opt/insta-messaging/.env << 'ENVEOF'
