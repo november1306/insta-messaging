@@ -34,14 +34,20 @@ print_info() {
 
 # Check Python installation
 echo "[1/7] Checking Python installation..."
-if ! command -v python3 &> /dev/null; then
-    print_error "Python 3 is not installed"
+
+# Use PYTHON_BIN if provided by caller (e.g., deploy-production.sh), otherwise default to python3
+if [ -z "$PYTHON_BIN" ]; then
+    PYTHON_BIN="python3"
+fi
+
+if ! command -v $PYTHON_BIN &> /dev/null; then
+    print_error "Python is not installed ($PYTHON_BIN)"
     echo "Please install Python 3.12 or higher"
     exit 1
 fi
 
 # Check Python version (3.12+)
-PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+PYTHON_VERSION=$($PYTHON_BIN --version 2>&1 | awk '{print $2}')
 MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
 MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
 
@@ -51,7 +57,7 @@ if [ "$MAJOR" -lt 3 ] || ([ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 12 ]); then
     echo "This application requires Python 3.12+ for full async support"
     exit 1
 fi
-print_success "Python $PYTHON_VERSION detected"
+print_success "Python $PYTHON_VERSION detected (using $PYTHON_BIN)"
 
 # Create virtual environment
 echo ""
@@ -59,7 +65,7 @@ echo "[2/7] Setting up Python virtual environment..."
 if [ -d "venv" ]; then
     print_success "Virtual environment already exists"
 else
-    python3 -m venv venv
+    $PYTHON_BIN -m venv venv
     print_success "Virtual environment created"
 fi
 
