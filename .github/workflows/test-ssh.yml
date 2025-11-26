@@ -1,0 +1,55 @@
+name: Test SSH Connection
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  test-ssh:
+    name: Test VPS SSH Connection
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🔍 Test SSH Connection
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            echo "=========================================="
+            echo "✅ SSH Connection Successful!"
+            echo "=========================================="
+            echo ""
+            echo "System Info:"
+            echo "  Hostname: $(hostname)"
+            echo "  User: $(whoami)"
+            echo "  OS: $(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)"
+            echo "  Uptime: $(uptime -p)"
+            echo ""
+            echo "Disk Space:"
+            df -h / | tail -1
+            echo ""
+            echo "Memory:"
+            free -h | grep Mem
+            echo ""
+            echo "=========================================="
+
+      - name: ✅ SSH Test Success
+        if: success()
+        run: |
+          echo "✅ SSH connection to VPS successful!"
+          echo "✅ GitHub Actions can authenticate to your VPS"
+          echo "✅ Ready to run the full deployment workflow"
+
+      - name: ❌ SSH Test Failed
+        if: failure()
+        run: |
+          echo "::error::SSH connection failed!"
+          echo ""
+          echo "Please check:"
+          echo "  1. VPS_HOST secret is set to: 185.156.43.172"
+          echo "  2. VPS_USER secret is set to: root"
+          echo "  3. VPS_SSH_KEY contains your PRIVATE key (not .pub)"
+          echo "  4. Your VPS has the PUBLIC key in ~/.ssh/authorized_keys"
+          echo "  5. VPS is online and SSH port 22 is accessible"
