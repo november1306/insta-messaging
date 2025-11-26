@@ -141,6 +141,11 @@ echo -e "${GREEN}[6/12] Setting up application directory...${NC}"
 if [ -d "${INSTALL_DIR}/.git" ]; then
     echo "Repository exists, updating..."
     cd ${INSTALL_DIR}
+
+    # Fix git ownership issues (directory may have been created by root)
+    git config --global --add safe.directory ${INSTALL_DIR}
+    chown -R ${APP_USER}:${APP_USER} ${INSTALL_DIR}
+
     sudo -u ${APP_USER} git fetch origin
     sudo -u ${APP_USER} git checkout ${BRANCH}
     sudo -u ${APP_USER} git pull origin ${BRANCH}
