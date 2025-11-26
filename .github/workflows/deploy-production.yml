@@ -82,6 +82,26 @@ jobs:
               sudo chmod 600 /opt/insta-messaging/.env
               sudo chown insta-messaging:insta-messaging /opt/insta-messaging/.env
 
+              # Check if venv exists and uses correct Python version
+              echo "🐍 Checking Python virtual environment..."
+              if [ ! -f "/opt/insta-messaging/venv/bin/python" ]; then
+                echo "Virtual environment not found, creating with Python 3.12..."
+                sudo -u insta-messaging python3.12 -m venv /opt/insta-messaging/venv
+              else
+                # Check venv Python version
+                VENV_PYTHON_VERSION=$(/opt/insta-messaging/venv/bin/python --version 2>&1 | awk '{print $2}')
+                VENV_MAJOR=$(echo $VENV_PYTHON_VERSION | cut -d. -f1)
+                VENV_MINOR=$(echo $VENV_PYTHON_VERSION | cut -d. -f2)
+
+                if [ "$VENV_MAJOR" -lt 3 ] || ([ "$VENV_MAJOR" -eq 3 ] && [ "$VENV_MINOR" -lt 12 ]); then
+                  echo "Virtual environment uses old Python $VENV_PYTHON_VERSION, recreating with Python 3.12..."
+                  sudo rm -rf /opt/insta-messaging/venv
+                  sudo -u insta-messaging python3.12 -m venv /opt/insta-messaging/venv
+                else
+                  echo "Virtual environment OK (Python $VENV_PYTHON_VERSION)"
+                fi
+              fi
+
               # Update Python dependencies
               echo "📚 Updating Python dependencies..."
               sudo -u insta-messaging /opt/insta-messaging/venv/bin/pip install -q --upgrade pip
