@@ -162,7 +162,7 @@ fi
 
 echo -e "${GREEN}[7/12] Running application deployment script...${NC}"
 chmod +x ${INSTALL_DIR}/scripts/linux/install.sh
-sudo -u ${APP_USER} bash ${INSTALL_DIR}/scripts/linux/install.sh
+sudo -u ${APP_USER} PYTHON_BIN="${PYTHON_BIN}" bash ${INSTALL_DIR}/scripts/linux/install.sh
 
 echo -e "${GREEN}[8/12] Configuring environment...${NC}"
 if [ ! -f "${INSTALL_DIR}/.env" ]; then
