@@ -1,0 +1,192 @@
+name: Deploy to Test Environment
+
+on:
+  workflow_dispatch:  # Manual trigger - deploy any branch to test
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: false
+        default: ''
+
+jobs:
+  deploy-test:
+    name: Deploy to Test VPS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📋 Get branch name
+        id: branch
+        run: |
+          if [ -n "${{ github.event.inputs.branch }}" ]; then
+            echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
+          else
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🚀 Deploy to Test VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+
+            # Disable interactive prompts
+            export DEBIAN_FRONTEND=noninteractive
+            export NEEDRESTART_MODE=a
+            export NEEDRESTART_SUSPEND=1
+
+            echo "======================================"
+            echo "🧪 Test Deployment"
+            echo "Branch: ${{ steps.branch.outputs.branch }}"
+            echo "======================================"
+
+            cd /opt/insta-messaging
+
+            # Fetch and checkout the branch
+            echo "📥 Fetching branch: ${{ steps.branch.outputs.branch }}"
+            sudo -u insta-messaging git fetch origin
+            sudo -u insta-messaging git checkout ${{ steps.branch.outputs.branch }}
+            sudo -u insta-messaging git pull origin ${{ steps.branch.outputs.branch }}
+
+            # Show current commit
+            echo "📍 Current commit:"
+            git log -1 --oneline
+
+            # Update secrets in .env
+            echo "🔐 Updating secrets..."
+            sudo bash -c "cat > /opt/insta-messaging/.env.temp << 'ENVEOF'
+            # Instagram/Facebook Credentials
+            FACEBOOK_VERIFY_TOKEN=${{ secrets.FACEBOOK_VERIFY_TOKEN }}
+            FACEBOOK_APP_SECRET=${{ secrets.FACEBOOK_APP_SECRET }}
+            INSTAGRAM_APP_SECRET=${{ secrets.INSTAGRAM_APP_SECRET }}
+            INSTAGRAM_PAGE_ACCESS_TOKEN=${{ secrets.INSTAGRAM_PAGE_ACCESS_TOKEN }}
+            INSTAGRAM_BUSINESS_ACCOUNT_ID=${{ secrets.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
+
+            # Server Configuration
+            HOST=0.0.0.0
+            PORT=8000
+            ENVIRONMENT=test
+
+            # Database Configuration
+            DATABASE_URL=sqlite+aiosqlite:////opt/insta-messaging/data/test.db
+
+            # CRM MySQL Configuration (optional)
+            CRM_MYSQL_ENABLED=false
+            CRM_MYSQL_HOST=
+            CRM_MYSQL_USER=
+            CRM_MYSQL_PASSWORD=${{ secrets.CRM_MYSQL_PASSWORD }}
+            CRM_MYSQL_DATABASE=
+
+            # Logging
+            LOG_LEVEL=DEBUG
+
+            # Authentication
+            USE_STUB_AUTH=false
+
+            # Ngrok Configuration
+            NGROK_AUTHTOKEN=${{ secrets.NGROK_AUTHTOKEN }}
+            ENVEOF"
+
+            sudo mv /opt/insta-messaging/.env.temp /opt/insta-messaging/.env
+            sudo chmod 600 /opt/insta-messaging/.env
+            sudo chown insta-messaging:insta-messaging /opt/insta-messaging/.env
+
+            # Check if venv exists and uses correct Python version
+            echo "🐍 Checking Python virtual environment..."
+            if [ ! -f "/opt/insta-messaging/venv/bin/python" ]; then
+              echo "Virtual environment not found, creating with Python 3.12..."
+              sudo -u insta-messaging python3.12 -m venv /opt/insta-messaging/venv
+            else
+              VENV_PYTHON_VERSION=$(/opt/insta-messaging/venv/bin/python --version 2>&1 | awk '{print $2}')
+              VENV_MAJOR=$(echo $VENV_PYTHON_VERSION | cut -d. -f1)
+              VENV_MINOR=$(echo $VENV_PYTHON_VERSION | cut -d. -f2)
+
+              if [ "$VENV_MAJOR" -lt 3 ] || ([ "$VENV_MAJOR" -eq 3 ] && [ "$VENV_MINOR" -lt 12 ]); then
+                echo "Virtual environment uses old Python $VENV_PYTHON_VERSION, recreating with Python 3.12..."
+                sudo rm -rf /opt/insta-messaging/venv
+                sudo -u insta-messaging python3.12 -m venv /opt/insta-messaging/venv
+              else
+                echo "Virtual environment OK (Python $VENV_PYTHON_VERSION)"
+              fi
+            fi
+
+            # Install Node.js if not present
+            echo "📦 Checking Node.js..."
+            if ! command -v node &> /dev/null; then
+              echo "Installing Node.js..."
+              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs
+              echo "Node.js $(node --version) installed"
+            else
+              echo "Node.js OK: $(node --version)"
+            fi
+
+            # Update Python dependencies
+            echo "📚 Updating Python dependencies..."
+            sudo -u insta-messaging /opt/insta-messaging/venv/bin/pip install -q --upgrade pip
+            sudo -u insta-messaging /opt/insta-messaging/venv/bin/pip install -q -r requirements.txt
+
+            # Ensure data directory exists
+            echo "📁 Ensuring data directory exists..."
+            sudo mkdir -p /opt/insta-messaging/data
+            sudo chown insta-messaging:insta-messaging /opt/insta-messaging/data
+            sudo chmod 755 /opt/insta-messaging/data
+
+            # Run database migrations
+            echo "🗄️  Running database migrations..."
+            cd /opt/insta-messaging
+            sudo -u insta-messaging /opt/insta-messaging/venv/bin/alembic upgrade head
+
+            # Build frontend
+            echo "🎨 Building frontend..."
+            cd /opt/insta-messaging/frontend
+            sudo -u insta-messaging npm install --silent
+            sudo -u insta-messaging npm run build
+
+            # Restart service
+            echo "🔄 Restarting service..."
+            sudo systemctl restart insta-messaging
+
+            # Wait and check status
+            sleep 3
+
+            if systemctl is-active --quiet insta-messaging; then
+              echo "✅ Service is running"
+              sudo systemctl status insta-messaging --no-pager -l | head -15
+            else
+              echo "❌ Service failed to start!"
+              echo "Recent logs:"
+              sudo journalctl -u insta-messaging -n 30 --no-pager
+              exit 1
+            fi
+
+            echo ""
+            echo "======================================"
+            echo "✅ Test Deployment Complete!"
+            echo "======================================"
+            echo ""
+            echo "Branch: ${{ steps.branch.outputs.branch }}"
+            echo "Commit: $(git log -1 --oneline)"
+            echo ""
+            echo "🔗 Test URLs:"
+            echo "  Health: http://${{ secrets.VPS_HOST }}/health"
+            echo "  API Docs: http://${{ secrets.VPS_HOST }}/docs"
+            echo "  Frontend: http://${{ secrets.VPS_HOST }}/chat"
+            echo ""
+            echo "📊 Service Status:"
+            systemctl status insta-messaging --no-pager | head -10
+
+      - name: 🔔 Deployment Success
+        if: success()
+        run: |
+          echo "✅ Test deployment completed successfully!"
+          echo "🌐 Test URL: http://${{ secrets.VPS_HOST }}"
+          echo "📋 Branch: ${{ steps.branch.outputs.branch }}"
+
+      - name: ❌ Deployment Failed
+        if: failure()
+        run: |
+          echo "::error::Test deployment failed! Check the logs above for details."
