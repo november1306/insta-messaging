@@ -36,12 +36,12 @@ if [ "$EUID" -ne 0 ]; then
    exit 1
 fi
 
-echo -e "${GREEN}[1/12] Checking system...${NC}"
+echo -e "${GREEN}[1/13] Checking system...${NC}"
 echo "OS: $(lsb_release -d 2>/dev/null | cut -f2 || cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)"
 echo "Architecture: $(uname -m)"
 echo ""
 
-echo -e "${GREEN}[2/12] Updating system packages...${NC}"
+echo -e "${GREEN}[2/13] Updating system packages...${NC}"
 
 # Remove potentially broken PPAs from previous attempts
 if ls /etc/apt/sources.list.d/deadsnakes-ubuntu-ppa-*.list 2>/dev/null; then
@@ -58,7 +58,7 @@ export NEEDRESTART_MODE=a
 export NEEDRESTART_SUSPEND=1
 apt-get upgrade -y -qq
 
-echo -e "${GREEN}[3/12] Installing system dependencies...${NC}"
+echo -e "${GREEN}[3/13] Installing system dependencies...${NC}"
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 export NEEDRESTART_SUSPEND=1
@@ -75,7 +75,7 @@ apt-get install -y -qq \
     python3-dev
 
 # Install Python 3.12 (required)
-echo -e "${GREEN}[4/12] Checking for Python 3.12...${NC}"
+echo -e "${GREEN}[4/13] Checking for Python 3.12...${NC}"
 
 # Function to get Python version
 get_python_version() {
@@ -129,7 +129,20 @@ fi
 
 echo "Using Python: $PYTHON_BIN ($(get_python_version $PYTHON_BIN))"
 
-echo -e "${GREEN}[5/12] Creating application user...${NC}"
+# Install Node.js and npm
+echo -e "${GREEN}[5/13] Installing Node.js and npm...${NC}"
+if ! command -v node &> /dev/null; then
+    echo "Installing Node.js from NodeSource repository..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs
+    echo "Node.js $(node --version) installed"
+    echo "npm $(npm --version) installed"
+else
+    echo "Node.js already installed: $(node --version)"
+    echo "npm version: $(npm --version)"
+fi
+
+echo -e "${GREEN}[6/13] Creating application user...${NC}"
 if ! id -u ${APP_USER} > /dev/null 2>&1; then
     useradd -r -s /bin/bash -d ${INSTALL_DIR} ${APP_USER}
     echo "Created user: ${APP_USER}"
@@ -137,7 +150,7 @@ else
     echo "User ${APP_USER} already exists"
 fi
 
-echo -e "${GREEN}[6/12] Setting up application directory...${NC}"
+echo -e "${GREEN}[7/13] Setting up application directory...${NC}"
 if [ -d "${INSTALL_DIR}/.git" ]; then
     echo "Repository exists, updating..."
     cd ${INSTALL_DIR}
@@ -160,11 +173,11 @@ else
     cd ${INSTALL_DIR}
 fi
 
-echo -e "${GREEN}[7/12] Running application deployment script...${NC}"
+echo -e "${GREEN}[8/13] Running application deployment script...${NC}"
 chmod +x ${INSTALL_DIR}/scripts/linux/install.sh
 sudo -u ${APP_USER} PYTHON_BIN="${PYTHON_BIN}" bash ${INSTALL_DIR}/scripts/linux/install.sh
 
-echo -e "${GREEN}[8/12] Configuring environment...${NC}"
+echo -e "${GREEN}[9/13] Configuring environment...${NC}"
 if [ ! -f "${INSTALL_DIR}/.env" ]; then
     echo -e "${YELLOW}No .env file found. Creating from template...${NC}"
     sudo -u ${APP_USER} cp ${INSTALL_DIR}/.env.example ${INSTALL_DIR}/.env
@@ -196,7 +209,7 @@ else
     fi
 fi
 
-echo -e "${GREEN}[9/12] Creating systemd service...${NC}"
+echo -e "${GREEN}[10/13] Creating systemd service...${NC}"
 cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
 [Unit]
 Description=Instagram Messenger Automation API
@@ -240,7 +253,7 @@ systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}
 echo "Systemd service created: ${SERVICE_NAME}.service"
 
-echo -e "${GREEN}[10/12] Configuring Nginx reverse proxy...${NC}"
+echo -e "${GREEN}[11/13] Configuring Nginx reverse proxy...${NC}"
 
 # Remove default site
 rm -f /etc/nginx/sites-enabled/default
@@ -299,7 +312,7 @@ ln -sf /etc/nginx/sites-available/${APP_NAME} /etc/nginx/sites-enabled/
 # Test nginx config
 nginx -t
 
-echo -e "${GREEN}[11/12] Configuring firewall (UFW)...${NC}"
+echo -e "${GREEN}[12/13] Configuring firewall (UFW)...${NC}"
 # Allow SSH, HTTP, HTTPS
 ufw --force disable
 ufw allow 22/tcp comment 'SSH'
@@ -313,7 +326,7 @@ ufw default allow outgoing
 # Enable firewall
 echo "y" | ufw enable
 
-echo -e "${GREEN}[12/12] Starting services...${NC}"
+echo -e "${GREEN}[13/13] Starting services...${NC}"
 
 # Start nginx
 systemctl restart nginx
