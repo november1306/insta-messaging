@@ -22,6 +22,11 @@ jobs:
           script: |
             set -e
 
+            # Disable interactive prompts for apt and service restarts
+            export DEBIAN_FRONTEND=noninteractive
+            export NEEDRESTART_MODE=a
+            export NEEDRESTART_SUSPEND=1
+
             echo "======================================"
             echo "🚀 Starting Deployment"
             echo "======================================"
