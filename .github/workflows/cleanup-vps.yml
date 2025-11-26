@@ -1,0 +1,76 @@
+name: Cleanup VPS (Reset Deployment)
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  cleanup:
+    name: Clean up incomplete deployment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🧹 Clean up VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+
+            echo "=========================================="
+            echo "🧹 Cleaning up incomplete deployment"
+            echo "=========================================="
+
+            # Stop services if they exist
+            if systemctl is-active --quiet insta-messaging 2>/dev/null; then
+              echo "Stopping insta-messaging service..."
+              systemctl stop insta-messaging
+            fi
+
+            # Remove systemd service
+            if [ -f /etc/systemd/system/insta-messaging.service ]; then
+              echo "Removing systemd service..."
+              rm -f /etc/systemd/system/insta-messaging.service
+              systemctl daemon-reload
+            fi
+
+            # Remove application directory
+            if [ -d /opt/insta-messaging ]; then
+              echo "Removing application directory..."
+              rm -rf /opt/insta-messaging
+            fi
+
+            # Remove application user
+            if id -u insta-messaging > /dev/null 2>&1; then
+              echo "Removing application user..."
+              userdel -r insta-messaging 2>/dev/null || true
+            fi
+
+            # Remove nginx config
+            if [ -f /etc/nginx/sites-available/insta-messaging ]; then
+              echo "Removing nginx config..."
+              rm -f /etc/nginx/sites-available/insta-messaging
+              rm -f /etc/nginx/sites-enabled/insta-messaging
+              systemctl restart nginx
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "✅ Cleanup complete!"
+            echo "=========================================="
+            echo ""
+            echo "VPS is now ready for a fresh deployment."
+            echo "You can now run the Deploy to Production workflow."
+
+      - name: ✅ Cleanup Success
+        if: success()
+        run: |
+          echo "✅ VPS cleanup completed successfully!"
+          echo "Ready for fresh deployment"
+
+      - name: ❌ Cleanup Failed
+        if: failure()
+        run: |
+          echo "::error::Cleanup failed! Check the logs above."
