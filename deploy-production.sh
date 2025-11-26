@@ -209,6 +209,14 @@ else
     fi
 fi
 
+# Create data directory for SQLite database
+echo ""
+echo "Creating data directory for database..."
+mkdir -p ${INSTALL_DIR}/data
+chown ${APP_USER}:${APP_USER} ${INSTALL_DIR}/data
+chmod 755 ${INSTALL_DIR}/data
+echo "Data directory created: ${INSTALL_DIR}/data"
+
 echo -e "${GREEN}[10/13] Creating systemd service...${NC}"
 cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
 [Unit]

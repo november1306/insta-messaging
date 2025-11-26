@@ -120,6 +120,12 @@ jobs:
               sudo -u insta-messaging /opt/insta-messaging/venv/bin/pip install -q --upgrade pip
               sudo -u insta-messaging /opt/insta-messaging/venv/bin/pip install -q -r requirements.txt
 
+              # Create data directory for SQLite database
+              echo "📁 Ensuring data directory exists..."
+              sudo mkdir -p /opt/insta-messaging/data
+              sudo chown insta-messaging:insta-messaging /opt/insta-messaging/data
+              sudo chmod 755 /opt/insta-messaging/data
+
               # Run database migrations
               echo "🗄️  Running database migrations..."
               cd /opt/insta-messaging
