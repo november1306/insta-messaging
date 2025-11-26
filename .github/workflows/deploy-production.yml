@@ -102,6 +102,19 @@ jobs:
                 fi
               fi
 
+              # Install Node.js if not present
+              echo "📦 Checking Node.js..."
+              if ! command -v node &> /dev/null; then
+                echo "Installing Node.js from NodeSource repository..."
+                curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs
+                echo "Node.js $(node --version) installed"
+                echo "npm $(npm --version) installed"
+              else
+                echo "Node.js already installed: $(node --version)"
+                echo "npm version: $(npm --version)"
+              fi
+
               # Update Python dependencies
               echo "📚 Updating Python dependencies..."
               sudo -u insta-messaging /opt/insta-messaging/venv/bin/pip install -q --upgrade pip
