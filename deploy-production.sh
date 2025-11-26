@@ -5,6 +5,11 @@
 
 set -e  # Exit on error
 
+# Disable interactive prompts for apt and service restarts
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+
 echo "=============================================="
 echo "Instagram Messenger - Production Deployment"
 echo "=============================================="
@@ -46,10 +51,18 @@ fi
 
 # Update package lists (ignore PPA errors if any)
 apt-get update -qq 2>&1 | grep -v "does not have a Release file" | grep -v "deadsnakes" || true
-DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq
+
+# Disable needrestart interactive prompts during upgrade
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+apt-get upgrade -y -qq
 
 echo -e "${GREEN}[3/12] Installing system dependencies...${NC}"
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+apt-get install -y -qq \
     software-properties-common \
     git \
     nginx \
