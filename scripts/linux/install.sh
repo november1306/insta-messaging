@@ -175,7 +175,7 @@ print_info "Building frontend for production..."
 
 # Load VITE_API_KEY from .env if available
 if [ -f "../.env" ]; then
-    export $(grep VITE_API_KEY ../.env | xargs) 2>/dev/null || true
+    export $(grep VITE_API_KEY ../.env | xargs)
 fi
 
 # Clean dist directory if it exists (avoid permission issues)

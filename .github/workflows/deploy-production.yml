@@ -156,7 +156,7 @@ jobs:
 
               # Export VITE_API_KEY for build (Vite needs it at build time)
               echo "Building with VITE_API_KEY from .env..."
-              sudo -u insta-messaging bash -c 'source /opt/insta-messaging/.env && npm run build'
+              sudo -u insta-messaging bash -c 'export $(grep VITE_API_KEY /opt/insta-messaging/.env | xargs) && cd /opt/insta-messaging/frontend && npm run build'
 
               # Install/configure ngrok (needed for Instagram webhooks until real domain)
               echo "🌐 Configuring ngrok..."
