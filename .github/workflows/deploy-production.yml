@@ -137,6 +137,11 @@ jobs:
               cd /opt/insta-messaging
               sudo -u insta-messaging /opt/insta-messaging/venv/bin/alembic upgrade head
 
+              # Ensure VITE_API_KEY exists in database
+              echo "🔑 Synchronizing API key with database..."
+              cd /opt/insta-messaging
+              sudo -u insta-messaging bash -c 'source .env && /opt/insta-messaging/venv/bin/python scripts/ensure_api_key.py'
+
               # Build frontend
               echo "🎨 Building frontend..."
               cd /opt/insta-messaging/frontend
@@ -151,7 +156,7 @@ jobs:
 
               # Export VITE_API_KEY for build (Vite needs it at build time)
               echo "Building with VITE_API_KEY from .env..."
-              sudo -u insta-messaging bash -c 'export VITE_API_KEY="${{ secrets.VITE_API_KEY }}" && npm run build'
+              sudo -u insta-messaging bash -c 'source /opt/insta-messaging/.env && npm run build'
 
               # Install/configure ngrok (needed for Instagram webhooks until real domain)
               echo "🌐 Configuring ngrok..."
