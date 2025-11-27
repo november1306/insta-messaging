@@ -1,11 +1,13 @@
 import axios from 'axios'
 
+// Get API key from environment variable or use demo key for development
+const apiKey = import.meta.env.VITE_API_KEY || 'demo-token'
+
 const apiClient = axios.create({
   baseURL: '/api/v1',
   headers: {
     'Content-Type': 'application/json',
-    // TODO: Replace with real authentication
-    'Authorization': 'Bearer demo-token'
+    'Authorization': `Bearer ${apiKey}`
   },
   timeout: 10000
 })
