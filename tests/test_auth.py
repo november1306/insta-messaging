@@ -1,7 +1,7 @@
 """
 Tests for API authentication system
 
-Tests both stub mode and real database-backed authentication.
+Tests database-backed API key authentication.
 """
 import pytest
 import pytest_asyncio
@@ -10,58 +10,9 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.pool import StaticPool
 from datetime import datetime, timezone
 
-from app.api.auth import verify_api_key, _verify_api_key_stub
+from app.api.auth import verify_api_key
 from app.services.api_key_service import APIKeyService
 from app.db.models import Base, APIKey, APIKeyType
-
-
-@pytest.fixture
-def monkeypatch_stub_auth(monkeypatch):
-    """Enable stub auth mode for testing"""
-    monkeypatch.setenv("USE_STUB_AUTH", "true")
-
-
-# ============================================
-# Stub Authentication Tests
-# ============================================
-
-def test_stub_auth_with_valid_bearer_token():
-    """Test that stub auth accepts valid Bearer token"""
-    result = _verify_api_key_stub(authorization="Bearer test_key")
-    assert result == "test_key"
-
-
-def test_stub_auth_with_any_key():
-    """Test that stub auth accepts any non-empty key"""
-    result = _verify_api_key_stub(authorization="Bearer my_custom_key_123")
-    assert result == "my_custom_key_123"
-
-
-def test_stub_auth_missing_header():
-    """Test that missing Authorization header returns 401"""
-    with pytest.raises(HTTPException) as exc_info:
-        _verify_api_key_stub(authorization=None)
-
-    assert exc_info.value.status_code == 401
-    assert "Invalid Authorization" in exc_info.value.detail
-
-
-def test_stub_auth_invalid_format():
-    """Test that invalid format (not Bearer) returns 401"""
-    with pytest.raises(HTTPException) as exc_info:
-        _verify_api_key_stub(authorization="Basic test_key")
-
-    assert exc_info.value.status_code == 401
-    assert "Invalid Authorization" in exc_info.value.detail
-
-
-def test_stub_auth_empty_key():
-    """Test that empty key after Bearer returns 401"""
-    with pytest.raises(HTTPException) as exc_info:
-        _verify_api_key_stub(authorization="Bearer ")
-
-    assert exc_info.value.status_code == 401
-    assert "Empty API key" in exc_info.value.detail
 
 
 # ============================================

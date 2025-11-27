@@ -71,9 +71,6 @@ jobs:
             # Logging
             LOG_LEVEL=INFO
 
-            # Authentication - MUST be false in production
-            USE_STUB_AUTH=false
-
             # Frontend API Key (for /chat UI)
             VITE_API_KEY=${{ secrets.VITE_API_KEY }}
 
@@ -247,9 +244,6 @@ jobs:
 
             # Logging
             LOG_LEVEL=INFO
-
-            # Authentication - MUST be false in production
-            USE_STUB_AUTH=false
 
             # Frontend API Key (for /chat UI)
             VITE_API_KEY=${{ secrets.VITE_API_KEY }}

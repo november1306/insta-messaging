@@ -18,17 +18,7 @@ Create a `.env` file from the example:
 cp .env.example .env
 ```
 
-Then choose one of the following options:
-
-#### Option A: Use Stub Authentication (Development)
-
-1. Enable stub auth in the backend `.env` file:
-   ```
-   USE_STUB_AUTH=true
-   ```
-2. The default `demo-token` in frontend `.env` will work
-
-#### Option B: Use Real API Key
+Then generate an API key:
 
 1. Generate an API key from the backend:
    ```bash

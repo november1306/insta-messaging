@@ -295,9 +295,6 @@ curl -H "Authorization: Bearer <your-api-key-here>" \
      http://localhost:8000/ui/conversations
 ```
 
-**Development mode:** Set `USE_STUB_AUTH=true` to accept any Bearer token
-**Production mode:** Generate proper API keys (required)
-
 📖 **See [AUTHENTICATION.md](AUTHENTICATION.md) for complete authentication documentation.**
 
 ### API Documentation

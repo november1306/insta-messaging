@@ -202,65 +202,6 @@ If you're building a frontend application:
 1. **Generate an API key** for the frontend to use
 2. **Store securely** (never expose in client-side code)
 3. **Use from backend** - make API calls from your backend server
-4. **Or use stub auth** in development (see below)
-
----
-
-## Development Mode
-
-### Stub Authentication
-
-For backward compatibility and testing, stub authentication can be enabled:
-
-```bash
-# .env file
-USE_STUB_AUTH=true
-```
-
-When enabled:
-- Any non-empty Bearer token is accepted
-- No database validation
-- Returns a fake admin API key
-- **DO NOT use in production!**
-
-### Environment Variables
-
-```bash
-# Enable stub auth (development only)
-# WARNING: Set to false or remove in production!
-USE_STUB_AUTH=false
-```
-
----
-
-## Migration from Stub Auth
-
-If upgrading from the old stub authentication system:
-
-1. **Generate admin API key:**
-   ```bash
-   python -m app.cli.generate_api_key --name "Migration Admin" --type admin --env test
-   ```
-
-2. **Update your application:**
-   ```bash
-   # Old (stub)
-   Authorization: Bearer test_key
-
-   # New (real key)
-   Authorization: Bearer <your-test-api-key-here>
-   ```
-
-3. **Disable stub auth:**
-   ```bash
-   # Remove or set to false in .env
-   USE_STUB_AUTH=false
-   ```
-
-4. **Run migrations:**
-   ```bash
-   alembic upgrade head
-   ```
 
 ---
 
@@ -269,7 +210,6 @@ If upgrading from the old stub authentication system:
 Before deploying to production:
 
 - [ ] Generate production API keys with `--env live`
-- [ ] Disable stub authentication (`USE_STUB_AUTH=false` or remove)
 - [ ] Review and restrict account permissions
 - [ ] Set API key expiration dates where appropriate
 - [ ] Enable HTTPS for all API requests
