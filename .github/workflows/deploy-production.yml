@@ -1,7 +1,10 @@
 name: Deploy to Production VPS
 
 on:
-  workflow_dispatch:  # Manual trigger only - prevents automatic deployment on every push
+  push:
+    branches:
+      - main  # Auto-deploy on push to main
+  workflow_dispatch:  # Also allow manual trigger
 
 jobs:
   deploy:
@@ -70,6 +73,9 @@ jobs:
 
             # Authentication - MUST be false in production
             USE_STUB_AUTH=false
+
+            # Frontend API Key (for /chat UI)
+            VITE_API_KEY=${{ secrets.VITE_API_KEY }}
 
             # Ngrok Configuration (REQUIRED until you have a real domain with SSL)
             # Instagram webhooks need HTTPS, ngrok provides this for test VPS
@@ -229,6 +235,9 @@ jobs:
 
             # Authentication - MUST be false in production
             USE_STUB_AUTH=false
+
+            # Frontend API Key (for /chat UI)
+            VITE_API_KEY=${{ secrets.VITE_API_KEY }}
 
             # Ngrok Configuration (REQUIRED until you have a real domain with SSL)
             # Instagram webhooks need HTTPS, ngrok provides this for test VPS

@@ -132,21 +132,37 @@ echo "[6/7] Running database migrations..."
 alembic upgrade head
 print_success "Database migrations completed"
 
-# Install frontend dependencies
+# Install frontend dependencies and build
 echo ""
-echo "[7/7] Installing frontend dependencies..."
+echo "[7/7] Installing frontend dependencies and building..."
 if [ ! -d "frontend" ]; then
     print_error "Frontend directory not found"
     exit 1
 fi
 
 cd frontend
-if [ -d "node_modules" ]; then
-    print_success "Frontend dependencies already installed"
-else
+
+# Install dependencies if needed
+if [ ! -d "node_modules" ]; then
+    print_info "Installing frontend dependencies..."
     npm install
     print_success "Frontend dependencies installed"
+else
+    print_success "Frontend dependencies already installed"
 fi
+
+# Build frontend for production
+print_info "Building frontend for production..."
+
+# Load VITE_API_KEY from .env if available
+if [ -f "../.env" ]; then
+    export $(grep VITE_API_KEY ../.env | xargs) 2>/dev/null || true
+fi
+
+# Build the frontend
+npm run build
+print_success "Frontend built successfully"
+
 cd ..
 
 echo ""
