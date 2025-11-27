@@ -12,13 +12,16 @@ from pathlib import Path
 # Add app directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.db.connection import get_db_session
+from app.db.connection import get_db_session, init_db
 from app.services.api_key_service import APIKeyService
 from app.db.models import APIKeyType
 
 
 async def ensure_api_key():
     """Ensure the VITE_API_KEY from .env exists in the database."""
+    # Initialize database
+    await init_db()
+
     # Read VITE_API_KEY from environment
     api_key = os.getenv("VITE_API_KEY")
 
