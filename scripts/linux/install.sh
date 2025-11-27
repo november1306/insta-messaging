@@ -159,6 +159,12 @@ if [ -f "../.env" ]; then
     export $(grep VITE_API_KEY ../.env | xargs) 2>/dev/null || true
 fi
 
+# Clean dist directory if it exists (avoid permission issues)
+if [ -d "dist" ]; then
+    rm -rf dist
+    print_info "Cleaned existing dist directory"
+fi
+
 # Build the frontend
 npm run build
 print_success "Frontend built successfully"

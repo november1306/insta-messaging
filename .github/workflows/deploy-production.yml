@@ -140,6 +140,13 @@ jobs:
               # Build frontend
               echo "🎨 Building frontend..."
               cd /opt/insta-messaging/frontend
+
+              # Fix permissions on dist directory if it exists (may be owned by root from previous builds)
+              if [ -d "dist" ]; then
+                sudo chown -R insta-messaging:insta-messaging dist
+                echo "Fixed dist directory permissions"
+              fi
+
               sudo -u insta-messaging npm install --silent
               sudo -u insta-messaging npm run build
 
