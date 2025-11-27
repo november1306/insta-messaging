@@ -204,6 +204,7 @@ if [ ! -f "${INSTALL_DIR}/.env" ]; then
     echo "  - INSTAGRAM_APP_SECRET"
     echo "  - INSTAGRAM_PAGE_ACCESS_TOKEN"
     echo "  - INSTAGRAM_BUSINESS_ACCOUNT_ID"
+    echo "  - VITE_API_KEY (generate with: python -m app.cli.generate_api_key)"
     echo "  - ENVIRONMENT=production"
     echo ""
     read -p "Press ENTER to edit .env now (or Ctrl+C to cancel): "
