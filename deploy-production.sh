@@ -173,6 +173,14 @@ else
     cd ${INSTALL_DIR}
 fi
 
+# Create data directory for SQLite database (before running install.sh)
+echo ""
+echo "Creating data directory for database..."
+mkdir -p ${INSTALL_DIR}/data
+chown ${APP_USER}:${APP_USER} ${INSTALL_DIR}/data
+chmod 755 ${INSTALL_DIR}/data
+echo "Data directory created: ${INSTALL_DIR}/data"
+
 echo -e "${GREEN}[8/13] Running application deployment script...${NC}"
 chmod +x ${INSTALL_DIR}/scripts/linux/install.sh
 sudo -u ${APP_USER} PYTHON_BIN="${PYTHON_BIN}" bash ${INSTALL_DIR}/scripts/linux/install.sh
@@ -208,14 +216,6 @@ else
         echo "ENVIRONMENT=production" >> ${INSTALL_DIR}/.env
     fi
 fi
-
-# Create data directory for SQLite database
-echo ""
-echo "Creating data directory for database..."
-mkdir -p ${INSTALL_DIR}/data
-chown ${APP_USER}:${APP_USER} ${INSTALL_DIR}/data
-chmod 755 ${INSTALL_DIR}/data
-echo "Data directory created: ${INSTALL_DIR}/data"
 
 echo -e "${GREEN}[10/13] Creating systemd service...${NC}"
 cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
