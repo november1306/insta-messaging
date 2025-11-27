@@ -148,7 +148,10 @@ jobs:
               fi
 
               sudo -u insta-messaging npm install --silent
-              sudo -u insta-messaging npm run build
+
+              # Export VITE_API_KEY for build (Vite needs it at build time)
+              echo "Building with VITE_API_KEY from .env..."
+              sudo -u insta-messaging bash -c 'export VITE_API_KEY="${{ secrets.VITE_API_KEY }}" && npm run build'
 
               # Install/configure ngrok (needed for Instagram webhooks until real domain)
               echo "🌐 Configuring ngrok..."
