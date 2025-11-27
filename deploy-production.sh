@@ -263,10 +263,21 @@ echo "Systemd service created: ${SERVICE_NAME}.service"
 
 echo -e "${GREEN}[11/13] Configuring Nginx reverse proxy...${NC}"
 
+# Install htpasswd utility if not present
+if ! command -v htpasswd &> /dev/null; then
+    echo "Installing apache2-utils for htpasswd..."
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apache2-utils
+fi
+
+# Create HTTP Basic Auth password file for /chat
+echo "Creating HTTP Basic Auth credentials..."
+htpasswd -cbB /etc/nginx/.htpasswd admin 'InstaChatTest2025'
+chmod 644 /etc/nginx/.htpasswd
+
 # Remove default site
 rm -f /etc/nginx/sites-enabled/default
 
-# Create nginx config
+# Create nginx config with HTTP Basic Auth for /chat
 cat > /etc/nginx/sites-available/${APP_NAME} <<'EOF'
 server {
     listen 80;
@@ -285,31 +296,59 @@ server {
     access_log /var/log/nginx/insta-messaging-access.log;
     error_log /var/log/nginx/insta-messaging-error.log;
 
-    # Proxy to application
-    location / {
+    # Protected /chat UI with HTTP Basic Auth
+    location /chat {
+        auth_basic "Instagram Chat - Login Required";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 
-        # Proxy headers
+    # API endpoints - require API key authentication (no HTTP Basic Auth)
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # WebSocket support (for future use)
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        # SSE support
+        proxy_set_header Connection '';
+        proxy_buffering off;
+        proxy_cache off;
+        chunked_transfer_encoding off;
+    }
 
-        # Timeouts
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
+    # Webhooks - no auth (Instagram needs to call this)
+    location /webhooks/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     # Health check endpoint
     location /health {
         proxy_pass http://127.0.0.1:8000/health;
         access_log off;
+    }
+
+    # Default proxy for everything else
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 EOF
