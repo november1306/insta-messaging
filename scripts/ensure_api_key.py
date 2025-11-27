@@ -33,8 +33,8 @@ async def ensure_api_key():
         print(f"❌ Invalid API key format: {api_key}")
         sys.exit(1)
 
-    # Extract prefix
-    key_prefix = "_".join(api_key.split("_")[:3])  # sk_test_XX or sk_live_XX
+    # Extract prefix (first 10 characters for quick lookup)
+    key_prefix = api_key[:10]  # e.g., "sk_test_yl"
 
     print(f"🔑 Checking if API key with prefix '{key_prefix}' exists in database...")
 
