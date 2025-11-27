@@ -14,8 +14,8 @@
       <svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
       </svg>
-      <p>No conversations yet</p>
-      <p class="text-sm mt-2">Messages will appear here when customers reach out</p>
+      <p>No active conversations</p>
+      <p class="text-sm mt-2">Only conversations with valid response tokens (24h window) are shown</p>
     </div>
 
     <!-- Conversation Items -->
@@ -46,9 +46,24 @@
               {{ formatTime(conversation.last_message_time) }}
             </span>
           </div>
-          <p class="text-sm text-gray-600 truncate">
-            {{ conversation.last_message }}
-          </p>
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-sm text-gray-600 truncate">
+              {{ conversation.last_message }}
+            </p>
+            <!-- Time Remaining Badge -->
+            <span
+              v-if="conversation.hours_remaining !== undefined"
+              :class="[
+                'text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap',
+                conversation.hours_remaining <= 2 ? 'bg-red-100 text-red-700' :
+                conversation.hours_remaining <= 6 ? 'bg-orange-100 text-orange-700' :
+                'bg-green-100 text-green-700'
+              ]"
+              :title="`You can respond for ${conversation.hours_remaining} more hour${conversation.hours_remaining !== 1 ? 's' : ''}`"
+            >
+              {{ conversation.hours_remaining }}h left
+            </span>
+          </div>
         </div>
 
         <!-- Unread Badge -->

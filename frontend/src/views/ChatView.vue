@@ -3,17 +3,42 @@
     <!-- Left Sidebar: Conversation List -->
     <div class="w-96 border-r border-instagram-border flex flex-col">
       <!-- Header -->
-      <div class="h-16 border-b border-instagram-border flex items-center justify-between px-6">
-        <h1 class="text-xl font-semibold">Messages</h1>
-        <button
-          @click="refreshConversations"
-          class="text-instagram-blue hover:text-blue-700"
-          title="Refresh"
-        >
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-        </button>
+      <div class="border-b border-instagram-border">
+        <!-- Account Info -->
+        <div class="px-6 py-3 border-b border-instagram-border">
+          <div v-if="store.currentAccount" class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-500 flex items-center justify-center text-white font-semibold">
+              {{ (store.currentAccount.username || '?')[0].toUpperCase() }}
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="font-semibold text-sm truncate">{{ store.currentAccount.username }}</div>
+              <div v-if="store.currentAccount.instagram_handle" class="text-xs text-gray-500 truncate">
+                @{{ store.currentAccount.instagram_handle }}
+              </div>
+            </div>
+          </div>
+          <div v-else class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full bg-gray-200 animate-pulse"></div>
+            <div class="flex-1">
+              <div class="h-4 bg-gray-200 rounded animate-pulse mb-1"></div>
+              <div class="h-3 bg-gray-200 rounded animate-pulse w-2/3"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Messages Header -->
+        <div class="h-12 flex items-center justify-between px-6">
+          <h1 class="text-lg font-semibold">Messages</h1>
+          <button
+            @click="refreshConversations"
+            class="text-instagram-blue hover:text-blue-700"
+            title="Refresh"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <!-- Conversation List -->
@@ -131,10 +156,16 @@ async function handleSendMessage(text) {
 }
 
 async function refreshConversations() {
-  await store.fetchConversations()
+  await Promise.all([
+    store.fetchCurrentAccount(),
+    store.fetchConversations()
+  ])
 }
 
 onMounted(async () => {
-  await store.fetchConversations()
+  await Promise.all([
+    store.fetchCurrentAccount(),
+    store.fetchConversations()
+  ])
 })
 </script>

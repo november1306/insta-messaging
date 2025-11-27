@@ -16,7 +16,7 @@ from app.clients.instagram_client import InstagramClient
 from app.config import settings
 from app.api.auth import verify_api_key
 from typing import List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +26,56 @@ router = APIRouter()
 # In production, use Redis or database
 username_cache: Dict[str, str] = {}
 
+# Business account can only respond within 24 hours
+RESPONSE_WINDOW_HOURS = 24
+
 
 # ============================================
 # UI Data Endpoints (API Key Protected)
 # ============================================
+
+
+@router.get("/ui/account/me")
+async def get_current_account(
+    api_key: APIKey = Depends(verify_api_key)
+):
+    """
+    Get current user's Instagram account information.
+
+    Returns the business account ID, username, and Instagram handle
+    configured in the application settings.
+
+    Requires API key authentication.
+    """
+    try:
+        business_account_id = settings.instagram_business_account_id
+
+        if not business_account_id:
+            logger.warning("Instagram business account ID not configured")
+            return {
+                "account_id": None,
+                "username": "Not configured",
+                "instagram_handle": None
+            }
+
+        # Fetch username from Instagram API
+        username = await _get_instagram_username(business_account_id)
+
+        # Extract handle (remove "@" prefix if present, or use account_id if fetch failed)
+        instagram_handle = username.replace("@", "") if username and username.startswith("@") else business_account_id
+
+        return {
+            "account_id": business_account_id,
+            "username": username if username else business_account_id,
+            "instagram_handle": instagram_handle
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch current account info: {e}")
+        return {
+            "account_id": settings.instagram_business_account_id,
+            "username": "Error loading account",
+            "instagram_handle": None
+        }
 
 
 async def _get_instagram_username(sender_id: str) -> str:
@@ -73,11 +119,18 @@ async def get_conversations(
 ):
     """
     Get list of all conversations grouped by sender.
-    Returns the latest message from each sender with Instagram usernames.
+    Returns only conversations with valid response tokens (within 24-hour window).
+
+    Business accounts can only initiate/respond to messages within 24 hours
+    of the last inbound message from the user.
 
     Requires API key authentication.
     """
     try:
+        # Calculate cutoff time for 24-hour response window
+        now = datetime.now(timezone.utc)
+        cutoff_time = now - timedelta(hours=RESPONSE_WINDOW_HOURS)
+
         # Subquery to get the latest message ID for each sender
         subq = (
             select(
@@ -89,7 +142,7 @@ async def get_conversations(
             .subquery()
         )
 
-        # Join to get full message details
+        # Join to get full message details, filter by 24-hour window
         stmt = (
             select(MessageModel)
             .join(
@@ -97,6 +150,7 @@ async def get_conversations(
                 (MessageModel.sender_id == subq.c.sender_id) &
                 (MessageModel.id == subq.c.latest_message_id)
             )
+            .where(MessageModel.timestamp >= cutoff_time)  # Only conversations within response window
             .order_by(desc(MessageModel.timestamp))
         )
 
@@ -107,14 +161,20 @@ async def get_conversations(
         for msg in messages:
             # Fetch Instagram username
             sender_name = await _get_instagram_username(msg.sender_id)
-            
+
+            # Calculate time remaining in response window
+            time_remaining = (msg.timestamp + timedelta(hours=RESPONSE_WINDOW_HOURS)) - now
+            hours_remaining = max(0, int(time_remaining.total_seconds() / 3600))
+
             conversations.append({
                 "sender_id": msg.sender_id,
                 "sender_name": sender_name,
                 "last_message": msg.message_text or "",
                 "last_message_time": msg.timestamp.isoformat() if msg.timestamp else None,
                 "unread_count": 0,  # TODO: Implement read/unread tracking
-                "instagram_account_id": msg.recipient_id  # The business account that received the message
+                "instagram_account_id": msg.recipient_id,  # The business account that received the message
+                "hours_remaining": hours_remaining,  # Hours left to respond
+                "can_respond": hours_remaining > 0
             })
 
         return {"conversations": conversations}

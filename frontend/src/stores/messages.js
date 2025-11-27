@@ -9,6 +9,7 @@ export const useMessagesStore = defineStore('messages', () => {
   const activeConversationId = ref(null)
   const loading = ref(false)
   const error = ref(null)
+  const currentAccount = ref(null) // Current user's account info
 
   // Computed
   const activeConversation = computed(() => {
@@ -20,6 +21,20 @@ export const useMessagesStore = defineStore('messages', () => {
   })
 
   // Actions
+  async function fetchCurrentAccount() {
+    try {
+      const response = await apiClient.get('/ui/account/me')
+      currentAccount.value = response.data
+    } catch (err) {
+      console.error('Failed to fetch current account:', err)
+      currentAccount.value = {
+        account_id: null,
+        username: 'Error loading account',
+        instagram_handle: null
+      }
+    }
+  }
+
   async function fetchConversations() {
     loading.value = true
     error.value = null
@@ -140,10 +155,12 @@ export const useMessagesStore = defineStore('messages', () => {
     activeConversationId,
     loading,
     error,
+    currentAccount,
     // Computed
     activeConversation,
     activeMessages,
     // Actions
+    fetchCurrentAccount,
     fetchConversations,
     fetchMessages,
     sendMessage,
