@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.db.connection import get_db_session
 from app.services.api_key_service import APIKeyService
-from app.schemas.api_key import APIKeyCreate, APIKeyType, Environment
+from app.db.models import APIKeyType
 
 
 async def ensure_api_key():
@@ -72,7 +72,6 @@ async def ensure_api_key():
             key_prefix=key_prefix,
             key_hash=key_hash,
             type=APIKeyType.ADMIN,
-            environment=Environment.TEST,
             is_active=True
         )
 
