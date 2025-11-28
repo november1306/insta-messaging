@@ -16,11 +16,38 @@ import logging
 from pathlib import Path
 import aiomysql
 
+# Custom logging filter to redact sensitive data
+class SensitiveDataFilter(logging.Filter):
+    """Filter to redact sensitive data from logs"""
+
+    def filter(self, record):
+        if hasattr(record, 'msg'):
+            msg = str(record.msg)
+            # Redact access tokens in URLs
+            if 'access_token=' in msg:
+                msg = msg.split('access_token=')[0] + 'access_token=[REDACTED]'
+                record.msg = msg
+            # Redact JWT tokens
+            if 'eyJ' in msg and 'token' in msg.lower():
+                import re
+                msg = re.sub(r'eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*', '[JWT_REDACTED]', msg)
+                record.msg = msg
+        return True
+
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+# Add filter to all loggers
+for handler in logging.root.handlers:
+    handler.addFilter(SensitiveDataFilter())
+
+# Add filter to httpx logger (logs API requests)
+httpx_logger = logging.getLogger('httpx')
+httpx_logger.addFilter(SensitiveDataFilter())
+
 logger = logging.getLogger(__name__)
 
 

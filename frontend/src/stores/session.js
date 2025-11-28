@@ -20,13 +20,20 @@ export const useSessionStore = defineStore('session', () => {
   })
 
   // Actions
-  async function createSession() {
+  async function login(username, password) {
     loading.value = true
     error.value = null
 
     try {
-      // Call session endpoint (protected by nginx basic auth)
-      const response = await apiClient.post('/ui/session')
+      // Encode credentials as Basic Auth
+      const credentials = btoa(`${username}:${password}`)
+
+      // Call session endpoint with Basic Auth header
+      const response = await apiClient.post('/ui/session', null, {
+        headers: {
+          'Authorization': `Basic ${credentials}`
+        }
+      })
 
       if (response.data.error || !response.data.token) {
         throw new Error(response.data.error || 'Failed to create session')
@@ -50,16 +57,26 @@ export const useSessionStore = defineStore('session', () => {
       // Configure API client to use session token
       apiClient.defaults.headers.Authorization = `Bearer ${token.value}`
 
-      console.log('Session created successfully for account:', accountId.value)
+      console.log('[Session] Session created successfully for account:', accountId.value)
+      console.log('[Session] Token stored in localStorage')
+      console.log('[Session] isAuthenticated:', isAuthenticated.value)
 
       return response.data
     } catch (err) {
-      error.value = err.message || 'Failed to create session'
+      // Extract error message from response
+      const errorMessage = err.response?.data?.detail || err.message || 'Invalid username or password'
+      error.value = errorMessage
       console.error('Failed to create session:', err)
-      throw err
+      throw new Error(errorMessage)
     } finally {
       loading.value = false
     }
+  }
+
+  async function createSession() {
+    // Deprecated: Use login() instead
+    // This function is kept for backwards compatibility during migration
+    throw new Error('Please use login() with username and password')
   }
 
   function restoreSession() {
@@ -106,28 +123,30 @@ export const useSessionStore = defineStore('session', () => {
     // Remove Authorization header from API client
     delete apiClient.defaults.headers.Authorization
 
-    console.log('Session cleared')
+    console.log('[Session] Session cleared')
+  }
+
+  function logout() {
+    console.log('[Session] Logging out...')
+    clearSession()
+    // Router will handle redirect to login via navigation guard
+    return true
   }
 
   async function ensureSession() {
-    // Check if we have a valid session, create one if not
+    // Check if we have a valid session
     if (isAuthenticated.value) {
       return true
     }
 
-    // Try to restore from localStorage first
+    // Try to restore from localStorage
     if (restoreSession()) {
       return true
     }
 
-    // Create new session
-    try {
-      await createSession()
-      return true
-    } catch (err) {
-      console.error('Failed to ensure session:', err)
-      return false
-    }
+    // No valid session - user needs to login
+    console.log('No valid session found - user needs to login')
+    return false
   }
 
   return {
@@ -140,7 +159,9 @@ export const useSessionStore = defineStore('session', () => {
     // Computed
     isAuthenticated,
     // Actions
-    createSession,
+    login,
+    logout,
+    createSession, // deprecated
     restoreSession,
     clearSession,
     ensureSession

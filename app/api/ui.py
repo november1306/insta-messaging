@@ -3,14 +3,14 @@ UI API endpoints for the web frontend
 Provides conversation lists and message retrieval for the Vue chat interface
 
 Authentication:
-- Phase 1: Session-based JWT authentication for UI endpoints
-- POST /ui/session: Protected by nginx basic auth, returns JWT token
+- POST /ui/session: Validates Basic Auth credentials, returns JWT token
 - All other /ui/* endpoints: Protected by JWT token validation
 """
 import logging
 import httpx
 import jwt
-from fastapi import APIRouter, Depends
+import base64
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_
 from app.db.connection import get_db_session
@@ -18,7 +18,8 @@ from app.db.models import MessageModel, APIKey
 from app.clients.instagram_client import InstagramClient
 from app.config import settings
 from app.api.auth import verify_api_key, verify_ui_session
-from typing import List, Dict, Any
+from app.services.user_service import UserService
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
@@ -39,66 +40,106 @@ RESPONSE_WINDOW_HOURS = 24
 
 
 @router.post("/ui/session")
-async def create_session():
+async def create_session(
+    authorization: Optional[str] = Header(None),
+    db: AsyncSession = Depends(get_db_session)
+):
     """
-    Create a UI session token (JWT).
+    Create a UI session token (JWT) by validating Basic Auth credentials.
 
-    Phase 1: Uses default Instagram business account (protected by nginx basic auth)
-    Phase 2: Will use Instagram OAuth to determine account_id dynamically
+    This endpoint validates username/password credentials from the Authorization header
+    and returns a JWT token for subsequent requests.
 
-    This endpoint is protected by nginx basic authentication at the reverse proxy level.
-    The frontend authenticates once with nginx, then receives a JWT token for subsequent requests.
+    Args:
+        authorization: Basic Auth header (e.g., "Basic base64(username:password)")
+        db: Database session
 
     Returns:
         dict: Session token and account information
             - token (str): JWT token for UI authentication
             - account_id (str): Instagram business account ID
             - expires_in (int): Token expiration time in seconds
+
+    Raises:
+        HTTPException: 401 if credentials are missing or invalid
     """
-    try:
-        # Get default account (Phase 1: single-tenant)
-        account_id = settings.instagram_business_account_id
-
-        if not account_id:
-            logger.error("Instagram business account ID not configured")
-            return {
-                "error": "Account not configured",
-                "token": None,
-                "account_id": None,
-                "expires_in": 0
-            }
-
-        # Create JWT with account context
-        expiration_time = datetime.now(timezone.utc) + timedelta(hours=settings.jwt_expiration_hours)
-        payload = {
-            "account_id": account_id,
-            "exp": expiration_time,
-            "type": "ui_session"
-        }
-
-        # Generate JWT token
-        token = jwt.encode(
-            payload,
-            settings.session_secret,
-            algorithm=settings.jwt_algorithm
+    # Check if Authorization header is present and valid format
+    if not authorization or not authorization.startswith("Basic "):
+        logger.warning("Session creation failed: Missing or invalid Authorization header")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Basic Auth credentials. Provide 'Authorization: Basic <credentials>'.",
+            headers={"WWW-Authenticate": "Basic"}
         )
 
-        logger.info(f"Created UI session for account {account_id}")
+    # Decode Basic Auth credentials
+    try:
+        # Extract base64 part after "Basic "
+        encoded_credentials = authorization[6:].strip()
 
-        return {
-            "token": token,
-            "account_id": account_id,
-            "expires_in": settings.jwt_expiration_hours * 3600  # Convert hours to seconds
-        }
+        # Decode base64
+        decoded_bytes = base64.b64decode(encoded_credentials)
+        decoded_str = decoded_bytes.decode('utf-8')
+
+        # Split username:password
+        if ':' not in decoded_str:
+            raise ValueError("Invalid credentials format")
+
+        username, password = decoded_str.split(':', 1)
 
     except Exception as e:
-        logger.error(f"Failed to create session: {e}")
-        return {
-            "error": "Failed to create session",
-            "token": None,
-            "account_id": None,
-            "expires_in": 0
-        }
+        logger.warning(f"Session creation failed: Invalid Basic Auth format - {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Basic Auth format. Use base64(username:password).",
+            headers={"WWW-Authenticate": "Basic"}
+        )
+
+    # Validate credentials against database
+    user = await UserService.validate_credentials(db, username, password)
+
+    if not user:
+        logger.warning(f"Session creation failed: Invalid credentials for username '{username}'")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password.",
+            headers={"WWW-Authenticate": "Basic"}
+        )
+
+    # Get Instagram business account ID
+    account_id = settings.instagram_business_account_id
+
+    if not account_id:
+        logger.error("Instagram business account ID not configured")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Account not configured"
+        )
+
+    # Create JWT with account context
+    expiration_time = datetime.now(timezone.utc) + timedelta(hours=settings.jwt_expiration_hours)
+    payload = {
+        "account_id": account_id,
+        "user_id": user.id,  # Include user ID in JWT for audit trail
+        "username": user.username,  # Include username for logging
+        "exp": expiration_time,
+        "type": "ui_session"
+    }
+
+    # Generate JWT token
+    token = jwt.encode(
+        payload,
+        settings.session_secret,
+        algorithm=settings.jwt_algorithm
+    )
+
+    logger.info(f"Created UI session for user '{user.username}' (account: {account_id})")
+
+    return {
+        "token": token,
+        "account_id": account_id,
+        "expires_in": settings.jwt_expiration_hours * 3600  # Convert hours to seconds
+    }
 
 
 # ============================================
@@ -113,7 +154,7 @@ async def get_current_account(
     """
     Get current user's Instagram account information.
 
-    Returns the business account ID, username, and Instagram handle
+    Returns the business account ID, username, profile picture, and Instagram handle
     from the session context.
 
     Requires JWT session authentication.
@@ -126,26 +167,30 @@ async def get_current_account(
             return {
                 "account_id": None,
                 "username": "Not configured",
-                "instagram_handle": None
+                "instagram_handle": None,
+                "profile_picture_url": None
             }
 
-        # Fetch username from Instagram API (pass is_business_account=True)
-        username = await _get_instagram_username(business_account_id, is_business_account=True)
+        # Fetch profile from Instagram API
+        profile = await _get_instagram_profile(business_account_id)
 
         # Extract handle (remove "@" prefix if present)
+        username = profile["username"]
         instagram_handle = username.replace("@", "") if username and username.startswith("@") else business_account_id
 
         return {
             "account_id": business_account_id,
             "username": username if username else f"@{business_account_id}",
-            "instagram_handle": instagram_handle
+            "instagram_handle": instagram_handle,
+            "profile_picture_url": profile["profile_picture_url"]
         }
     except Exception as e:
         logger.error(f"Failed to fetch current account info: {e}")
         return {
             "account_id": settings.instagram_business_account_id,
             "username": "Error loading account",
-            "instagram_handle": None
+            "instagram_handle": None,
+            "profile_picture_url": None
         }
 
 
@@ -184,6 +229,41 @@ async def _get_instagram_username(sender_id: str, is_business_account: bool = Fa
 
     # Fallback to sender_id
     return sender_id
+
+
+async def _get_instagram_profile(sender_id: str) -> dict:
+    """
+    Get Instagram profile data for a sender ID.
+
+    Args:
+        sender_id: Instagram user ID
+
+    Returns:
+        Dictionary with username and profile_picture_url, or default values if fetch fails
+    """
+    # Fetch from Instagram API
+    try:
+        async with httpx.AsyncClient() as http_client:
+            instagram_client = InstagramClient(
+                http_client=http_client,
+                settings=settings,
+                logger_instance=logger
+            )
+            profile = await instagram_client.get_user_profile(sender_id)
+
+            if profile and "username" in profile:
+                return {
+                    "username": f"@{profile['username']}",
+                    "profile_picture_url": profile.get("profile_picture_url")
+                }
+    except Exception as e:
+        logger.warning(f"Failed to fetch profile for {sender_id}: {e}")
+
+    # Fallback
+    return {
+        "username": sender_id,
+        "profile_picture_url": None
+    }
 
 
 @router.get("/ui/conversations")
@@ -236,32 +316,38 @@ async def get_conversations(
         result = await db.execute(stmt)
         messages = result.scalars().all()
 
-        # Batch fetch usernames in parallel to avoid N+1 query problem
+        # Batch fetch profiles in parallel to avoid N+1 query problem
         # Collect unique sender IDs
         unique_sender_ids = list(set(msg.sender_id for msg in messages))
 
-        # Fetch all usernames concurrently
+        # Fetch all profiles concurrently
         import asyncio
-        username_tasks = [_get_instagram_username(sender_id) for sender_id in unique_sender_ids]
-        usernames = await asyncio.gather(*username_tasks)
+        profile_tasks = [_get_instagram_profile(sender_id) for sender_id in unique_sender_ids]
+        profiles = await asyncio.gather(*profile_tasks)
 
-        # Create sender_id -> username mapping
-        username_map = dict(zip(unique_sender_ids, usernames))
+        # Create sender_id -> profile mapping
+        profile_map = dict(zip(unique_sender_ids, profiles))
 
         conversations = []
         for msg in messages:
-            # Get username from pre-fetched map
-            sender_name = username_map.get(msg.sender_id, msg.sender_id)
+            # Get profile from pre-fetched map
+            profile = profile_map.get(msg.sender_id, {"username": msg.sender_id, "profile_picture_url": None})
 
             # Calculate time remaining in response window
-            time_remaining = (msg.timestamp + timedelta(hours=RESPONSE_WINDOW_HOURS)) - now
+            # Ensure msg.timestamp is timezone-aware (assume UTC if naive)
+            msg_timestamp = msg.timestamp
+            if msg_timestamp.tzinfo is None:
+                msg_timestamp = msg_timestamp.replace(tzinfo=timezone.utc)
+
+            time_remaining = (msg_timestamp + timedelta(hours=RESPONSE_WINDOW_HOURS)) - now
             hours_remaining = max(0, int(time_remaining.total_seconds() / 3600))
 
             conversations.append({
                 "sender_id": msg.sender_id,
-                "sender_name": sender_name,
+                "sender_name": profile["username"],
+                "profile_picture_url": profile["profile_picture_url"],
                 "last_message": msg.message_text or "",
-                "last_message_time": msg.timestamp.isoformat() if msg.timestamp else None,
+                "last_message_time": msg_timestamp.isoformat() if msg_timestamp else None,
                 "unread_count": 0,  # TODO: Implement read/unread tracking
                 "instagram_account_id": msg.recipient_id,  # The business account that received the message
                 "hours_remaining": hours_remaining,  # Hours left to respond

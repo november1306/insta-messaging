@@ -33,7 +33,16 @@
       >
         <!-- Avatar -->
         <div class="flex-shrink-0">
-          <div class="w-14 h-14 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-semibold text-xl">
+          <img
+            v-if="conversation.profile_picture_url"
+            :src="conversation.profile_picture_url"
+            :alt="conversation.sender_name"
+            class="w-14 h-14 rounded-full object-cover"
+          />
+          <div
+            v-else
+            class="w-14 h-14 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-semibold text-xl"
+          >
             {{ getInitials(conversation.sender_name) }}
           </div>
         </div>

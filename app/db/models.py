@@ -142,3 +142,25 @@ class APIKeyPermission(Base):
         Index('idx_api_key_id', 'api_key_id'),
         Index('idx_account_id', 'account_id'),
     )
+
+
+class User(Base):
+    """
+    Users for UI authentication.
+
+    Stores username and bcrypt-hashed password for login.
+    Used for JWT session creation via Basic Auth validation.
+    """
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(50), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)  # bcrypt hash
+    is_active = Column(Boolean, nullable=False, default=True)  # Allow deactivation
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('idx_username', 'username'),
+        Index('idx_is_active', 'is_active'),
+    )
