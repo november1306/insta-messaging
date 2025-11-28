@@ -58,15 +58,15 @@ async def get_current_account(
                 "instagram_handle": None
             }
 
-        # Fetch username from Instagram API
-        username = await _get_instagram_username(business_account_id)
+        # Fetch username from Instagram API (pass is_business_account=True)
+        username = await _get_instagram_username(business_account_id, is_business_account=True)
 
-        # Extract handle (remove "@" prefix if present, or use account_id if fetch failed)
+        # Extract handle (remove "@" prefix if present)
         instagram_handle = username.replace("@", "") if username and username.startswith("@") else business_account_id
 
         return {
             "account_id": business_account_id,
-            "username": username if username else business_account_id,
+            "username": username if username else f"@{business_account_id}",
             "instagram_handle": instagram_handle
         }
     except Exception as e:
@@ -78,19 +78,22 @@ async def get_current_account(
         }
 
 
-async def _get_instagram_username(sender_id: str) -> str:
+async def _get_instagram_username(sender_id: str, is_business_account: bool = False) -> str:
     """
     Get Instagram username for a sender ID.
     Uses cache to avoid repeated API calls.
+
+    Args:
+        sender_id: Instagram user ID
+        is_business_account: If True, fetch business account username properly
+
+    Returns:
+        Username in @username format, or user_id if fetch fails
     """
-    # Check if this is the business account
-    if sender_id == settings.instagram_business_account_id:
-        return f"{sender_id} (me)"
-    
-    # Check cache first
-    if sender_id in username_cache:
+    # Check cache first (unless it's the business account)
+    if not is_business_account and sender_id in username_cache:
         return username_cache[sender_id]
-    
+
     # Fetch from Instagram API
     try:
         async with httpx.AsyncClient() as http_client:
@@ -100,14 +103,14 @@ async def _get_instagram_username(sender_id: str) -> str:
                 logger_instance=logger
             )
             profile = await instagram_client.get_user_profile(sender_id)
-            
+
             if profile and "username" in profile:
                 username = f"@{profile['username']}"
                 username_cache[sender_id] = username
                 return username
     except Exception as e:
         logger.warning(f"Failed to fetch username for {sender_id}: {e}")
-    
+
     # Fallback to sender_id
     return sender_id
 
@@ -131,6 +134,9 @@ async def get_conversations(
         now = datetime.now(timezone.utc)
         cutoff_time = now - timedelta(hours=RESPONSE_WINDOW_HOURS)
 
+        # Get business account ID to exclude from contacts
+        business_account_id = settings.instagram_business_account_id
+
         # Subquery to get the latest message ID for each sender
         subq = (
             select(
@@ -143,6 +149,7 @@ async def get_conversations(
         )
 
         # Join to get full message details, filter by 24-hour window
+        # IMPORTANT: Exclude business account from contacts (no chatting with myself)
         stmt = (
             select(MessageModel)
             .join(
@@ -151,6 +158,7 @@ async def get_conversations(
                 (MessageModel.id == subq.c.latest_message_id)
             )
             .where(MessageModel.timestamp >= cutoff_time)  # Only conversations within response window
+            .where(MessageModel.sender_id != business_account_id)  # Exclude business account from contacts
             .order_by(desc(MessageModel.timestamp))
         )
 

@@ -8,9 +8,9 @@
         </div>
         <div>
           <h2 class="font-semibold text-gray-900">
-            {{ conversation?.sender_name || conversation?.sender_id }}
+            {{ conversation?.sender_name }}
           </h2>
-          <p class="text-xs text-gray-500">{{ conversation?.sender_id }}</p>
+          <p class="text-xs text-gray-500">Active now</p>
         </div>
       </div>
     </div>

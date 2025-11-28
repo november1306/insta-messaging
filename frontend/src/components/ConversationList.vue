@@ -11,11 +11,13 @@
 
     <!-- Empty State -->
     <div v-else-if="!conversations.length" class="p-8 text-center text-gray-500">
-      <svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+      <svg class="w-20 h-20 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
       </svg>
-      <p>No active conversations</p>
-      <p class="text-sm mt-2">Only conversations with valid response tokens (24h window) are shown</p>
+      <p class="font-semibold text-gray-700 mb-2">No messages yet</p>
+      <p class="text-sm text-gray-500 px-4">
+        Start a conversation when someone messages you. You can respond within 24 hours of their last message.
+      </p>
     </div>
 
     <!-- Conversation Items -->
@@ -40,7 +42,7 @@
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between mb-1">
             <h3 class="font-semibold text-gray-900 truncate">
-              {{ conversation.sender_name || conversation.sender_id }}
+              {{ conversation.sender_name }}
             </h3>
             <span class="text-xs text-gray-500 flex-shrink-0 ml-2">
               {{ formatTime(conversation.last_message_time) }}
