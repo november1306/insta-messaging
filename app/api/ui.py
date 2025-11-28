@@ -9,7 +9,7 @@ import logging
 import httpx
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, or_
 from app.db.connection import get_db_session
 from app.db.models import MessageModel, APIKey
 from app.clients.instagram_client import InstagramClient
@@ -205,10 +205,17 @@ async def get_messages(
     Requires API key authentication.
     """
     try:
-        # Get all messages for this sender
+        # Get all messages for this conversation thread (both inbound and outbound)
+        # - Inbound: sender_id = user (user sends to business)
+        # - Outbound: recipient_id = user (business sends to user, including automated replies)
         stmt = (
             select(MessageModel)
-            .where(MessageModel.sender_id == sender_id)
+            .where(
+                or_(
+                    MessageModel.sender_id == sender_id,      # Inbound messages from user
+                    MessageModel.recipient_id == sender_id    # Outbound messages to user
+                )
+            )
             .order_by(MessageModel.timestamp)
         )
 
