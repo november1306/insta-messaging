@@ -8,9 +8,9 @@
         </div>
         <div>
           <h2 class="font-semibold text-gray-900">
-            {{ conversation?.sender_name || conversation?.sender_id }}
+            {{ conversation?.sender_name }}
           </h2>
-          <p class="text-xs text-gray-500">{{ conversation?.sender_id }}</p>
+          <p class="text-xs text-gray-500">Active now</p>
         </div>
       </div>
     </div>
@@ -66,6 +66,7 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue'
 import MessageBubble from './MessageBubble.vue'
+import { getInitials } from '../composables/useUserUtils'
 
 const props = defineProps({
   conversation: {
@@ -87,15 +88,6 @@ const emit = defineEmits(['send'])
 const messageText = ref('')
 const sending = ref(false)
 const messagesContainer = ref(null)
-
-function getInitials(name) {
-  if (!name) return '?'
-  const parts = name.split(' ')
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase()
-  }
-  return name.substring(0, 2).toUpperCase()
-}
 
 async function handleSend() {
   if (!messageText.value.trim() || sending.value) return
