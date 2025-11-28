@@ -23,15 +23,21 @@ class SensitiveDataFilter(logging.Filter):
     def filter(self, record):
         if hasattr(record, 'msg'):
             msg = str(record.msg)
+            import re
+
             # Redact access tokens in URLs
             if 'access_token=' in msg:
                 msg = msg.split('access_token=')[0] + 'access_token=[REDACTED]'
-                record.msg = msg
+
             # Redact JWT tokens
             if 'eyJ' in msg and 'token' in msg.lower():
-                import re
                 msg = re.sub(r'eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*', '[JWT_REDACTED]', msg)
-                record.msg = msg
+
+            # Redact Instagram message IDs and other long identifiers (80+ chars of alphanumeric)
+            # These are typically base64-encoded IDs from Instagram Graph API
+            msg = re.sub(r'\b[A-Za-z0-9_-]{80,}\b', '[ID_REDACTED]', msg)
+
+            record.msg = msg
         return True
 
 # Configure logging
