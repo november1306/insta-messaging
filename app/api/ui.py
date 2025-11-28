@@ -165,10 +165,22 @@ async def get_conversations(
         result = await db.execute(stmt)
         messages = result.scalars().all()
 
+        # Batch fetch usernames in parallel to avoid N+1 query problem
+        # Collect unique sender IDs
+        unique_sender_ids = list(set(msg.sender_id for msg in messages))
+
+        # Fetch all usernames concurrently
+        import asyncio
+        username_tasks = [_get_instagram_username(sender_id) for sender_id in unique_sender_ids]
+        usernames = await asyncio.gather(*username_tasks)
+
+        # Create sender_id -> username mapping
+        username_map = dict(zip(unique_sender_ids, usernames))
+
         conversations = []
         for msg in messages:
-            # Fetch Instagram username
-            sender_name = await _get_instagram_username(msg.sender_id)
+            # Get username from pre-fetched map
+            sender_name = username_map.get(msg.sender_id, msg.sender_id)
 
             # Calculate time remaining in response window
             time_remaining = (msg.timestamp + timedelta(hours=RESPONSE_WINDOW_HOURS)) - now

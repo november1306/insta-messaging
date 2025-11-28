@@ -127,21 +127,14 @@
 </template>
 
 <script setup>
+import { getInitials } from '../composables/useUserUtils'
+
 defineProps({
   conversation: {
     type: Object,
     default: null
   }
 })
-
-function getInitials(name) {
-  if (!name) return '?'
-  const parts = name.split(' ')
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase()
-  }
-  return name.substring(0, 2).toUpperCase()
-}
 
 function formatLastMessageTime(timestamp) {
   if (!timestamp) return 'N/A'
