@@ -29,6 +29,12 @@ jobs:
               systemctl stop insta-messaging
             fi
 
+            # Stop ngrok if running
+            if pgrep -x "ngrok" > /dev/null; then
+              echo "Stopping ngrok tunnel..."
+              pkill -9 ngrok || true
+            fi
+
             # Remove systemd service
             if [ -f /etc/systemd/system/insta-messaging.service ]; then
               echo "Removing systemd service..."
