@@ -13,7 +13,7 @@ import uuid
 import logging
 import httpx
 
-from app.api.auth import verify_api_key
+from app.api.auth import verify_api_key, verify_jwt_or_api_key
 from app.db.connection import get_db_session
 from app.db.models import OutboundMessage, Account, APIKey
 from app.clients.instagram_client import InstagramClient, InstagramAPIError
@@ -85,7 +85,7 @@ class MessageStatusResponse(BaseModel):
 @router.post("/messages/send", response_model=SendMessageResponse, status_code=status.HTTP_202_ACCEPTED)
 async def send_message(
     request: SendMessageRequest,
-    api_key: APIKey = Depends(verify_api_key),
+    auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -105,15 +105,35 @@ async def send_message(
     """
     logger.info(f"Send message request - account: {request.account_id}, recipient: {request.recipient_id}")
 
-    # Check if API key has permission to access this account
-    has_permission = await APIKeyService.check_account_permission(db, api_key, request.account_id)
-    if not has_permission:
-        logger.warning(
-            f"Permission denied: API key {api_key.id} attempted to send message for account {request.account_id}"
-        )
+    # Handle both JWT and API key authentication
+    if auth.get("auth_type") == "api_key":
+        # API key authentication - check permissions
+        api_key = auth.get("api_key")
+        has_permission = await APIKeyService.check_account_permission(db, api_key, request.account_id)
+        if not has_permission:
+            logger.warning(
+                f"Permission denied: API key {api_key.id} attempted to send message for account {request.account_id}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"API key does not have permission to access account {request.account_id}"
+            )
+    elif auth.get("auth_type") == "jwt":
+        # JWT authentication - use account from token
+        token_account_id = auth.get("account_id")
+        if token_account_id != request.account_id:
+            logger.warning(
+                f"Permission denied: JWT token for account {token_account_id} attempted to send message for account {request.account_id}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"JWT token does not have permission to access account {request.account_id}"
+            )
+    else:
+        logger.error(f"Unknown authentication type: {auth.get('auth_type')}")
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"API key does not have permission to access account {request.account_id}"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication context"
         )
     
     # 1. Check idempotency - return existing if duplicate

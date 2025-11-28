@@ -1,13 +1,20 @@
 import axios from 'axios'
 
-// Get API key from environment variable or use demo key for development
-const apiKey = import.meta.env.VITE_API_KEY || 'demo-token'
-
+/**
+ * API Client for frontend requests
+ *
+ * Authentication is managed by the session store:
+ * 1. Session store calls POST /ui/session to get JWT token
+ * 2. Session store sets apiClient.defaults.headers.Authorization
+ * 3. All subsequent requests use the JWT token automatically
+ *
+ * Note: The /ui/session endpoint itself is protected by nginx basic auth
+ */
 const apiClient = axios.create({
   baseURL: '/api/v1',
   headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${apiKey}`
+    'Content-Type': 'application/json'
+    // Authorization header is set dynamically by session store
   },
   timeout: 10000
 })
@@ -30,7 +37,17 @@ apiClient.interceptors.response.use(
   error => {
     if (error.response) {
       // Server responded with error status
-      console.error('API Error:', error.response.status, error.response.data)
+      const status = error.response.status
+      const errorData = error.response.data
+
+      // Handle authentication errors
+      if (status === 401) {
+        console.warn('Authentication failed (401) - session may be expired:', errorData)
+        // Session store should handle clearing expired sessions
+        // Components can listen for 401 errors to trigger re-authentication
+      }
+
+      console.error('API Error:', status, errorData)
     } else if (error.request) {
       // No response received
       console.error('Network Error:', error.message)

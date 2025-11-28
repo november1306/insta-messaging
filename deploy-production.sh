@@ -192,19 +192,26 @@ if [ ! -f "${INSTALL_DIR}/.env" ]; then
     chmod 600 ${INSTALL_DIR}/.env
     chown ${APP_USER}:${APP_USER} ${INSTALL_DIR}/.env
 
+    # Generate and set SESSION_SECRET automatically
+    echo "Generating SESSION_SECRET..."
+    SESSION_SECRET=$($PYTHON_BIN -c "import secrets; print(secrets.token_urlsafe(32))")
+    sed -i "s/SESSION_SECRET=your_session_secret_here/SESSION_SECRET=${SESSION_SECRET}/" ${INSTALL_DIR}/.env
+    echo "✓ SESSION_SECRET generated and configured"
+
     echo ""
     echo -e "${YELLOW}========================================${NC}"
     echo -e "${YELLOW}⚠️  IMPORTANT: Configure .env file${NC}"
     echo -e "${YELLOW}========================================${NC}"
     echo "Edit ${INSTALL_DIR}/.env and add your Instagram API credentials"
     echo ""
-    echo "Required variables:"
+    echo "✓ SESSION_SECRET: Auto-generated and configured"
+    echo ""
+    echo "Required variables to configure:"
     echo "  - FACEBOOK_VERIFY_TOKEN"
     echo "  - FACEBOOK_APP_SECRET"
     echo "  - INSTAGRAM_APP_SECRET"
     echo "  - INSTAGRAM_PAGE_ACCESS_TOKEN"
     echo "  - INSTAGRAM_BUSINESS_ACCOUNT_ID"
-    echo "  - VITE_API_KEY (generate with: python -m app.cli.generate_api_key)"
     echo "  - ENVIRONMENT=production"
     echo ""
     read -p "Press ENTER to edit .env now (or Ctrl+C to cancel): "
@@ -262,23 +269,72 @@ systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}
 echo "Systemd service created: ${SERVICE_NAME}.service"
 
-echo -e "${GREEN}[11/13] Configuring Nginx reverse proxy...${NC}"
+echo -e "${GREEN}[10.5/13] Creating admin user for UI authentication...${NC}"
 
-# Install htpasswd utility if not present
-if ! command -v htpasswd &> /dev/null; then
-    echo "Installing apache2-utils for htpasswd..."
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apache2-utils
+# Check if any users exist in database
+USER_COUNT=$(sudo -u ${APP_USER} ${INSTALL_DIR}/venv/bin/python3 -c "
+import asyncio
+import sys
+sys.path.insert(0, '${INSTALL_DIR}')
+
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import select, func
+from app.db.models import User
+from app.config import settings
+
+async def count_users():
+    engine = create_async_engine(settings.database_url, echo=False)
+    async with engine.begin() as conn:
+        result = await conn.execute(select(func.count(User.id)))
+        count = result.scalar()
+        await engine.dispose()
+        return count
+
+try:
+    count = asyncio.run(count_users())
+    print(count if count else 0)
+except Exception as e:
+    print(0)
+" 2>/dev/null || echo "0")
+
+if [ "$USER_COUNT" -eq 0 ]; then
+    echo "No users found. Creating default admin user..."
+
+    # Prompt for admin password or generate random one
+    echo ""
+    read -p "Enter admin password (leave empty to generate random): " ADMIN_PASSWORD
+
+    if [ -z "$ADMIN_PASSWORD" ]; then
+        ADMIN_PASSWORD=$($PYTHON_BIN -c "import secrets; print(secrets.token_urlsafe(16))")
+        echo ""
+        echo -e "${YELLOW}Generated admin password: ${ADMIN_PASSWORD}${NC}"
+        echo -e "${YELLOW}⚠️  SAVE THIS PASSWORD - It will not be shown again!${NC}"
+        echo ""
+    fi
+
+    # Create admin user
+    sudo -u ${APP_USER} ${INSTALL_DIR}/venv/bin/python3 -m app.cli.manage_users create \
+        --username admin \
+        --password "$ADMIN_PASSWORD" 2>&1 | grep -v "^Traceback" | grep -v "^  File" | grep -v "^    " || true
+
+    echo "✓ Admin user created: username=admin"
+
+    # Save credentials to a secure file for reference
+    echo "admin:$ADMIN_PASSWORD" > ${INSTALL_DIR}/.admin_credentials
+    chmod 600 ${INSTALL_DIR}/.admin_credentials
+    chown ${APP_USER}:${APP_USER} ${INSTALL_DIR}/.admin_credentials
+    echo "  Credentials saved to: ${INSTALL_DIR}/.admin_credentials"
+else
+    echo "Users already exist (count: $USER_COUNT), skipping user creation"
+    echo "  To create additional users, use: python -m app.cli.manage_users create --username <name>"
 fi
 
-# Create HTTP Basic Auth password file for /chat
-echo "Creating HTTP Basic Auth credentials..."
-htpasswd -cbB /etc/nginx/.htpasswd admin 'InstaChatTest2025'
-chmod 644 /etc/nginx/.htpasswd
+echo -e "${GREEN}[11/13] Configuring Nginx reverse proxy...${NC}"
 
 # Remove default site
 rm -f /etc/nginx/sites-enabled/default
 
-# Create nginx config with HTTP Basic Auth for /chat
+# Create nginx config (auth handled by backend)
 cat > /etc/nginx/sites-available/${APP_NAME} <<'EOF'
 server {
     listen 80;
@@ -297,11 +353,8 @@ server {
     access_log /var/log/nginx/insta-messaging-access.log;
     error_log /var/log/nginx/insta-messaging-error.log;
 
-    # Protected /chat UI with HTTP Basic Auth
-    location /chat {
-        auth_basic "Instagram Chat - Login Required";
-        auth_basic_user_file /etc/nginx/.htpasswd;
-
+    # UI routes (authentication handled by backend)
+    location ~ ^/(chat|ui) {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

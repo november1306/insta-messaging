@@ -3,7 +3,16 @@
     <!-- Thread Header -->
     <div class="h-16 border-b border-instagram-border flex items-center px-6">
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-semibold">
+        <img
+          v-if="conversation?.profile_picture_url"
+          :src="conversation.profile_picture_url"
+          :alt="conversation.sender_name"
+          class="w-10 h-10 rounded-full object-cover"
+        />
+        <div
+          v-else
+          class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-semibold"
+        >
           {{ getInitials(conversation?.sender_name) }}
         </div>
         <div>

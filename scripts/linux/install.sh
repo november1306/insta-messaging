@@ -132,25 +132,6 @@ echo "[6/7] Running database migrations..."
 alembic upgrade head
 print_success "Database migrations completed"
 
-# Ensure VITE_API_KEY from .env exists in database
-echo ""
-print_info "Ensuring VITE_API_KEY exists in database..."
-if [ -f ".env" ]; then
-    source .env
-    if [ ! -z "$VITE_API_KEY" ]; then
-        python scripts/ensure_api_key.py
-        if [ $? -eq 0 ]; then
-            print_success "API key synchronized with database"
-        else
-            print_error "Failed to synchronize API key"
-        fi
-    else
-        print_warning "VITE_API_KEY not set in .env"
-    fi
-else
-    print_warning ".env file not found"
-fi
-
 # Install frontend dependencies and build
 echo ""
 echo "[7/7] Installing frontend dependencies and building..."
@@ -172,11 +153,6 @@ fi
 
 # Build frontend for production
 print_info "Building frontend for production..."
-
-# Load VITE_API_KEY from .env if available
-if [ -f "../.env" ]; then
-    export $(grep VITE_API_KEY ../.env | xargs)
-fi
 
 # Clean dist directory if it exists (avoid permission issues)
 if [ -d "dist" ]; then

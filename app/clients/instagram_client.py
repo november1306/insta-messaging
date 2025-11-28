@@ -69,21 +69,21 @@ class InstagramClient:
         
         Args:
             user_id: Instagram user's PSID (Page-Scoped ID)
-            
+
         Returns:
-            Dictionary with user profile data (name, username, profile_pic) or None if failed
-            
+            Dictionary with user profile data (name, username, profile_picture_url) or None if failed
+
         Example:
             profile = await client.get_user_profile("1558635688632972")
-            # Returns: {"name": "John Doe", "username": "johndoe", "profile_pic": "..."}
+            # Returns: {"name": "John Doe", "username": "johndoe", "profile_picture_url": "https://..."}
         """
         url = f"{self._api_base_url}/{user_id}"
-        
+
         try:
             response = await self._http_client.get(
                 url,
                 params={
-                    "fields": "name,username,profile_pic",
+                    "fields": "name,username,profile_picture_url",
                     "access_token": self._settings.instagram_page_access_token
                 },
                 timeout=5.0
