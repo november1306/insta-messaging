@@ -94,12 +94,14 @@
 <script setup>
 import { onMounted } from 'vue'
 import { useMessagesStore } from '../stores/messages'
+import { useSessionStore } from '../stores/session'
 import { useSSE } from '../composables/useSSE'
 import ConversationList from '../components/ConversationList.vue'
 import MessageThread from '../components/MessageThread.vue'
 import ConversationDetails from '../components/ConversationDetails.vue'
 
 const store = useMessagesStore()
+const sessionStore = useSessionStore()
 
 // SSE connection for real-time updates
 const { connected: sseConnected, error: sseError } = useSSE(
@@ -168,6 +170,17 @@ function getAccountInitial(username) {
 }
 
 onMounted(async () => {
+  // Initialize session before making any API calls
+  // This will either restore from localStorage or create a new session
+  const sessionReady = await sessionStore.ensureSession()
+
+  if (!sessionReady) {
+    console.error('Failed to initialize session - authentication required')
+    // Session creation failed - user may need to login via nginx basic auth
+    return
+  }
+
+  // Session is ready, fetch data
   await Promise.all([
     store.fetchCurrentAccount(),
     store.fetchConversations()

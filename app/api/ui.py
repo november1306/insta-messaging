@@ -2,11 +2,14 @@
 UI API endpoints for the web frontend
 Provides conversation lists and message retrieval for the Vue chat interface
 
-Authentication: Uses API key authentication (same as CRM endpoints).
-Generate an API key with: python -m app.cli.generate_api_key --name "UI Access" --type admin --env test
+Authentication:
+- Phase 1: Session-based JWT authentication for UI endpoints
+- POST /ui/session: Protected by nginx basic auth, returns JWT token
+- All other /ui/* endpoints: Protected by JWT token validation
 """
 import logging
 import httpx
+import jwt
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_
@@ -14,7 +17,7 @@ from app.db.connection import get_db_session
 from app.db.models import MessageModel, APIKey
 from app.clients.instagram_client import InstagramClient
 from app.config import settings
-from app.api.auth import verify_api_key
+from app.api.auth import verify_api_key, verify_ui_session
 from typing import List, Dict, Any
 from datetime import datetime, timezone, timedelta
 
@@ -31,21 +34,89 @@ RESPONSE_WINDOW_HOURS = 24
 
 
 # ============================================
-# UI Data Endpoints (API Key Protected)
+# Session Authentication Endpoint
+# ============================================
+
+
+@router.post("/ui/session")
+async def create_session():
+    """
+    Create a UI session token (JWT).
+
+    Phase 1: Uses default Instagram business account (protected by nginx basic auth)
+    Phase 2: Will use Instagram OAuth to determine account_id dynamically
+
+    This endpoint is protected by nginx basic authentication at the reverse proxy level.
+    The frontend authenticates once with nginx, then receives a JWT token for subsequent requests.
+
+    Returns:
+        dict: Session token and account information
+            - token (str): JWT token for UI authentication
+            - account_id (str): Instagram business account ID
+            - expires_in (int): Token expiration time in seconds
+    """
+    try:
+        # Get default account (Phase 1: single-tenant)
+        account_id = settings.instagram_business_account_id
+
+        if not account_id:
+            logger.error("Instagram business account ID not configured")
+            return {
+                "error": "Account not configured",
+                "token": None,
+                "account_id": None,
+                "expires_in": 0
+            }
+
+        # Create JWT with account context
+        expiration_time = datetime.now(timezone.utc) + timedelta(hours=settings.jwt_expiration_hours)
+        payload = {
+            "account_id": account_id,
+            "exp": expiration_time,
+            "type": "ui_session"
+        }
+
+        # Generate JWT token
+        token = jwt.encode(
+            payload,
+            settings.session_secret,
+            algorithm=settings.jwt_algorithm
+        )
+
+        logger.info(f"Created UI session for account {account_id}")
+
+        return {
+            "token": token,
+            "account_id": account_id,
+            "expires_in": settings.jwt_expiration_hours * 3600  # Convert hours to seconds
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to create session: {e}")
+        return {
+            "error": "Failed to create session",
+            "token": None,
+            "account_id": None,
+            "expires_in": 0
+        }
+
+
+# ============================================
+# UI Data Endpoints (JWT Protected)
 # ============================================
 
 
 @router.get("/ui/account/me")
 async def get_current_account(
-    api_key: APIKey = Depends(verify_api_key)
+    session: dict = Depends(verify_ui_session)
 ):
     """
     Get current user's Instagram account information.
 
     Returns the business account ID, username, and Instagram handle
-    configured in the application settings.
+    from the session context.
 
-    Requires API key authentication.
+    Requires JWT session authentication.
     """
     try:
         business_account_id = settings.instagram_business_account_id
@@ -117,7 +188,7 @@ async def _get_instagram_username(sender_id: str, is_business_account: bool = Fa
 
 @router.get("/ui/conversations")
 async def get_conversations(
-    api_key: APIKey = Depends(verify_api_key),
+    session: dict = Depends(verify_ui_session),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -127,7 +198,7 @@ async def get_conversations(
     Business accounts can only initiate/respond to messages within 24 hours
     of the last inbound message from the user.
 
-    Requires API key authentication.
+    Requires JWT session authentication.
     """
     try:
         # Calculate cutoff time for 24-hour response window
@@ -207,14 +278,14 @@ async def get_conversations(
 @router.get("/ui/messages/{sender_id}")
 async def get_messages(
     sender_id: str,
-    api_key: APIKey = Depends(verify_api_key),
+    session: dict = Depends(verify_ui_session),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
     Get all messages for a specific sender (conversation thread).
     Returns both inbound and outbound messages with Instagram username.
 
-    Requires API key authentication.
+    Requires JWT session authentication.
     """
     try:
         # Get all messages for this conversation thread (both inbound and outbound)

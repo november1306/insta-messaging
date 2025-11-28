@@ -192,19 +192,26 @@ if [ ! -f "${INSTALL_DIR}/.env" ]; then
     chmod 600 ${INSTALL_DIR}/.env
     chown ${APP_USER}:${APP_USER} ${INSTALL_DIR}/.env
 
+    # Generate and set SESSION_SECRET automatically
+    echo "Generating SESSION_SECRET..."
+    SESSION_SECRET=$($PYTHON_BIN -c "import secrets; print(secrets.token_urlsafe(32))")
+    sed -i "s/SESSION_SECRET=your_session_secret_here/SESSION_SECRET=${SESSION_SECRET}/" ${INSTALL_DIR}/.env
+    echo "✓ SESSION_SECRET generated and configured"
+
     echo ""
     echo -e "${YELLOW}========================================${NC}"
     echo -e "${YELLOW}⚠️  IMPORTANT: Configure .env file${NC}"
     echo -e "${YELLOW}========================================${NC}"
     echo "Edit ${INSTALL_DIR}/.env and add your Instagram API credentials"
     echo ""
-    echo "Required variables:"
+    echo "✓ SESSION_SECRET: Auto-generated and configured"
+    echo ""
+    echo "Required variables to configure:"
     echo "  - FACEBOOK_VERIFY_TOKEN"
     echo "  - FACEBOOK_APP_SECRET"
     echo "  - INSTAGRAM_APP_SECRET"
     echo "  - INSTAGRAM_PAGE_ACCESS_TOKEN"
     echo "  - INSTAGRAM_BUSINESS_ACCOUNT_ID"
-    echo "  - VITE_API_KEY (generate with: python -m app.cli.generate_api_key)"
     echo "  - ENVIRONMENT=production"
     echo ""
     read -p "Press ENTER to edit .env now (or Ctrl+C to cancel): "

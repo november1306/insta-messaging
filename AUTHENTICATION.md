@@ -1,245 +1,137 @@
-# Authentication Guide
-
-This document explains how to use the authentication system in the Instagram Messenger Automation project.
-
-## Overview
-
-The project uses **API Key Authentication** for all endpoints (both CRM API and UI).
 
-- Single authentication method for consistency
-- Bcrypt-hashed API keys stored in database
-- Two permission levels: admin and account-scoped
-- Generate keys via CLI tool
-
----
-
-## API Key Authentication
-
-API keys are used for all CRM integration endpoints (`/api/v1/*`). Keys are stored securely with bcrypt hashing and support two permission levels.
-
-### API Key Types
-
-#### Admin Keys
-- Full access to all accounts and operations
-- Can create new accounts
-- Can send messages for any account
-- Recommended for development and administrative tasks
-
-#### Account-Scoped Keys
-- Limited to specific Instagram accounts
-- Cannot create new accounts
-- Can only send/view messages for permitted accounts
-- Recommended for production integrations
-
-### Generating API Keys
-
-Use the CLI tool to generate API keys:
-
-```bash
-# Generate admin key for testing
-python -m app.cli.generate_api_key \
-  --name "Development Admin" \
-  --type admin \
-  --env test
-
-# Generate production admin key
-python -m app.cli.generate_api_key \
-  --name "Production Admin" \
-  --type admin \
-  --env live
-
-# Generate account-scoped key
-python -m app.cli.generate_api_key \
-  --name "Customer A Integration" \
-  --type account \
-  --env live \
-  --accounts acc_abc123,acc_def456
-
-# Generate key with expiration
-python -m app.cli.generate_api_key \
-  --name "Temporary Key" \
-  --type admin \
-  --env test \
-  --expires 90  # Expires in 90 days
-```
-
-**Output example:**
-```
-======================================================================
-✅ API Key created successfully!
-======================================================================
-
-API Key: <your-test-api-key-here>
-
-⚠️  SAVE THIS KEY - It will not be shown again!
-
-Key Details:
-  • ID: key_a1b2c3d4e5f6
-  • Name: Development Admin
-  • Type: admin
-  • Environment: test
-  • Created: 2025-11-17 20:55:00 UTC
-
-Usage Example:
-  curl -H 'Authorization: Bearer <your-test-api-key-here>' \
-       http://localhost:8000/api/v1/messages/send
-
-======================================================================
-```
-
-### Using API Keys
-
-Include the API key in the `Authorization` header of all CRM API requests:
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/messages/send" \
-  -H "Authorization: Bearer <your-test-api-key-here>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "account_id": "acc_123",
-    "recipient_id": "1234567890",
-    "message": "Hello from CRM!",
-    "idempotency_key": "order_123_msg_1"
-  }'
-```
-
-### API Key Format
-
-```
-sk_{environment}_{random_32_chars}
-```
-
-- `sk_` - Secret key prefix
-- `test_` or `live_` - Environment indicator
-- 32 random alphanumeric characters
-
-**Examples:**
-- `<your-test-api-key-here>` (test key)
-- `<your-live-api-key-here>` (live key)
-
-### Security Features
-
-- ✅ **Bcrypt hashing** - Keys are hashed, never stored in plain text
-- ✅ **Prefix lookup** - Fast database queries without exposing full keys
-- ✅ **Revocable** - Keys can be deactivated without deleting data
-- ✅ **Expirable** - Optional expiration dates
-- ✅ **Permission scoping** - Account-level access control
-- ✅ **Usage tracking** - Last used timestamp for audit logs
-
-### Managing API Keys
-
-#### Revoking a Key
-
-```python
-from app.services.api_key_service import APIKeyService
-from app.db.connection import get_db_session
-
-async with get_db_session() as db:
-    await APIKeyService.revoke_api_key(db, "key_a1b2c3d4e5f6")
-```
-
-#### Checking Permissions
-
-```python
-from app.services.api_key_service import APIKeyService
-
-# Check if key has access to an account
-has_permission = await APIKeyService.check_account_permission(
-    db, api_key, "acc_123"
-)
-
-# Get all permitted accounts
-account_ids = await APIKeyService.get_permitted_account_ids(db, api_key)
-```
-
-### Error Responses
-
-#### 401 Unauthorized
-- Missing `Authorization` header
-- Invalid API key format
-- Invalid or expired key
-
-```json
-{
-  "detail": "Invalid API key. Check your credentials."
-}
-```
-
-#### 403 Forbidden
-- Valid key but insufficient permissions
-- Account-scoped key accessing unauthorized account
-
-```json
-{
-  "detail": "API key does not have permission to access account acc_123"
-}
-```
-
----
-
-## UI Endpoints
-
-The web chat UI endpoints (`/ui/conversations`, `/ui/messages/*`) use the **same API key authentication** as the CRM API.
-
-### Accessing UI Endpoints
-
-```bash
-# Generate an API key for UI access
-python -m app.cli.generate_api_key \
-  --name "UI Access" \
-  --type admin \
-  --env test
-
-# Use the API key with UI endpoints
-curl "http://localhost:8000/ui/conversations" \
-  -H "Authorization: Bearer <your-api-key>"
-```
-
-### Frontend Integration
-
-If you're building a frontend application:
-
-1. **Generate an API key** for the frontend to use
-2. **Store securely** (never expose in client-side code)
-3. **Use from backend** - make API calls from your backend server
-
----
-
-## Production Checklist
-
-Before deploying to production:
-
-- [ ] Generate production API keys with `--env live`
-- [ ] Review and restrict account permissions
-- [ ] Set API key expiration dates where appropriate
-- [ ] Enable HTTPS for all API requests
-- [ ] Implement rate limiting (recommended)
-- [ ] Monitor API key usage via `last_used_at` field
-- [ ] Run database migrations (`alembic upgrade head`)
-
----
-
-## Troubleshooting
-
-### "Invalid API key" error
-
-1. Check the API key format (should start with `sk_test_` or `sk_live_`)
-2. Verify the key wasn't revoked
-3. Check if the key has expired
-4. Ensure you're using the correct environment (test vs live)
-
-### "Permission denied" error
-
-1. Verify your API key type (admin vs account-scoped)
-2. Check which accounts your key has access to
-3. Create a new admin key if needed
-
----
-
-## API Reference
-
-See the interactive API documentation:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
-
-All endpoints (CRM API and UI) require API key authentication.
+  Recommended Architecture
+
+  Phase 1 (Now): Session-based authentication
+  ┌─────────┐    1. GET /ui/session     ┌─────────┐
+  │  Browser│ ──────────────────────────>│ Backend │
+  │         │ (nginx basic auth)         │         │
+  │         │<─────────────────────────── │         │
+  │         │    session token (JWT)     └─────────┘
+  │         │                                  │
+  │         │    2. GET /ui/conversations     │
+  │         │ ──────────────────────────────> │
+  │         │  Authorization: Bearer <JWT>    │
+  │         │    (includes account_id)        │
+  └─────────┘                                  │
+                                               ▼
+                                      Validates JWT
+                                      Loads account context
+
+  Phase 2 (Future): Instagram OAuth
+  User → Instagram OAuth → Backend creates JWT with account_id → Multi-tenant UI
+
+  Implementation:
+
+  1. Create session endpoint (Phase 1)
+
+  # app/api/ui.py
+
+  from datetime import datetime, timedelta
+  import jwt
+
+  @router.post("/ui/session")
+  async def create_session(
+      # Only accessible behind nginx basic auth
+      account_id: str = settings.instagram_business_account_id
+  ):
+      """
+      Create a UI session token.
+
+      Phase 1: Uses default account (nginx auth protects this)
+      Phase 2: Will use Instagram OAuth to determine account_id
+      """
+      # Create JWT with account context
+      payload = {
+          "account_id": account_id,
+          "exp": datetime.utcnow() + timedelta(hours=24),
+          "type": "ui_session"
+      }
+
+      token = jwt.encode(payload, settings.session_secret, algorithm="HS256")
+
+      return {
+          "token": token,
+          "account_id": account_id,
+          "expires_in": 86400  # 24 hours
+      }
+
+  2. Add session validation middleware
+
+  # app/api/auth.py
+
+  async def verify_ui_session(
+      authorization: str = Header(None),
+      db: AsyncSession = Depends(get_db_session)
+  ):
+      """Verify UI session token (JWT)"""
+      if not authorization or not authorization.startswith("Bearer "):
+          raise HTTPException(401, "Missing session token")
+
+      token = authorization.replace("Bearer ", "")
+
+      try:
+          payload = jwt.decode(token, settings.session_secret, algorithms=["HS256"])
+
+          if payload.get("type") != "ui_session":
+              raise HTTPException(401, "Invalid token type")
+
+          # Return account context
+          return {"account_id": payload["account_id"]}
+
+      except jwt.ExpiredSignatureError:
+          raise HTTPException(401, "Session expired")
+      except jwt.InvalidTokenError:
+          raise HTTPException(401, "Invalid session token")
+
+  3. Update UI endpoints to use session auth
+
+  @router.get("/ui/conversations")
+  async def get_conversations(
+      session: dict = Depends(verify_ui_session),  # ← Changed from API key
+      db: AsyncSession = Depends(get_db_session)
+  ):
+      account_id = session["account_id"]
+      # Filter conversations by account_id
+      # ... rest of implementation
+
+  4. Update frontend to fetch session token
+
+  // frontend/src/stores/session.js
+  export const useSessionStore = defineStore('session', () => {
+    const token = ref(null)
+    const accountId = ref(null)
+
+    async function createSession() {
+      const response = await axios.post('/api/v1/ui/session')
+      token.value = response.data.token
+      accountId.value = response.data.account_id
+
+      // Configure API client to use session token
+      apiClient.defaults.headers.Authorization = `Bearer ${token.value}`
+    }
+
+    return { token, accountId, createSession }
+  })
+
+  Benefits of this approach:
+
+  ✅ Secure: No API keys in frontend code
+  ✅ Multi-tenant ready: JWT contains account_id for future multi-user support
+  ✅ OAuth-ready: Easy to swap nginx auth for Instagram OAuth later
+  ✅ API remains protected: Direct API calls still require API keys
+  ✅ Flexible: Can add permissions, roles, etc. to JWT
+  ✅ Standard: Industry best practice (JWT sessions)
+
+  Migration Path:
+
+  Now → Phase 2 (Instagram OAuth):
+  1. Add Instagram OAuth endpoint: /auth/instagram/login
+  2. User authenticates with Instagram
+  3. Backend fetches their account info, creates JWT with their account_id
+  4. UI shows only their conversations
+  5. Remove nginx basic auth, use OAuth instead
+
+  Want me to implement Phase 1 (session-based auth)?
+
+> implement phase 1
+  ⎿  5-hour limit reached · resets 3am (Europe/Kiev) ·

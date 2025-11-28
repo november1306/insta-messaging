@@ -52,7 +52,22 @@ class Settings:
             
             # Check for missing credentials and warn
             self._warn_missing_credentials()
-        
+
+        # JWT/Session configuration for UI authentication
+        if self.environment == "production":
+            self.session_secret = self._get_required("SESSION_SECRET")
+        else:
+            # Development: Use default secret (not secure - for local testing only)
+            self.session_secret = os.getenv("SESSION_SECRET", "dev_session_secret_change_in_production")
+            if self.session_secret == "dev_session_secret_change_in_production":
+                import logging
+                logging.getLogger(__name__).warning(
+                    "⚠️  Using default SESSION_SECRET - generate a secure random secret for production"
+                )
+
+        self.jwt_algorithm = os.getenv("JWT_ALGORITHM", "HS256")
+        self.jwt_expiration_hours = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
+
         # Server configuration
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "8000"))
