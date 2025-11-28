@@ -186,75 +186,35 @@ chmod +x ${INSTALL_DIR}/scripts/linux/install.sh
 sudo -u ${APP_USER} PYTHON_BIN="${PYTHON_BIN}" bash ${INSTALL_DIR}/scripts/linux/install.sh
 
 echo -e "${GREEN}[9/13] Configuring environment...${NC}"
-
-# Create .env file from environment variables (GitHub secrets) or template
 if [ ! -f "${INSTALL_DIR}/.env" ]; then
-    echo "Creating .env from template..."
+    echo -e "${YELLOW}No .env file found. Creating from template...${NC}"
     sudo -u ${APP_USER} cp ${INSTALL_DIR}/.env.example ${INSTALL_DIR}/.env
     chmod 600 ${INSTALL_DIR}/.env
     chown ${APP_USER}:${APP_USER} ${INSTALL_DIR}/.env
-fi
 
-# Apply environment variables from GitHub secrets (if set)
-# These override the template values
-echo "Applying environment configuration..."
-ENV_VARS=(
-    "FACEBOOK_VERIFY_TOKEN"
-    "FACEBOOK_APP_SECRET"
-    "INSTAGRAM_APP_SECRET"
-    "INSTAGRAM_PAGE_ACCESS_TOKEN"
-    "INSTAGRAM_BUSINESS_ACCOUNT_ID"
-    "VITE_API_KEY"
-)
-
-CONFIGURED_COUNT=0
-for var in "${ENV_VARS[@]}"; do
-    if [ ! -z "${!var}" ]; then
-        # Variable is set in environment (from GitHub secrets)
-        echo "Setting $var from environment..."
-        # Remove existing line if present
-        sed -i "/^${var}=/d" ${INSTALL_DIR}/.env
-        # Add new value
-        echo "${var}=${!var}" >> ${INSTALL_DIR}/.env
-        CONFIGURED_COUNT=$((CONFIGURED_COUNT + 1))
-    fi
-done
-
-# Always set production environment
-sed -i "/^ENVIRONMENT=/d" ${INSTALL_DIR}/.env
-echo "ENVIRONMENT=production" >> ${INSTALL_DIR}/.env
-
-echo "Configured $CONFIGURED_COUNT variables from environment"
-
-# Check if critical variables are set
-MISSING_VARS=()
-for var in "${ENV_VARS[@]}"; do
-    if ! grep -q "^${var}=" ${INSTALL_DIR}/.env || grep -q "^${var}=$" ${INSTALL_DIR}/.env; then
-        MISSING_VARS+=("$var")
-    fi
-done
-
-if [ ${#MISSING_VARS[@]} -gt 0 ]; then
     echo ""
     echo -e "${YELLOW}========================================${NC}"
-    echo -e "${YELLOW}⚠️  WARNING: Missing configuration${NC}"
+    echo -e "${YELLOW}⚠️  IMPORTANT: Configure .env file${NC}"
     echo -e "${YELLOW}========================================${NC}"
-    echo "The following variables are not configured:"
-    for var in "${MISSING_VARS[@]}"; do
-        echo "  - $var"
-    done
+    echo "Edit ${INSTALL_DIR}/.env and add your Instagram API credentials"
     echo ""
-    echo "Set these in GitHub Secrets for automated deployment,"
-    echo "or edit ${INSTALL_DIR}/.env manually"
+    echo "Required variables:"
+    echo "  - FACEBOOK_VERIFY_TOKEN"
+    echo "  - FACEBOOK_APP_SECRET"
+    echo "  - INSTAGRAM_APP_SECRET"
+    echo "  - INSTAGRAM_PAGE_ACCESS_TOKEN"
+    echo "  - INSTAGRAM_BUSINESS_ACCOUNT_ID"
+    echo "  - VITE_API_KEY (generate with: python -m app.cli.generate_api_key)"
+    echo "  - ENVIRONMENT=production"
     echo ""
-
-    # Only prompt for manual edit if running interactively (not from GitHub Actions)
-    if [ -t 0 ]; then
-        read -p "Press ENTER to edit .env now (or Ctrl+C to cancel): "
-        nano ${INSTALL_DIR}/.env
-    else
-        echo "Running non-interactively, skipping manual edit"
-        echo "Application may not function without proper configuration"
+    read -p "Press ENTER to edit .env now (or Ctrl+C to cancel): "
+    nano ${INSTALL_DIR}/.env
+else
+    echo ".env file exists, skipping configuration"
+    # Ensure production environment
+    if ! grep -q "ENVIRONMENT=production" ${INSTALL_DIR}/.env; then
+        echo "Setting ENVIRONMENT=production in .env"
+        echo "ENVIRONMENT=production" >> ${INSTALL_DIR}/.env
     fi
 fi
 
