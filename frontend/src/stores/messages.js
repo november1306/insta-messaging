@@ -41,6 +41,19 @@ export const useMessagesStore = defineStore('messages', () => {
     try {
       const response = await apiClient.get('/ui/conversations')
       conversations.value = response.data.conversations
+
+      // Debug: Log conversations data to help diagnose missing hours_remaining
+      if (conversations.value.length > 0) {
+        console.log('[DEBUG] Conversations loaded:', {
+          count: conversations.value.length,
+          firstConversation: conversations.value[0],
+          hasHoursRemaining: conversations.value.map(c => ({
+            sender: c.sender_name,
+            hours: c.hours_remaining,
+            hasField: c.hours_remaining !== undefined
+          }))
+        })
+      }
     } catch (err) {
       error.value = err.message
       console.error('Failed to fetch conversations:', err)

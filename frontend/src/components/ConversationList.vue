@@ -54,7 +54,7 @@
             </p>
             <!-- Time Remaining Badge -->
             <span
-              v-if="conversation.hours_remaining !== undefined"
+              v-if="conversation.hours_remaining !== undefined && conversation.hours_remaining !== null"
               :class="[
                 'text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap',
                 conversation.hours_remaining <= 2 ? 'bg-red-100 text-red-700' :
