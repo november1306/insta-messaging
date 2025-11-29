@@ -76,9 +76,6 @@ jobs:
             JWT_ALGORITHM=HS256
             JWT_EXPIRATION_HOURS=24
 
-            # Frontend API Key (for /chat UI)
-            VITE_API_KEY=${{ secrets.VITE_API_KEY }}
-
             # Ngrok Configuration (REQUIRED until you have a real domain with SSL)
             # Instagram webhooks need HTTPS, ngrok provides this for test VPS
             # Remove this once you deploy to a real domain with Let's Encrypt SSL
@@ -139,11 +136,6 @@ jobs:
               cd /opt/insta-messaging
               sudo -u insta-messaging /opt/insta-messaging/venv/bin/alembic upgrade head
 
-              # Ensure VITE_API_KEY exists in database
-              echo "🔑 Synchronizing API key with database..."
-              cd /opt/insta-messaging
-              sudo -u insta-messaging bash -c 'source .env && /opt/insta-messaging/venv/bin/python scripts/ensure_api_key.py'
-
               # Build frontend
               echo "🎨 Building frontend..."
               cd /opt/insta-messaging/frontend
@@ -156,9 +148,9 @@ jobs:
 
               sudo -u insta-messaging npm install --silent
 
-              # Export VITE_API_KEY for build (Vite needs it at build time)
-              echo "Building with VITE_API_KEY from .env..."
-              sudo -u insta-messaging bash -c 'export $(grep VITE_API_KEY /opt/insta-messaging/.env | xargs) && cd /opt/insta-messaging/frontend && npm run build'
+              # Build frontend
+              echo "Building frontend..."
+              sudo -u insta-messaging bash -c 'cd /opt/insta-messaging/frontend && npm run build'
 
               # Install/configure ngrok (needed for Instagram webhooks until real domain)
               echo "🌐 Configuring ngrok..."
@@ -254,9 +246,6 @@ jobs:
             SESSION_SECRET=${{ secrets.SESSION_SECRET }}
             JWT_ALGORITHM=HS256
             JWT_EXPIRATION_HOURS=24
-
-            # Frontend API Key (for /chat UI)
-            VITE_API_KEY=${{ secrets.VITE_API_KEY }}
 
             # Ngrok Configuration (REQUIRED until you have a real domain with SSL)
             # Instagram webhooks need HTTPS, ngrok provides this for test VPS
