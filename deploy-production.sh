@@ -304,16 +304,15 @@ except Exception as e:
 if [ "$USER_COUNT" -eq 0 ]; then
     echo "No users found. Creating default admin user..."
 
-    # Prompt for admin password or generate random one
-    echo ""
-    read -p "Enter admin password (leave empty to generate random): " ADMIN_PASSWORD
-
+    # Use ADMIN_PASSWORD from environment if set, otherwise generate random
     if [ -z "$ADMIN_PASSWORD" ]; then
         ADMIN_PASSWORD=$($PYTHON_BIN -c "import secrets; print(secrets.token_urlsafe(16))")
         echo ""
-        echo -e "${YELLOW}Generated admin password: ${ADMIN_PASSWORD}${NC}"
-        echo -e "${YELLOW}⚠️  SAVE THIS PASSWORD - It will not be shown again!${NC}"
+        echo -e "${YELLOW}Generated random admin password${NC}"
+        echo -e "${YELLOW}⚠️  Password saved to: ${INSTALL_DIR}/.admin_credentials${NC}"
         echo ""
+    else
+        echo "Using provided admin password"
     fi
 
     # Create admin user

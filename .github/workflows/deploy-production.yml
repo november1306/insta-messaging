@@ -255,9 +255,10 @@ jobs:
 
               sudo chmod 600 /opt/insta-messaging/.env
 
-              # Run full deployment script
+              # Run full deployment script with admin password
               echo "🔧 Running full deployment script..."
-              sudo bash /opt/insta-messaging/deploy-production.sh
+              export ADMIN_PASSWORD="${{ secrets.ADMIN_PASSWORD }}"
+              sudo -E bash /opt/insta-messaging/deploy-production.sh
 
               # Install/configure ngrok after deployment (needed for Instagram webhooks)
               echo "🌐 Configuring ngrok..."
