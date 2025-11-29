@@ -337,7 +337,7 @@ echo -e "${GREEN}[11/13] Configuring Nginx reverse proxy...${NC}"
 # Remove default site
 rm -f /etc/nginx/sites-enabled/default
 
-# Create nginx config (auth handled by backend)
+# Create nginx config
 cat > /etc/nginx/sites-available/${APP_NAME} <<'EOF'
 server {
     listen 80;
@@ -356,35 +356,34 @@ server {
     access_log /var/log/nginx/insta-messaging-access.log;
     error_log /var/log/nginx/insta-messaging-error.log;
 
-    # UI routes (authentication handled by backend)
-    location ~ ^/(chat|ui) {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+    # Frontend (served from /chat/ path)
+    location /chat/ {
+        alias /opt/insta-messaging/frontend/dist/;
+        try_files $uri $uri/ /chat/index.html;
+        add_header Cache-Control "no-cache";
     }
 
-    # API endpoints - require API key authentication (no HTTP Basic Auth)
+    # Root redirects to /chat/
+    location = / {
+        return 301 /chat/;
+    }
+
+    # API endpoints
     location /api/ {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:8000/api/;
         proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-
-        # SSE support
-        proxy_set_header Connection '';
-        proxy_buffering off;
-        proxy_cache off;
-        chunked_transfer_encoding off;
+        proxy_cache_bypass $http_upgrade;
     }
 
-    # Webhooks - no auth (Instagram needs to call this)
+    # Webhooks
     location /webhooks/ {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:8000/webhooks/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -398,14 +397,13 @@ server {
         access_log off;
     }
 
-    # Default proxy for everything else
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+    # API docs
+    location /docs {
+        proxy_pass http://127.0.0.1:8000/docs;
+    }
+
+    location /openapi.json {
+        proxy_pass http://127.0.0.1:8000/openapi.json;
     }
 }
 EOF
