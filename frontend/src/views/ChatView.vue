@@ -9,7 +9,7 @@
           <div v-if="store.currentAccount" class="flex items-center gap-3">
             <img
               v-if="store.currentAccount.profile_picture_url"
-              :src="store.currentAccount.profile_picture_url"
+              :src="getProxiedImageUrl(store.currentAccount.profile_picture_url)"
               :alt="store.currentAccount.username"
               class="w-12 h-12 rounded-full object-cover shadow-sm"
             />
@@ -115,6 +115,7 @@ import { useRouter } from 'vue-router'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionStore } from '../stores/session'
 import { useSSE } from '../composables/useSSE'
+import { getProxiedImageUrl } from '../composables/useImageProxy'
 import ConversationList from '../components/ConversationList.vue'
 import MessageThread from '../components/MessageThread.vue'
 import ConversationDetails from '../components/ConversationDetails.vue'

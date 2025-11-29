@@ -66,16 +66,16 @@ class InstagramClient:
     async def get_user_profile(self, user_id: str) -> Optional[dict]:
         """
         Get user profile information from Instagram.
-        
+
         Args:
             user_id: Instagram user's PSID (Page-Scoped ID)
 
         Returns:
-            Dictionary with user profile data (name, username, profile_picture_url) or None if failed
+            Dictionary with user profile data (name, username, profile_pic) or None if failed
 
         Example:
             profile = await client.get_user_profile("1558635688632972")
-            # Returns: {"name": "John Doe", "username": "johndoe", "profile_picture_url": "https://..."}
+            # Returns: {"name": "John Doe", "username": "johndoe", "profile_pic": "https://..."}
         """
         url = f"{self._api_base_url}/{user_id}"
 
@@ -83,7 +83,7 @@ class InstagramClient:
             response = await self._http_client.get(
                 url,
                 params={
-                    "fields": "name,username,profile_picture_url",
+                    "fields": "name,username,profile_pic",
                     "access_token": self._settings.instagram_page_access_token
                 },
                 timeout=5.0
@@ -105,7 +105,55 @@ class InstagramClient:
         except Exception as e:
             self._logger.warning(f"⚠️ Error fetching user profile for {user_id}: {e}")
             return None
-    
+
+    async def get_business_account_profile(self, ig_user_id: str) -> Optional[dict]:
+        """
+        Get business account profile information from Instagram Graph API.
+
+        For Instagram Business/Creator accounts (IG User ID), use different fields
+        than regular user profiles.
+
+        Args:
+            ig_user_id: Instagram Business Account ID (IG User ID)
+
+        Returns:
+            Dictionary with business profile data or None if failed
+            {
+                "username": "business_name",
+                "profile_picture_url": "https://...",
+                "biography": "Bio text",
+                "followers_count": 1234
+            }
+        """
+        url = f"{self._api_base_url}/{ig_user_id}"
+
+        try:
+            response = await self._http_client.get(
+                url,
+                params={
+                    "fields": "username,profile_picture_url,biography,followers_count",
+                    "access_token": self._settings.instagram_page_access_token
+                },
+                timeout=5.0
+            )
+
+            if response.status_code == 200:
+                profile_data = response.json()
+                self._logger.info(f"✅ Retrieved business profile for {ig_user_id}: @{profile_data.get('username')}")
+                return profile_data
+            else:
+                error_data = response.json() if response.text else {}
+                error_message = error_data.get("error", {}).get("message", "Unknown error")
+                self._logger.warning(
+                    f"⚠️ Failed to get business profile - status: {response.status_code}, "
+                    f"message: {error_message}"
+                )
+                return None
+
+        except Exception as e:
+            self._logger.warning(f"⚠️ Error fetching business profile for {ig_user_id}: {e}")
+            return None
+
     async def send_message(
         self, 
         recipient_id: str, 

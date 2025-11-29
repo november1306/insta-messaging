@@ -66,22 +66,22 @@
 │                         DATABASE (SQLite/MySQL)                              │
 │                                                                             │
 │  Tables:                                                                    │
-│  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────────┐       │
-│  │  messages       │  │  accounts        │  │ outbound_messages   │       │
-│  ├─────────────────┤  ├──────────────────┤  ├─────────────────────┤       │
-│  │ id (PK)         │  │ id (PK)          │  │ id (PK)             │       │
-│  │ sender_id       │  │ instagram_acc_id │  │ account_id (FK)     │       │
-│  │ recipient_id    │  │ username         │  │ recipient_id        │       │
-│  │ message_text    │  │ access_token_enc │  │ message_text        │       │
-│  │ direction       │  │ crm_webhook_url  │  │ idempotency_key (U) │       │
-│  │ timestamp       │  │ webhook_secret   │  │ status              │       │
-│  │ created_at      │  │ created_at       │  │ instagram_msg_id    │       │
-│  │                 │  │                  │  │ error_code/message  │       │
-│  │ Indexes:        │  │ Indexes:         │  │ created_at          │       │
-│  │ idx_timestamp   │  │ idx_instagram_id │  │                     │       │
-│  │ idx_sender      │  │                  │  │ Indexes:            │       │
-│  │                 │  │                  │  │ idx_account_status  │       │
-│  └─────────────────┘  └──────────────────┘  └─────────────────────┘       │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐  │
+│  │  messages       │  │  accounts        │  │ crm_outbound_messages    │  │
+│  ├─────────────────┤  ├──────────────────┤  ├──────────────────────────┤  │
+│  │ id (PK)         │  │ id (PK)          │  │ id (PK)                  │  │
+│  │ sender_id       │  │ instagram_acc_id │  │ account_id (FK)          │  │
+│  │ recipient_id    │  │ username         │  │ recipient_id             │  │
+│  │ message_text    │  │ access_token_enc │  │ message_text             │  │
+│  │ direction       │  │ crm_webhook_url  │  │ idempotency_key (U)      │  │
+│  │ timestamp       │  │ webhook_secret   │  │ status                   │  │
+│  │ created_at      │  │ created_at       │  │ instagram_msg_id         │  │
+│  │                 │  │                  │  │ error_code/message       │  │
+│  │ Indexes:        │  │ Indexes:         │  │ created_at               │  │
+│  │ idx_timestamp   │  │ idx_instagram_id │  │                          │  │
+│  │ idx_sender      │  │                  │  │ Indexes:                 │  │
+│  │                 │  │                  │  │ idx_account_status       │  │
+│  └─────────────────┘  └──────────────────┘  └──────────────────────────┘  │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
         │                                             ▲

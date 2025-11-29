@@ -10,7 +10,8 @@ import logging
 import httpx
 import jwt
 import base64
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_
 from app.db.connection import get_db_session
@@ -171,25 +172,41 @@ async def get_current_account(
                 "profile_picture_url": None
             }
 
-        # Fetch profile from Instagram API
-        profile = await _get_instagram_profile(business_account_id)
+        # Fetch business account profile from Instagram Graph API
+        async with httpx.AsyncClient() as http_client:
+            instagram_client = InstagramClient(
+                http_client=http_client,
+                settings=settings,
+                logger_instance=logger
+            )
+            profile = await instagram_client.get_business_account_profile(business_account_id)
 
-        # Extract handle (remove "@" prefix if present)
-        username = profile["username"]
-        instagram_handle = username.replace("@", "") if username and username.startswith("@") else business_account_id
+        if not profile:
+            logger.warning(f"Failed to fetch business account profile for {business_account_id}")
+            return {
+                "account_id": business_account_id,
+                "username": f"@{business_account_id}",
+                "instagram_handle": business_account_id,
+                "profile_picture_url": None
+            }
+
+        username = profile.get("username", "")
+        profile_pic_url = profile.get("profile_picture_url")
+
+        logger.info(f"✅ Business account: @{username}, has_pic={bool(profile_pic_url)}")
 
         return {
             "account_id": business_account_id,
-            "username": username if username else f"@{business_account_id}",
-            "instagram_handle": instagram_handle,
-            "profile_picture_url": profile["profile_picture_url"]
+            "username": f"@{username}" if username else f"@{business_account_id}",
+            "instagram_handle": username or business_account_id,
+            "profile_picture_url": profile_pic_url
         }
     except Exception as e:
-        logger.error(f"Failed to fetch current account info: {e}")
+        logger.error(f"Failed to fetch current account info: {e}", exc_info=True)
         return {
             "account_id": settings.instagram_business_account_id,
-            "username": "Error loading account",
-            "instagram_handle": None,
+            "username": f"@{settings.instagram_business_account_id}" if settings.instagram_business_account_id else "Unknown",
+            "instagram_handle": settings.instagram_business_account_id,
             "profile_picture_url": None
         }
 
@@ -254,7 +271,7 @@ async def _get_instagram_profile(sender_id: str) -> dict:
             if profile and "username" in profile:
                 return {
                     "username": f"@{profile['username']}",
-                    "profile_picture_url": profile.get("profile_picture_url")
+                    "profile_picture_url": profile.get("profile_pic")
                 }
     except Exception as e:
         logger.warning(f"Failed to fetch profile for {sender_id}: {e}")
@@ -285,22 +302,24 @@ async def get_conversations(
         now = datetime.now(timezone.utc)
         cutoff_time = now - timedelta(hours=RESPONSE_WINDOW_HOURS)
 
-        # Get business account ID to exclude from contacts
+        # Get business account ID from session (user's account perspective)
         business_account_id = settings.instagram_business_account_id
 
         # Subquery to get the latest message ID for each sender
+        # Filter by recipient_id to ensure only messages TO this account are included
         subq = (
             select(
                 MessageModel.sender_id,
                 func.max(MessageModel.id).label('latest_message_id')
             )
             .where(MessageModel.direction == 'inbound')
+            .where(MessageModel.recipient_id == business_account_id)  # Only messages to this account
             .group_by(MessageModel.sender_id)
             .subquery()
         )
 
         # Join to get full message details, filter by 24-hour window
-        # IMPORTANT: Exclude business account from contacts (no chatting with myself)
+        # IMPORTANT: Filter by account to show only this account's contacts
         stmt = (
             select(MessageModel)
             .join(
@@ -309,6 +328,7 @@ async def get_conversations(
                 (MessageModel.id == subq.c.latest_message_id)
             )
             .where(MessageModel.timestamp >= cutoff_time)  # Only conversations within response window
+            .where(MessageModel.recipient_id == business_account_id)  # Only messages to this account
             .where(MessageModel.sender_id != business_account_id)  # Exclude business account from contacts
             .order_by(desc(MessageModel.timestamp))
         )
@@ -345,7 +365,7 @@ async def get_conversations(
             conversations.append({
                 "sender_id": msg.sender_id,
                 "sender_name": profile["username"],
-                "profile_picture_url": profile["profile_picture_url"],
+                "profile_picture_url": profile["profile_picture_url"],  # Fixed field name for frontend
                 "last_message": msg.message_text or "",
                 "last_message_time": msg_timestamp.isoformat() if msg_timestamp else None,
                 "unread_count": 0,  # TODO: Implement read/unread tracking
@@ -374,15 +394,24 @@ async def get_messages(
     Requires JWT session authentication.
     """
     try:
+        # Get business account ID from session (user's account perspective)
+        business_account_id = settings.instagram_business_account_id
+
         # Get all messages for this conversation thread (both inbound and outbound)
-        # - Inbound: sender_id = user (user sends to business)
-        # - Outbound: recipient_id = user (business sends to user, including automated replies)
+        # Filter by account to ensure only messages for THIS business account are returned
+        # - Inbound: user sends TO business account
+        # - Outbound: business account sends TO user
         stmt = (
             select(MessageModel)
             .where(
                 or_(
-                    MessageModel.sender_id == sender_id,      # Inbound messages from user
-                    MessageModel.recipient_id == sender_id    # Outbound messages to user
+                    # Inbound: user sends to this business account
+                    (MessageModel.sender_id == sender_id) &
+                    (MessageModel.recipient_id == business_account_id),
+
+                    # Outbound: this business account sends to user
+                    (MessageModel.sender_id == business_account_id) &
+                    (MessageModel.recipient_id == sender_id)
                 )
             )
             .order_by(MessageModel.timestamp)
@@ -430,3 +459,73 @@ async def get_messages(
             "messages": [],
             "sender_info": {"id": sender_id, "name": sender_name}
         }
+
+
+@router.get("/ui/proxy-image")
+async def proxy_instagram_image(
+    url: str = Query(..., description="Instagram CDN image URL to proxy")
+):
+    """
+    Proxy Instagram CDN images to bypass CORS and referrer restrictions.
+
+    Instagram CDN blocks direct image loading from external sites due to:
+    - Referrer policy restrictions
+    - CORS headers
+    - User-Agent requirements
+
+    This endpoint fetches the image server-side and serves it to the frontend,
+    bypassing these restrictions.
+
+    Public endpoint (no auth required) since:
+    - Only proxies public Instagram CDN URLs
+    - Browser <img> tags don't send JWT tokens
+    - Instagram profile pictures are already public data
+    """
+    # Security: Only allow Instagram CDN URLs
+    if not url.startswith("https://scontent.cdninstagram.com/"):
+        logger.warning(f"Rejected non-Instagram URL: {url}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only Instagram CDN URLs are allowed"
+        )
+
+    try:
+        # Fetch image from Instagram CDN with proper headers
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                }
+            )
+
+            if response.status_code != 200:
+                logger.warning(f"Failed to fetch image from Instagram CDN: {response.status_code}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Image not found or no longer available"
+                )
+
+            # Return image with caching headers
+            return Response(
+                content=response.content,
+                media_type=response.headers.get("content-type", "image/jpeg"),
+                headers={
+                    "Cache-Control": "public, max-age=86400",  # Cache for 24 hours
+                    "Access-Control-Allow-Origin": "*",  # Allow CORS
+                }
+            )
+
+    except httpx.TimeoutException:
+        logger.error(f"Timeout fetching image from Instagram CDN")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Timeout fetching image"
+        )
+    except Exception as e:
+        logger.error(f"Error proxying image: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch image"
+        )

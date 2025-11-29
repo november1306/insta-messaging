@@ -15,11 +15,13 @@ import httpx
 
 from app.api.auth import verify_api_key, verify_jwt_or_api_key
 from app.db.connection import get_db_session
-from app.db.models import OutboundMessage, Account, APIKey
+from app.db.models import CRMOutboundMessage, Account, APIKey
 from app.clients.instagram_client import InstagramClient, InstagramAPIError
 from app.config import settings
 from app.api.events import broadcast_new_message, broadcast_message_status
 from app.services.api_key_service import APIKeyService
+from app.core.interfaces import Message
+from app.repositories.message_repository import MessageRepository
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +140,7 @@ async def send_message(
     
     # 1. Check idempotency - return existing if duplicate
     result = await db.execute(
-        select(OutboundMessage).where(OutboundMessage.idempotency_key == request.idempotency_key)
+        select(CRMOutboundMessage).where(CRMOutboundMessage.idempotency_key == request.idempotency_key)
     )
     existing = result.scalar_one_or_none()
     
@@ -152,9 +154,9 @@ async def send_message(
     
     # 2. Generate message ID
     message_id = f"msg_{uuid.uuid4().hex[:12]}"
-    
-    # 3. Create outbound_messages record
-    outbound_message = OutboundMessage(
+
+    # 3. Create CRM outbound message record (for tracking/idempotency)
+    outbound_message = CRMOutboundMessage(
         id=message_id,
         account_id=request.account_id,
         recipient_id=request.recipient_id,
@@ -200,13 +202,31 @@ async def send_message(
                     recipient_id=request.recipient_id,
                     message_text=request.message
                 )
-                
-                # Update message status to "sent"
+
+                # Update CRM tracking status to "sent"
                 outbound_message.status = "sent"
                 outbound_message.instagram_message_id = ig_response.message_id
-                
+
                 logger.info(f"✅ Message sent to Instagram: {message_id} (ig_msg_id: {ig_response.message_id})")
-                
+
+                # Save to messages table for UI display (messenger pattern)
+                # This ensures the message appears when fetching conversation history
+                try:
+                    message_repo = MessageRepository(db, crm_pool=None)
+                    ui_message = Message(
+                        id=ig_response.message_id,  # Use Instagram's message ID
+                        sender_id=request.account_id,  # Business account
+                        recipient_id=request.recipient_id,  # Customer
+                        message_text=request.message,
+                        direction="outbound",
+                        timestamp=datetime.now(timezone.utc)
+                    )
+                    await message_repo.save(ui_message)
+                    logger.info(f"✅ Message saved to messages table for UI: {ig_response.message_id}")
+                except Exception as save_error:
+                    # Log error but don't fail the request - message was sent successfully
+                    logger.error(f"⚠️ Failed to save message to messages table: {save_error}", exc_info=True)
+
                 # Broadcast to SSE clients for real-time UI update
                 try:
                     await broadcast_new_message({
@@ -278,20 +298,20 @@ async def get_message_status(
     Requires permission to access the account associated with the message.
 
     Minimal implementation for MVP (Priority 1):
-    - Query outbound_messages by message_id
+    - Query crm_outbound_messages by message_id
     - Return 404 if not found
     - Return current status
     - Check permission for the associated account
-    
+
     Returns:
         200 OK with message status
         404 Not Found if message doesn't exist
     """
     logger.info(f"Status query for message: {message_id}")
-    
+
     # Query message by ID
     result = await db.execute(
-        select(OutboundMessage).where(OutboundMessage.id == message_id)
+        select(CRMOutboundMessage).where(CRMOutboundMessage.id == message_id)
     )
     message = result.scalar_one_or_none()
     

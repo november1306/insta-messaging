@@ -70,14 +70,18 @@ class Account(Base):
     )
 
 
-class OutboundMessage(Base):
+class CRMOutboundMessage(Base):
     """
-    Outbound messages sent via CRM integration API.
-    
+    CRM outbound messages - tracks messages sent via CRM integration API.
+
+    This table is specifically for CRM integration to track delivery status
+    and enable idempotency for external systems. NOT for general UI message display.
+    UI should use the 'messages' table which stores all inbound/outbound messages.
+
     Tracks delivery status and enables idempotency.
     Minimal fields for MVP - add retry logic fields later if needed.
     """
-    __tablename__ = "outbound_messages"
+    __tablename__ = "crm_outbound_messages"
     
     id = Column(String(50), primary_key=True)  # Our message ID
     account_id = Column(String(50), ForeignKey('accounts.id'), nullable=False)  # FK to accounts.id
