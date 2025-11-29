@@ -71,6 +71,11 @@ jobs:
             # Logging
             LOG_LEVEL=INFO
 
+            # JWT/Session Configuration
+            SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+            JWT_ALGORITHM=HS256
+            JWT_EXPIRATION_HOURS=24
+
             # Frontend API Key (for /chat UI)
             VITE_API_KEY=${{ secrets.VITE_API_KEY }}
 
@@ -244,6 +249,11 @@ jobs:
 
             # Logging
             LOG_LEVEL=INFO
+
+            # JWT/Session Configuration
+            SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+            JWT_ALGORITHM=HS256
+            JWT_EXPIRATION_HOURS=24
 
             # Frontend API Key (for /chat UI)
             VITE_API_KEY=${{ secrets.VITE_API_KEY }}
