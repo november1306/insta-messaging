@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     # Create users table for UI authentication (idempotent - safe to run multiple times)
     from sqlalchemy import inspect
-    from sqlalchemy.engine import reflection
+    from sqlalchemy.exc import OperationalError
 
     bind = op.get_bind()
     inspector = inspect(bind)
@@ -39,19 +39,18 @@ def upgrade() -> None:
             sa.UniqueConstraint('username')
         )
 
-    # Check if indexes exist before creating them (must be outside table creation block)
-    # Refresh inspector after potential table creation
-    inspector = inspect(bind)
+    # Create indexes if they don't exist (use try/except for robustness)
+    try:
+        op.create_index('idx_username', 'users', ['username'], unique=False)
+    except OperationalError:
+        # Index already exists, skip
+        pass
 
-    # Only check indexes if table exists
-    if 'users' in inspector.get_table_names():
-        existing_indexes = [idx['name'] for idx in inspector.get_indexes('users')]
-
-        if 'idx_username' not in existing_indexes:
-            op.create_index('idx_username', 'users', ['username'], unique=False)
-
-        if 'idx_is_active' not in existing_indexes:
-            op.create_index('idx_is_active', 'users', ['is_active'], unique=False)
+    try:
+        op.create_index('idx_is_active', 'users', ['is_active'], unique=False)
+    except OperationalError:
+        # Index already exists, skip
+        pass
 
 
 def downgrade() -> None:
