@@ -5,7 +5,7 @@
       <div class="flex items-center gap-3">
         <img
           v-if="conversation?.profile_picture_url"
-          :src="conversation.profile_picture_url"
+          :src="getProxiedImageUrl(conversation.profile_picture_url)"
           :alt="conversation.sender_name"
           class="w-10 h-10 rounded-full object-cover"
         />
@@ -76,6 +76,7 @@
 import { ref, watch, nextTick } from 'vue'
 import MessageBubble from './MessageBubble.vue'
 import { getInitials } from '../composables/useUserUtils'
+import { getProxiedImageUrl } from '../composables/useImageProxy'
 
 const props = defineProps({
   conversation: {

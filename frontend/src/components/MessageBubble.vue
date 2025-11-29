@@ -31,6 +31,8 @@ const props = defineProps({
 const isOutbound = computed(() => props.message.direction === 'outbound')
 
 const bubbleClasses = computed(() => {
+  // Outbound messages: blue background with white text (right-aligned)
+  // Inbound messages: grey background with dark text (left-aligned)
   if (isOutbound.value) {
     return 'bg-instagram-blue text-white'
   }

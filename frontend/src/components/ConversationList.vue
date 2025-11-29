@@ -35,7 +35,7 @@
         <div class="flex-shrink-0">
           <img
             v-if="conversation.profile_picture_url"
-            :src="conversation.profile_picture_url"
+            :src="getProxiedImageUrl(conversation.profile_picture_url)"
             :alt="conversation.sender_name"
             class="w-14 h-14 rounded-full object-cover"
           />
@@ -90,6 +90,7 @@
 
 <script setup>
 import { getInitials } from '../composables/useUserUtils'
+import { getProxiedImageUrl } from '../composables/useImageProxy'
 
 defineProps({
   conversations: {
