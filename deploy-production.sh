@@ -181,11 +181,7 @@ chown ${APP_USER}:${APP_USER} ${INSTALL_DIR}/data
 chmod 755 ${INSTALL_DIR}/data
 echo "Data directory created: ${INSTALL_DIR}/data"
 
-echo -e "${GREEN}[8/13] Running application deployment script...${NC}"
-chmod +x ${INSTALL_DIR}/scripts/linux/install.sh
-sudo -u ${APP_USER} PYTHON_BIN="${PYTHON_BIN}" bash ${INSTALL_DIR}/scripts/linux/install.sh
-
-echo -e "${GREEN}[9/13] Configuring environment...${NC}"
+echo -e "${GREEN}[8/13] Configuring environment...${NC}"
 if [ ! -f "${INSTALL_DIR}/.env" ]; then
     echo -e "${YELLOW}No .env file found. Creating from template...${NC}"
     sudo -u ${APP_USER} cp ${INSTALL_DIR}/.env.example ${INSTALL_DIR}/.env
@@ -198,6 +194,10 @@ if [ ! -f "${INSTALL_DIR}/.env" ]; then
     sed -i "s/SESSION_SECRET=your_session_secret_here/SESSION_SECRET=${SESSION_SECRET}/" ${INSTALL_DIR}/.env
     echo "✓ SESSION_SECRET generated and configured"
 
+    # Set ENVIRONMENT=production
+    sed -i "s/ENVIRONMENT=development/ENVIRONMENT=production/" ${INSTALL_DIR}/.env
+    echo "✓ ENVIRONMENT set to production"
+
     echo ""
     echo -e "${YELLOW}========================================${NC}"
     echo -e "${YELLOW}⚠️  IMPORTANT: Configure .env file${NC}"
@@ -205,6 +205,7 @@ if [ ! -f "${INSTALL_DIR}/.env" ]; then
     echo "Edit ${INSTALL_DIR}/.env and add your Instagram API credentials"
     echo ""
     echo "✓ SESSION_SECRET: Auto-generated and configured"
+    echo "✓ ENVIRONMENT: Set to production"
     echo ""
     echo "Required variables to configure:"
     echo "  - FACEBOOK_VERIFY_TOKEN"
@@ -212,7 +213,6 @@ if [ ! -f "${INSTALL_DIR}/.env" ]; then
     echo "  - INSTAGRAM_APP_SECRET"
     echo "  - INSTAGRAM_PAGE_ACCESS_TOKEN"
     echo "  - INSTAGRAM_BUSINESS_ACCOUNT_ID"
-    echo "  - ENVIRONMENT=production"
     echo ""
     read -p "Press ENTER to edit .env now (or Ctrl+C to cancel): "
     nano ${INSTALL_DIR}/.env
@@ -224,6 +224,10 @@ else
         echo "ENVIRONMENT=production" >> ${INSTALL_DIR}/.env
     fi
 fi
+
+echo -e "${GREEN}[9/13] Running application deployment script...${NC}"
+chmod +x ${INSTALL_DIR}/scripts/linux/install.sh
+sudo -u ${APP_USER} PYTHON_BIN="${PYTHON_BIN}" bash ${INSTALL_DIR}/scripts/linux/install.sh
 
 echo -e "${GREEN}[10/13] Creating systemd service...${NC}"
 cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
