@@ -3,7 +3,7 @@ CRM Integration API - Message Sending Endpoints
 
 Implements outbound message sending for CRM integration.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, Field
@@ -87,6 +87,7 @@ class MessageStatusResponse(BaseModel):
 @router.post("/messages/send", response_model=SendMessageResponse, status_code=status.HTTP_202_ACCEPTED)
 async def send_message(
     request: SendMessageRequest,
+    http_request: Request,
     auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
@@ -212,7 +213,10 @@ async def send_message(
                 # Save to messages table for UI display (messenger pattern)
                 # This ensures the message appears when fetching conversation history
                 try:
-                    message_repo = MessageRepository(db, crm_pool=None)
+                    # Get CRM pool from app state for MySQL sync
+                    crm_pool = getattr(http_request.app.state, 'crm_pool', None)
+                    
+                    message_repo = MessageRepository(db, crm_pool=crm_pool)
                     ui_message = Message(
                         id=ig_response.message_id,  # Use Instagram's message ID
                         sender_id=request.account_id,  # Business account
