@@ -84,7 +84,8 @@ async def lifespan(app: FastAPI):
                     maxsize=5,
                     pool_recycle=3600,  # Recycle connections after 1 hour
                     connect_timeout=30,  # 30 second connection timeout
-                    ssl=None  # Explicitly disable SSL (as per test command)
+                    ssl=None,  # Explicitly disable SSL (as per test command)
+                    charset='utf8mb4'  # UTF-8 with full Unicode support (Cyrillic, emojis, etc.)
                 )
                 logger.info(f"✅ CRM MySQL connected: {settings.crm_mysql_host}/{settings.crm_mysql_database}")
             except Exception as e:
