@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
     crm_pool = None
     if settings.crm_mysql_enabled:
         if not settings.crm_mysql_user or not settings.crm_mysql_password:
-            logger.warning("⚠️  CRM_MYSQL_ENABLED=true but credentials missing. CRM sync disabled.")
+            logger.warning("CRM_MYSQL_ENABLED=true but credentials missing. CRM sync disabled.")
         else:
             try:
                 crm_pool = await aiomysql.create_pool(
