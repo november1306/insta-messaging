@@ -32,7 +32,9 @@ export function useAuthenticatedMedia() {
       }
 
       // Fetch media with Authorization header
-      const response = await fetch(`http://localhost:8000/${mediaPath}`, {
+      // Use relative URL to work in both development and production
+      const baseUrl = import.meta.env.DEV ? 'http://localhost:8000' : ''
+      const response = await fetch(`${baseUrl}/${mediaPath}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
