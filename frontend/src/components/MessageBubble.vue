@@ -39,18 +39,16 @@
             </audio>
 
             <!-- Files (PDF, DOC, etc.) -->
-            <a
+            <button
               v-else-if="attachment.media_type === 'file'"
-              :href="getMediaUrl(attachment)"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="flex items-center gap-2 p-3 bg-white bg-opacity-20 rounded-lg hover:bg-opacity-30 transition-colors"
+              @click="downloadFile(attachment)"
+              class="flex items-center gap-2 p-3 bg-white bg-opacity-20 rounded-lg hover:bg-opacity-30 transition-colors cursor-pointer w-full text-left"
             >
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
               <span class="text-sm font-medium">{{ getFileName(attachment) }}</span>
-            </a>
+            </button>
 
             <!-- Like/Heart -->
             <div v-else-if="attachment.media_type === 'like_heart'" class="text-4xl">
@@ -94,7 +92,7 @@ const props = defineProps({
   }
 })
 
-const { fetchAuthenticatedMedia } = useAuthenticatedMedia()
+const { fetchAuthenticatedMedia, downloadAuthenticatedFile } = useAuthenticatedMedia()
 const mediaBlobUrls = ref(new Map())
 
 const isOutbound = computed(() => props.message.direction === 'outbound')
@@ -190,5 +188,15 @@ function handleImageError(attachment) {
 function openMediaLightbox(mediaUrl) {
   // MVP: Open in new tab (future: add lightbox modal)
   window.open(mediaUrl, '_blank', 'noopener,noreferrer')
+}
+
+function downloadFile(attachment) {
+  // Use authenticated download for file attachments
+  if (attachment.media_url_local) {
+    const filename = getFileName(attachment)
+    downloadAuthenticatedFile(attachment.media_url_local, filename)
+  } else {
+    console.error('No local file path available for download')
+  }
 }
 </script>

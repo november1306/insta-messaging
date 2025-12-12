@@ -238,6 +238,7 @@ async def serve_media(
     account_id: str,
     sender_id: str,
     filename: str,
+    download: bool = False,
     auth_context: dict = Depends(verify_jwt_or_api_key)
 ):
     """
@@ -249,6 +250,9 @@ async def serve_media(
 
     Path format: /media/{account_id}/{sender_id}/{filename}
     Example: /media/page456/user123/mid_abc123_0.jpg
+
+    Query parameters:
+        download: If True, force download with Content-Disposition: attachment
     """
     # Verify user has access to this account's media
     # JWT tokens contain account_id, API keys have broader access
@@ -286,8 +290,27 @@ async def serve_media(
             detail="Invalid file path"
         )
 
-    logger.debug(f"Serving media file: {file_path} (auth: {auth_context.get('auth_type')})")
-    return FileResponse(file_path)
+    # Determine if file should be downloaded vs previewed
+    # File attachments (PDFs, docs, etc.) should download by default
+    # Images/videos can be previewed in browser
+    file_extension = file_path.suffix.lower()
+    downloadable_extensions = {'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.zip', '.rar', '.7z'}
+
+    # Force download if explicitly requested OR if it's a file attachment type
+    should_download = download or (file_extension in downloadable_extensions)
+
+    logger.debug(f"Serving media file: {file_path} (auth: {auth_context.get('auth_type')}, download: {should_download})")
+
+    if should_download:
+        # Force download with proper filename
+        return FileResponse(
+            file_path,
+            filename=filename,
+            media_type='application/octet-stream'
+        )
+    else:
+        # Allow browser to preview (images, videos, audio)
+        return FileResponse(file_path)
 
 # Media endpoint info logged at startup
 logger.info(f"✅ Authenticated media endpoint enabled at /media/{{account_id}}/{{sender_id}}/{{filename}}")

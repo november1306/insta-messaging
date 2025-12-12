@@ -61,6 +61,53 @@ export function useAuthenticatedMedia() {
   }
 
   /**
+   * Download file attachment with authentication
+   * @param {string} mediaPath - Relative path like "media/account/sender/file.pdf"
+   * @param {string} filename - Desired filename for download
+   */
+  async function downloadAuthenticatedFile(mediaPath, filename) {
+    try {
+      // Get JWT token from localStorage
+      const token = localStorage.getItem('session_token')
+      if (!token) {
+        console.error('No session token found for authenticated download')
+        return
+      }
+
+      // Fetch file with Authorization header
+      // Use relative URL to work in both development and production
+      const baseUrl = import.meta.env.DEV ? 'http://localhost:8000' : ''
+      const response = await fetch(`${baseUrl}/${mediaPath}?download=true`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (!response.ok) {
+        console.error(`Failed to download file: ${response.status} ${response.statusText}`)
+        return
+      }
+
+      // Convert to blob
+      const blob = await response.blob()
+
+      // Create temporary download link and trigger download
+      const blobUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+
+      // Cleanup blob URL after a short delay
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 100)
+    } catch (error) {
+      console.error('Error downloading authenticated file:', error)
+    }
+  }
+
+  /**
    * Cleanup blob URLs when component unmounts
    */
   onUnmounted(() => {
@@ -77,6 +124,7 @@ export function useAuthenticatedMedia() {
   })
 
   return {
-    fetchAuthenticatedMedia
+    fetchAuthenticatedMedia,
+    downloadAuthenticatedFile
   }
 }
