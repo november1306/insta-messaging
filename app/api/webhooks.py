@@ -435,7 +435,8 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
 
         # Message must have either text or attachments
         if not text and not attachments:
-            logger.info("Skipping message with no text or attachments")
+            # Log the full message to debug what Instagram is sending
+            logger.info(f"Skipping message with no text or attachments. Full message: {message}")
             return None
 
         # Extract required fields
@@ -475,7 +476,8 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
                         "media_url": media_url
                     })
                 else:
-                    logger.warning(f"Invalid attachment at index {idx}: missing type or URL")
+                    # Log full attachment structure to debug unsupported file types
+                    logger.warning(f"Invalid attachment at index {idx}: missing type or URL. Full attachment: {attachment}")
 
             if message_data["attachments"]:
                 logger.info(f"Message has {len(message_data['attachments'])} attachment(s)")
