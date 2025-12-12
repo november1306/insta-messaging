@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_
+from sqlalchemy.orm import selectinload
 from app.db.connection import get_db_session
 from app.db.models import MessageModel, APIKey
 from app.clients.instagram_client import InstagramClient
@@ -403,6 +404,7 @@ async def get_messages(
         # - Outbound: business account sends TO user
         stmt = (
             select(MessageModel)
+            .options(selectinload(MessageModel.attachments))  # Eagerly load attachments
             .where(
                 or_(
                     # Inbound: user sends to this business account
@@ -424,12 +426,24 @@ async def get_messages(
         sender_info = None
 
         for msg in messages:
+            # Build attachments list
+            attachments_data = []
+            for att in msg.attachments:
+                attachments_data.append({
+                    "id": att.id,
+                    "media_type": att.media_type,
+                    "media_url": att.media_url,
+                    "media_url_local": att.media_url_local,
+                    "media_mime_type": att.media_mime_type
+                })
+
             message_list.append({
                 "id": msg.id,
                 "text": msg.message_text or "",
                 "direction": msg.direction,
                 "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
-                "status": getattr(msg, 'status', None)
+                "status": getattr(msg, 'status', None),
+                "attachments": attachments_data
             })
 
             # Capture sender info from first message

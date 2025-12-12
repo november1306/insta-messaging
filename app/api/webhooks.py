@@ -7,8 +7,9 @@ from app.config import settings
 from app.db.connection import get_db_session
 from app.db.models import Account
 from app.repositories.message_repository import MessageRepository
-from app.core.interfaces import Message
+from app.core.interfaces import Message, Attachment
 from app.clients import InstagramClient
+from app.services.media_downloader import MediaDownloader
 from app.clients.instagram_client import InstagramAPIError
 from app.rules.reply_rules import get_reply_text
 from app.services.webhook_forwarder import WebhookForwarder
@@ -127,7 +128,7 @@ async def handle_webhook(
                     try:
                         # Extract message data
                         message_data = _extract_message_data(messaging_event)
-                        
+
                         if message_data:
                             # Create domain Message object
                             message = Message(
@@ -136,17 +137,79 @@ async def handle_webhook(
                                 recipient_id=message_data["recipient_id"],
                                 message_text=message_data["text"],
                                 direction="inbound",  # Webhooks only receive inbound messages
-                                timestamp=message_data["timestamp"]
+                                timestamp=message_data["timestamp"],
+                                attachments=[]  # Will populate if media present
                             )
-                            
+
+                            # Download and process attachments (if any)
+                            if "attachments" in message_data and message_data["attachments"]:
+                                downloader = MediaDownloader()
+
+                                for att_data in message_data["attachments"]:
+                                    try:
+                                        # Download media from Instagram CDN (URL expires in 7 days)
+                                        media_file = await downloader.download_media(
+                                            instagram_url=att_data["media_url"],
+                                            message_id=message.id,
+                                            attachment_index=att_data["index"],
+                                            account_id=message.recipient_id,  # Instagram business account ID
+                                            sender_id=message.sender_id,
+                                            media_type=att_data["media_type"]
+                                        )
+
+                                        # Create Attachment domain object
+                                        attachment = Attachment(
+                                            id=f"{message.id}_{att_data['index']}",
+                                            message_id=message.id,
+                                            attachment_index=att_data["index"],
+                                            media_type=att_data["media_type"],
+                                            media_url=att_data["media_url"],
+                                            media_url_local=media_file.local_path,
+                                            media_mime_type=media_file.mime_type
+                                        )
+                                        message.attachments.append(attachment)
+
+                                    except Exception as download_error:
+                                        # Log error but continue - save message with URL only
+                                        logger.error(
+                                            f"❌ Failed to download attachment {att_data['index']} "
+                                            f"for message {message.id}: {download_error}"
+                                        )
+                                        # Create attachment with URL only (no local copy)
+                                        attachment = Attachment(
+                                            id=f"{message.id}_{att_data['index']}",
+                                            message_id=message.id,
+                                            attachment_index=att_data["index"],
+                                            media_type=att_data["media_type"],
+                                            media_url=att_data["media_url"],
+                                            media_url_local=None,  # Download failed
+                                            media_mime_type=None
+                                        )
+                                        message.attachments.append(attachment)
+
                             # Save to database (handle duplicates from webhook retries)
                             try:
                                 await message_repo.save(message)
                                 messages_processed += 1
-                                logger.info(f"✅ Stored message {message.id} from {message.sender_id}")
+
+                                attachment_summary = f" with {len(message.attachments)} attachment(s)" if message.attachments else ""
+                                logger.info(f"✅ Stored message {message.id} from {message.sender_id}{attachment_summary}")
 
                                 # Broadcast to SSE clients (real-time UI update)
                                 try:
+                                    # Build attachments data for frontend
+                                    attachments_data = []
+                                    if message.attachments:
+                                        for att in message.attachments:
+                                            attachments_data.append({
+                                                "id": att.id,
+                                                "index": att.attachment_index,
+                                                "media_type": att.media_type,
+                                                "media_url": att.media_url,
+                                                "media_url_local": att.media_url_local,
+                                                "media_mime_type": att.media_mime_type
+                                            })
+
                                     await broadcast_new_message({
                                         "id": message.id,
                                         "sender_id": message.sender_id,
@@ -154,7 +217,8 @@ async def handle_webhook(
                                         "text": message.message_text,
                                         "direction": "inbound",
                                         "timestamp": message.timestamp.isoformat() if message.timestamp else None,
-                                        "instagram_account_id": message.recipient_id
+                                        "instagram_account_id": message.recipient_id,
+                                        "attachments": attachments_data  # NEW: Array of attachments
                                     })
                                 except Exception as sse_error:
                                     logger.error(f"Failed to broadcast SSE message: {sse_error}")
@@ -352,50 +416,72 @@ def _validate_webhook_signature(payload: bytes, signature_header: str) -> bool:
 
 def _extract_message_data(messaging_event: dict) -> dict | None:
     """
-    Extract message data from a messaging event.
-    
+    Extract message data from a messaging event (text and/or media attachments).
+
     Args:
         messaging_event: A single messaging event from the webhook payload
-        
+
     Returns:
-        Dictionary with message data if it's a text message, None otherwise
+        Dictionary with message data (text and/or attachments), None if invalid
     """
     try:
         # Check if this is a message event (not delivery, read, etc.)
         if "message" not in messaging_event:
             return None
-        
+
         message = messaging_event["message"]
-        
-        # Only process text messages for now
-        if "text" not in message:
-            message_type = "image" if "attachments" in message else "unknown"
-            logger.info(f"Skipping non-text message type: {message_type}")
+        text = message.get("text")
+        attachments = message.get("attachments", [])
+
+        # Message must have either text or attachments
+        if not text and not attachments:
+            logger.info("Skipping message with no text or attachments")
             return None
-        
+
         # Extract required fields
         sender_id = messaging_event.get("sender", {}).get("id")
         recipient_id = messaging_event.get("recipient", {}).get("id")
         message_id = message.get("mid")
-        message_text = message.get("text")
         timestamp_ms = messaging_event.get("timestamp")
-        
-        # Validate required fields
-        if not all([sender_id, recipient_id, message_id, message_text, timestamp_ms]):
+
+        # Validate required fields (text is now optional)
+        if not all([sender_id, recipient_id, message_id, timestamp_ms]):
             logger.warning("Missing required fields in message event")
             return None
-        
+
         # Convert timestamp from milliseconds to datetime (UTC timezone-aware)
         timestamp = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc)
-        
-        return {
+
+        # Build message data
+        message_data = {
             "id": message_id,
             "sender_id": sender_id,
             "recipient_id": recipient_id,
-            "text": message_text,
+            "text": text,  # Can be None for media-only messages
             "timestamp": timestamp
         }
-        
+
+        # Extract attachments data if present
+        if attachments:
+            message_data["attachments"] = []
+            for idx, attachment in enumerate(attachments):
+                media_type = attachment.get("type")  # "image", "video", "audio", "file", "like_heart"
+                media_url = attachment.get("payload", {}).get("url")
+
+                if media_type and media_url:
+                    message_data["attachments"].append({
+                        "index": idx,
+                        "media_type": media_type,
+                        "media_url": media_url
+                    })
+                else:
+                    logger.warning(f"Invalid attachment at index {idx}: missing type or URL")
+
+            if message_data["attachments"]:
+                logger.info(f"Message has {len(message_data['attachments'])} attachment(s)")
+
+        return message_data
+
     except Exception as e:
         logger.error(f"Error extracting message data: {e}", exc_info=True)
         return None

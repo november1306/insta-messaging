@@ -226,6 +226,8 @@ __marimo__/
 # Local settings may contain permissions and user-specific configurations
 .claude/settings.local.json
 .claude/*.local.json
+.claude/skills/
+.claude/CLAUDE.md
 
 # Security - Sensitive files that should never be committed
 # Private keys and certificates
@@ -260,6 +262,7 @@ dumps/
 
 # Logs that may contain sensitive information
 logs/
+.logs/
 *.log.*
 error.log
 access.log
@@ -330,3 +333,8 @@ SETUP_NOTES.local.md
 
 # Daemon process files
 server.pid
+
+# Media files (Instagram attachments - images, videos, audio, files)
+# Downloaded from Instagram CDN and stored locally
+# Do not commit user-uploaded content to version control
+media/

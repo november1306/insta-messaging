@@ -180,6 +180,7 @@ mkdir -p ${INSTALL_DIR}/data
 chown ${APP_USER}:${APP_USER} ${INSTALL_DIR}/data
 chmod 755 ${INSTALL_DIR}/data
 echo "Data directory created: ${INSTALL_DIR}/data"
+echo "Note: media/ directory will be created automatically by application on first run"
 
 echo -e "${GREEN}[8/13] Configuring environment...${NC}"
 if [ ! -f "${INSTALL_DIR}/.env" ]; then
@@ -384,6 +385,16 @@ server {
     # Webhooks
     location /webhooks/ {
         proxy_pass http://127.0.0.1:8000/webhooks/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Media files (authenticated Instagram attachments)
+    location /media/ {
+        proxy_pass http://127.0.0.1:8000/media/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

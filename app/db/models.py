@@ -4,6 +4,7 @@ SQLAlchemy ORM models for database tables.
 YAGNI: Start minimal, add tables only when needed.
 """
 from sqlalchemy import Column, String, Text, DateTime, Index, ForeignKey, Boolean, Integer, Enum
+from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 import enum
@@ -24,24 +25,63 @@ class APIKeyType(str, enum.Enum):
 class MessageModel(Base):
     """
     Messages table - stores all Instagram messages (inbound/outbound).
-    
+
     Start simple: just store messages. Add complexity later when needed.
     """
     __tablename__ = "messages"
-    
+
     # Core fields
     id = Column(String(100), primary_key=True)  # Instagram message ID
     sender_id = Column(String(50), nullable=False)  # Instagram user ID
     recipient_id = Column(String(50), nullable=False)  # Instagram user ID
-    message_text = Column(Text)  # Message content
+    message_text = Column(Text)  # Message content (text message OR caption for media)
     direction = Column(String(10), nullable=False)  # 'inbound' or 'outbound'
     timestamp = Column(DateTime, nullable=False)  # When message was sent
     created_at = Column(DateTime, default=func.now())  # When we stored it
-    
+
     __table_args__ = (
         Index('idx_timestamp', 'timestamp'),
         Index('idx_sender', 'sender_id'),
     )
+
+    # Relationships
+    attachments = relationship("MessageAttachment", back_populates="message", cascade="all, delete-orphan")
+
+
+class MessageAttachment(Base):
+    """
+    Message attachments - images, videos, audio, files.
+
+    Instagram supports multiple attachments per message (attachments array in webhook).
+    Each attachment is a separate row linked to parent message via message_id.
+
+    Design rationale:
+    - Separate table for 1-to-many relationship (Instagram feature verified 2024-2025)
+    - Proper normalization: avoids JSON columns, enables efficient queries
+    - attachment_index preserves display order (0, 1, 2...)
+    - Both media_type (from Instagram) and media_mime_type (detected) for flexibility
+    - media_url expires in 7 days - media_url_local is our permanent copy
+    """
+    __tablename__ = "message_attachments"
+
+    # Core fields
+    id = Column(String(100), primary_key=True)  # Format: "mid_abc123_0", "mid_abc123_1"
+    message_id = Column(String(100), ForeignKey('messages.id', ondelete='CASCADE'), nullable=False)
+    attachment_index = Column(Integer, nullable=False)  # Order: 0, 1, 2 (important for display)
+
+    # Media metadata
+    media_type = Column(String(20), nullable=False)  # 'image', 'video', 'audio', 'file', 'like_heart'
+    media_url = Column(Text, nullable=False)  # Original Instagram URL (expires in 7 days)
+    media_url_local = Column(Text, nullable=True)  # Local copy: "media/page456/user123/mid_abc123_0.jpg"
+    media_mime_type = Column(String(100), nullable=True)  # 'image/jpeg', 'video/mp4' (detected on download)
+
+    __table_args__ = (
+        Index('idx_message_attachments_message_id', 'message_id'),
+        Index('idx_message_attachments_media_type', 'media_type'),
+    )
+
+    # Relationships
+    message = relationship("MessageModel", back_populates="attachments")
 
 
 # ============================================

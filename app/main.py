@@ -3,7 +3,7 @@ Instagram Messenger Automation - Main Application Entry Point
 """
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -67,6 +67,15 @@ async def lifespan(app: FastAPI):
 
     # Initialize database
     await init_db()
+
+    # Create media directory for Instagram attachments
+    media_dir = Path(__file__).parent.parent / "media"
+    try:
+        media_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"✅ Media directory ready: {media_dir}")
+    except Exception as e:
+        logger.error(f"❌ Failed to create media directory: {e}")
+        # Non-fatal - will retry when first media is downloaded
 
     # Initialize CRM MySQL connection pool (if enabled)
     crm_pool = None
@@ -211,6 +220,77 @@ async def health_check():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "environment": settings.environment
     }
+
+
+# ============================================
+# Media Files Serving (Instagram Attachments)
+# ============================================
+
+# Import authentication dependency for media endpoint
+from app.api.auth import verify_jwt_or_api_key
+
+# Serve media files with authentication (images, videos, audio, documents)
+# Downloaded from Instagram CDN and stored locally at media/{account_id}/{sender_id}/
+media_dir = Path(__file__).parent.parent / "media"
+
+@app.get("/media/{account_id}/{sender_id}/{filename}")
+async def serve_media(
+    account_id: str,
+    sender_id: str,
+    filename: str,
+    auth_context: dict = Depends(verify_jwt_or_api_key)
+):
+    """
+    Serve media files with authentication.
+
+    Requires valid JWT token or API key. Users can only access media from
+    their authenticated account to prevent unauthorized access to private
+    Instagram DM attachments.
+
+    Path format: /media/{account_id}/{sender_id}/{filename}
+    Example: /media/page456/user123/mid_abc123_0.jpg
+    """
+    # Verify user has access to this account's media
+    # JWT tokens contain account_id, API keys have broader access
+    if auth_context.get("auth_type") == "jwt":
+        user_account_id = auth_context.get("account_id")
+        if user_account_id != account_id:
+            logger.warning(
+                f"Unauthorized media access attempt: user account {user_account_id} "
+                f"tried to access media from account {account_id}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access this media"
+            )
+    # API keys have access to all accounts (for CRM integration)
+
+    # Construct file path and verify it exists
+    file_path = media_dir / account_id / sender_id / filename
+
+    if not file_path.exists():
+        logger.warning(f"Media file not found: {file_path}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media file not found"
+        )
+
+    # Security: Verify the resolved path is still within media directory
+    # Prevents path traversal attacks (e.g., ../../../etc/passwd)
+    try:
+        file_path.resolve().relative_to(media_dir.resolve())
+    except ValueError:
+        logger.error(f"Path traversal attempt detected: {file_path}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid file path"
+        )
+
+    logger.debug(f"Serving media file: {file_path} (auth: {auth_context.get('auth_type')})")
+    return FileResponse(file_path)
+
+# Media endpoint info logged at startup
+logger.info(f"✅ Authenticated media endpoint enabled at /media/{{account_id}}/{{sender_id}}/{{filename}}")
 
 
 # ============================================

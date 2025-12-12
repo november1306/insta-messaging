@@ -8,16 +8,16 @@ from typing import Optional
 from app.rules.message_rules import get_reply
 
 
-def get_reply_text(message_text: str) -> Optional[str]:
+def get_reply_text(message_text: Optional[str]) -> Optional[str]:
     """
     Get the reply text for a given message.
-    
+
     Returns None if no rule matches (no reply should be sent).
     Reply may contain {username} placeholder for personalization.
-    
+
     Args:
-        message_text: The text content of the incoming message
-        
+        message_text: The text content of the incoming message (can be None for media-only messages)
+
     Returns:
         The reply text (with optional {username} placeholder), or None if no reply should be sent
     """
