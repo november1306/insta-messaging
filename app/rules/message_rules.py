@@ -7,19 +7,23 @@ Just use simple if/elif/else logic.
 from typing import Optional
 
 
-def get_reply(message_text: str) -> Optional[str]:
+def get_reply(message_text: Optional[str]) -> Optional[str]:
     """
     Get reply for a message based on simple if/elif/else rules.
-    
+
     Use {username} placeholder in reply text for personalization.
     The webhook handler will replace it with the actual username.
-    
+
     Args:
-        message_text: The incoming message text
-        
+        message_text: The incoming message text (can be None for media-only messages)
+
     Returns:
         Reply text with optional {username} placeholder, or None if no rule matches
     """
+    # Media-only messages (no text) don't trigger auto-replies
+    if not message_text:
+        return None
+
     # Convert to lowercase for case-insensitive matching
     msg = message_text.lower()
     

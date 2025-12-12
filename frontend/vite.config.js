@@ -24,6 +24,10 @@ export default defineConfig({
       '/docs': {
         target: 'http://localhost:8000',
         changeOrigin: true
+      },
+      '/media': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
       }
     }
   }
