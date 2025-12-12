@@ -338,3 +338,7 @@ server.pid
 # Downloaded from Instagram CDN and stored locally
 # Do not commit user-uploaded content to version control
 media/
+
+# Development scripts
+cld-start
+cld-stop

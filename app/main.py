@@ -291,25 +291,31 @@ async def serve_media(
         )
 
     # Determine if file should be downloaded vs previewed
-    # File attachments (PDFs, docs, etc.) should download by default
-    # Images/videos can be previewed in browser
+    # Only images, videos, and audio can be previewed - everything else downloads
     file_extension = file_path.suffix.lower()
-    downloadable_extensions = {'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.zip', '.rar', '.7z'}
+    previewable_extensions = {
+        # Images
+        '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg',
+        # Videos
+        '.mp4', '.webm', '.mov', '.avi', '.mkv',
+        # Audio
+        '.mp3', '.m4a', '.ogg', '.wav', '.aac'
+    }
 
-    # Force download if explicitly requested OR if it's a file attachment type
-    should_download = download or (file_extension in downloadable_extensions)
+    # Preview if it's a standard media type, otherwise force download
+    should_download = download or (file_extension not in previewable_extensions)
 
     logger.debug(f"Serving media file: {file_path} (auth: {auth_context.get('auth_type')}, download: {should_download})")
 
     if should_download:
-        # Force download with proper filename
+        # Force download with proper filename for non-previewable files
         return FileResponse(
             file_path,
             filename=filename,
             media_type='application/octet-stream'
         )
     else:
-        # Allow browser to preview (images, videos, audio)
+        # Allow browser to preview standard media types
         return FileResponse(file_path)
 
 # Media endpoint info logged at startup
