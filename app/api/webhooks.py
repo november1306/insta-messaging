@@ -433,10 +433,13 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
         text = message.get("text")
         attachments = message.get("attachments", [])
 
-        # Message must have either text or attachments
+        # If message has no text and no parseable attachments, log it but don't skip
+        # Instagram sent this webhook for a reason - show the user something was received
         if not text and not attachments:
-            logger.info("Skipping message with no text or attachments")
-            return None
+            # Log the full message to debug what Instagram is sending
+            logger.warning(f"Message with no text or attachments - logging raw data. Full message: {message}")
+            # Use placeholder text so the message appears in the UI
+            text = "[Unsupported attachment or message type]"
 
         # Extract required fields
         sender_id = messaging_event.get("sender", {}).get("id")
@@ -475,10 +478,17 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
                         "media_url": media_url
                     })
                 else:
-                    logger.warning(f"Invalid attachment at index {idx}: missing type or URL")
+                    # Log full attachment structure to debug unsupported file types
+                    logger.warning(f"Invalid attachment at index {idx}: missing type or URL. Full attachment: {attachment}")
 
             if message_data["attachments"]:
                 logger.info(f"Message has {len(message_data['attachments'])} attachment(s)")
+            else:
+                # Instagram sent attachments but we couldn't parse any of them
+                # Add placeholder text if there's no existing text
+                if not message_data["text"]:
+                    message_data["text"] = "[Unsupported file type]"
+                    logger.warning(f"Could not parse any attachments from message {message_data['id']}")
 
         return message_data
 
