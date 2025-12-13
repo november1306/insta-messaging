@@ -250,6 +250,53 @@ from app.api.auth import verify_jwt_or_api_key
 # Downloaded from Instagram CDN and stored locally at media/{account_id}/{sender_id}/
 media_dir = Path(__file__).parent.parent / "media"
 
+@app.get("/media/outbound/{account_id}/{filename}")
+async def serve_outbound_media(
+    account_id: str,
+    filename: str
+):
+    """
+    Serve outbound media files - PUBLIC (no authentication required).
+
+    Instagram Graph API requires publicly accessible URLs to fetch media attachments.
+    These files are temporary (24-hour TTL) and stored in media/outbound/{account_id}/
+
+    Path format: /media/outbound/{account_id}/{filename}
+    Example: /media/outbound/page456/uuid_timestamp.jpg
+
+    Security:
+    - Files have random UUID filenames (not guessable)
+    - 24-hour automatic deletion limits exposure window
+    - Path traversal protection
+    """
+    # Construct file path
+    file_path = media_dir / "outbound" / account_id / filename
+
+    if not file_path.exists():
+        logger.warning(f"Outbound media file not found: {file_path}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media file not found or expired"
+        )
+
+    # Security: Verify the resolved path is still within outbound media directory
+    # Prevents path traversal attacks
+    outbound_dir = media_dir / "outbound"
+    try:
+        file_path.resolve().relative_to(outbound_dir.resolve())
+    except ValueError:
+        logger.error(f"Path traversal attempt detected in outbound media: {file_path}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid file path"
+        )
+
+    logger.debug(f"Serving outbound media file (public): {file_path}")
+
+    # Return file for Instagram to fetch
+    return FileResponse(file_path)
+
+
 @app.get("/media/{account_id}/{sender_id}/{filename}")
 async def serve_media(
     account_id: str,
@@ -328,53 +375,6 @@ async def serve_media(
     else:
         # Allow browser to preview (images, videos, audio)
         return FileResponse(file_path)
-
-
-@app.get("/media/outbound/{account_id}/{filename}")
-async def serve_outbound_media(
-    account_id: str,
-    filename: str
-):
-    """
-    Serve outbound media files - PUBLIC (no authentication required).
-
-    Instagram Graph API requires publicly accessible URLs to fetch media attachments.
-    These files are temporary (24-hour TTL) and stored in media/outbound/{account_id}/
-
-    Path format: /media/outbound/{account_id}/{filename}
-    Example: /media/outbound/page456/uuid_timestamp.jpg
-
-    Security:
-    - Files have random UUID filenames (not guessable)
-    - 24-hour automatic deletion limits exposure window
-    - Path traversal protection
-    """
-    # Construct file path
-    file_path = media_dir / "outbound" / account_id / filename
-
-    if not file_path.exists():
-        logger.warning(f"Outbound media file not found: {file_path}")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Media file not found or expired"
-        )
-
-    # Security: Verify the resolved path is still within outbound media directory
-    # Prevents path traversal attacks
-    outbound_dir = media_dir / "outbound"
-    try:
-        file_path.resolve().relative_to(outbound_dir.resolve())
-    except ValueError:
-        logger.error(f"Path traversal attempt detected in outbound media: {file_path}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid file path"
-        )
-
-    logger.debug(f"Serving outbound media file (public): {file_path}")
-
-    # Return file for Instagram to fetch
-    return FileResponse(file_path)
 
 # Media endpoint info logged at startup
 logger.info(f"✅ Authenticated media endpoint enabled at /media/{{account_id}}/{{sender_id}}/{{filename}}")
