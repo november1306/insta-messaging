@@ -3,12 +3,13 @@ CRM Integration API - Message Sending Endpoints
 
 Implements outbound message sending for CRM integration.
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Form, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
+from pathlib import Path
 import uuid
 import logging
 import httpx
@@ -86,51 +87,61 @@ class MessageStatusResponse(BaseModel):
 
 @router.post("/messages/send", response_model=SendMessageResponse, status_code=status.HTTP_202_ACCEPTED)
 async def send_message(
-    request: SendMessageRequest,
-    http_request: Request,
+    recipient_id: str = Form(...),
+    account_id: str = Form(...),
+    idempotency_key: str = Form(...),
+    message: Optional[str] = Form(None),
+    metadata: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    http_request: Request = None,
     auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Send a message from Instagram business account to a customer.
+    Send a message with optional text and/or file attachment to an Instagram user.
 
-    Requires permission to access the specified account_id.
+    Accepts multipart/form-data with:
+    - recipient_id, account_id, idempotency_key (required)
+    - message (optional text)
+    - file (optional attachment: image, video, or audio)
 
-    Minimal implementation for MVP (Priority 1):
-    - Check idempotency - return existing if duplicate
-    - Create outbound_messages record with status="pending"
-    - Return 202 Accepted immediately
-    - Skip account validation (will add in Priority 2)
-    - Skip actual Instagram delivery (will add in Task 6)
+    At least one of message or file must be provided.
 
     Returns:
-        202 Accepted with message_id
+        202 Accepted with message_id and status
     """
-    logger.info(f"Send message request - account: {request.account_id}, recipient: {request.recipient_id}")
+    logger.info(f"Send message request - account: {account_id}, recipient: {recipient_id}, has_file: {file is not None}")
+
+    # Validate that at least one of message or file is provided
+    if not message and not file:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either message text or file attachment is required"
+        )
 
     # Handle both JWT and API key authentication
     if auth.get("auth_type") == "api_key":
         # API key authentication - check permissions
         api_key = auth.get("api_key")
-        has_permission = await APIKeyService.check_account_permission(db, api_key, request.account_id)
+        has_permission = await APIKeyService.check_account_permission(db, api_key, account_id)
         if not has_permission:
             logger.warning(
-                f"Permission denied: API key {api_key.id} attempted to send message for account {request.account_id}"
+                f"Permission denied: API key {api_key.id} attempted to send message for account {account_id}"
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"API key does not have permission to access account {request.account_id}"
+                detail=f"API key does not have permission to access account {account_id}"
             )
     elif auth.get("auth_type") == "jwt":
         # JWT authentication - use account from token
         token_account_id = auth.get("account_id")
-        if token_account_id != request.account_id:
+        if token_account_id != account_id:
             logger.warning(
-                f"Permission denied: JWT token for account {token_account_id} attempted to send message for account {request.account_id}"
+                f"Permission denied: JWT token for account {token_account_id} attempted to send message for account {account_id}"
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"JWT token does not have permission to access account {request.account_id}"
+                detail=f"JWT token does not have permission to access account {account_id}"
             )
     else:
         logger.error(f"Unknown authentication type: {auth.get('auth_type')}")
@@ -141,10 +152,10 @@ async def send_message(
     
     # 1. Check idempotency - return existing if duplicate
     result = await db.execute(
-        select(CRMOutboundMessage).where(CRMOutboundMessage.idempotency_key == request.idempotency_key)
+        select(CRMOutboundMessage).where(CRMOutboundMessage.idempotency_key == idempotency_key)
     )
     existing = result.scalar_one_or_none()
-    
+
     if existing:
         logger.info(f"Duplicate request detected - returning existing message: {existing.id}")
         return SendMessageResponse(
@@ -152,17 +163,79 @@ async def send_message(
             status=existing.status,
             created_at=existing.created_at
         )
-    
-    # 2. Generate message ID
+
+    # 2. Handle file upload if present
+    attachment_url = None
+    attachment_type = None
+
+    if file:
+        # Validate file type
+        content_type = file.content_type
+        if content_type.startswith('image/'):
+            if content_type not in ['image/jpeg', 'image/png']:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unsupported image type: {content_type}. Supported: JPEG, PNG"
+                )
+            attachment_type = 'image'
+            max_size = 8 * 1024 * 1024  # 8MB
+        elif content_type.startswith('video/'):
+            if content_type not in ['video/mp4', 'video/ogg', 'video/avi', 'video/quicktime', 'video/webm']:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unsupported video type: {content_type}. Supported: MP4, OGG, AVI, MOV, WebM"
+                )
+            attachment_type = 'video'
+            max_size = 25 * 1024 * 1024  # 25MB
+        elif content_type.startswith('audio/'):
+            if content_type not in ['audio/aac', 'audio/m4a', 'audio/wav', 'audio/mp4']:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unsupported audio type: {content_type}. Supported: AAC, M4A, WAV, MP4"
+                )
+            attachment_type = 'audio'
+            max_size = 25 * 1024 * 1024  # 25MB
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported file type: {content_type}"
+            )
+
+        # Read and validate file size
+        file_content = await file.read()
+        if len(file_content) > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File too large: {len(file_content)} bytes (max: {max_size} bytes = {max_size//1024//1024}MB)"
+            )
+
+        # Generate unique filename
+        file_ext = Path(file.filename).suffix if file.filename else '.bin'
+        unique_filename = f"{uuid.uuid4()}_{int(datetime.now().timestamp())}{file_ext}"
+
+        # Store file in outbound media directory
+        media_dir = Path(__file__).parent.parent.parent / "media" / "outbound" / account_id
+        media_dir.mkdir(parents=True, exist_ok=True)
+        file_path = media_dir / unique_filename
+
+        with open(file_path, 'wb') as f:
+            f.write(file_content)
+
+        # Generate public URL for Instagram API to fetch
+        attachment_url = f"{settings.public_base_url}/media/outbound/{account_id}/{unique_filename}"
+
+        logger.info(f"File uploaded: {file.filename} -> {unique_filename} ({len(file_content)} bytes, type: {attachment_type})")
+
+    # 3. Generate message ID
     message_id = f"msg_{uuid.uuid4().hex[:12]}"
 
-    # 3. Create CRM outbound message record (for tracking/idempotency)
+    # 4. Create CRM outbound message record (for tracking/idempotency)
     outbound_message = CRMOutboundMessage(
         id=message_id,
-        account_id=request.account_id,
-        recipient_id=request.recipient_id,
-        message_text=request.message,
-        idempotency_key=request.idempotency_key,
+        account_id=account_id,
+        recipient_id=recipient_id,
+        message_text=message,
+        idempotency_key=idempotency_key,
         status="pending",
         created_at=datetime.now(timezone.utc)
     )
@@ -198,11 +271,21 @@ async def send_message(
             )
             
             try:
-                # Send message via Instagram API
-                ig_response = await instagram_client.send_message(
-                    recipient_id=request.recipient_id,
-                    message_text=request.message
-                )
+                # Send message via Instagram API (with or without attachment)
+                if attachment_url:
+                    # Send message with attachment
+                    ig_response = await instagram_client.send_message_with_attachment(
+                        recipient_id=recipient_id,
+                        attachment_url=attachment_url,
+                        attachment_type=attachment_type,
+                        caption_text=message  # Optional caption
+                    )
+                else:
+                    # Send text-only message
+                    ig_response = await instagram_client.send_message(
+                        recipient_id=recipient_id,
+                        message_text=message
+                    )
 
                 # Update CRM tracking status to "sent"
                 outbound_message.status = "sent"
@@ -215,13 +298,13 @@ async def send_message(
                 try:
                     # Get CRM pool from app state for MySQL sync
                     crm_pool = getattr(http_request.app.state, 'crm_pool', None)
-                    
+
                     message_repo = MessageRepository(db, crm_pool=crm_pool)
                     ui_message = Message(
                         id=ig_response.message_id,  # Use Instagram's message ID
-                        sender_id=request.account_id,  # Business account
-                        recipient_id=request.recipient_id,  # Customer
-                        message_text=request.message,
+                        sender_id=account_id,  # Business account
+                        recipient_id=recipient_id,  # Customer
+                        message_text=message or '',  # Empty string if media-only
                         direction="outbound",
                         timestamp=datetime.now(timezone.utc)
                     )
@@ -235,13 +318,13 @@ async def send_message(
                 try:
                     await broadcast_new_message({
                         "id": message_id,
-                        "sender_id": request.account_id,
-                        "recipient_id": request.recipient_id,
-                        "text": request.message,
+                        "sender_id": account_id,
+                        "recipient_id": recipient_id,
+                        "text": message or '',
                         "direction": "outbound",
                         "timestamp": outbound_message.created_at.isoformat(),
                         "status": "sent",
-                        "instagram_account_id": request.account_id
+                        "instagram_account_id": account_id
                     })
                 except Exception as sse_error:
                     logger.error(f"Failed to broadcast SSE message: {sse_error}")

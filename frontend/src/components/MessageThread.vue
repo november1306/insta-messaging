@@ -53,6 +53,28 @@
     <!-- Input Area -->
     <div class="border-t border-instagram-border p-4">
       <form @submit.prevent="handleSend" class="flex items-center gap-3">
+        <!-- Hidden file input -->
+        <input
+          ref="fileInput"
+          type="file"
+          accept="image/jpeg,image/png,video/mp4,video/ogg,video/avi,video/quicktime,video/webm,audio/aac,audio/m4a,audio/wav"
+          @change="handleFileSelect"
+          style="display: none"
+        />
+
+        <!-- Attach button -->
+        <button
+          type="button"
+          @click="$refs.fileInput.click()"
+          :disabled="sending"
+          class="p-2 text-gray-600 hover:text-instagram-blue transition-colors disabled:opacity-50"
+          title="Attach file"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+          </svg>
+        </button>
+
         <input
           v-model="messageText"
           type="text"
@@ -62,12 +84,55 @@
         />
         <button
           type="submit"
-          :disabled="!messageText.trim() || sending"
+          :disabled="(!messageText.trim() && !selectedFile) || sending"
           class="px-6 py-2 bg-instagram-blue text-white rounded-full font-semibold hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {{ sending ? 'Sending...' : 'Send' }}
         </button>
       </form>
+
+      <!-- File preview -->
+      <div v-if="selectedFile" class="mt-3 flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+        <img
+          v-if="filePreview && selectedFile.type.startsWith('image/')"
+          :src="filePreview"
+          class="h-16 w-16 rounded object-cover"
+          alt="Preview"
+        />
+        <div v-else class="h-16 w-16 rounded bg-gray-200 flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-8 h-8 text-gray-400">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+          </svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-gray-900 truncate">{{ selectedFile.name }}</p>
+          <p class="text-xs text-gray-500">{{ formatFileSize(selectedFile.size) }}</p>
+        </div>
+        <button
+          @click="removeFile"
+          type="button"
+          class="p-1 text-red-500 hover:text-red-700 transition-colors"
+          title="Remove file"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Upload progress -->
+      <div v-if="uploadProgress > 0 && uploadProgress < 100" class="mt-3">
+        <div class="flex items-center justify-between text-xs text-gray-600 mb-1">
+          <span>Uploading...</span>
+          <span>{{ uploadProgress }}%</span>
+        </div>
+        <div class="w-full bg-gray-200 rounded-full h-2">
+          <div
+            class="bg-instagram-blue h-2 rounded-full transition-all duration-300"
+            :style="{ width: uploadProgress + '%' }"
+          ></div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -98,16 +163,96 @@ const emit = defineEmits(['send'])
 const messageText = ref('')
 const sending = ref(false)
 const messagesContainer = ref(null)
+const fileInput = ref(null)
+const selectedFile = ref(null)
+const filePreview = ref(null)
+const uploadProgress = ref(0)
+
+function handleFileSelect(event) {
+  const file = event.target.files[0]
+  if (!file) return
+
+  // Validate file size
+  const maxSizes = {
+    'image': 8 * 1024 * 1024,    // 8MB
+    'video': 25 * 1024 * 1024,   // 25MB
+    'audio': 25 * 1024 * 1024    // 25MB
+  }
+
+  const fileType = file.type.split('/')[0]
+  const maxSize = maxSizes[fileType]
+
+  if (!maxSize) {
+    alert('Unsupported file type')
+    event.target.value = ''
+    return
+  }
+
+  if (file.size > maxSize) {
+    alert(`File too large. Max size for ${fileType}: ${formatFileSize(maxSize)}`)
+    event.target.value = ''
+    return
+  }
+
+  selectedFile.value = file
+
+  // Create preview for images
+  if (file.type.startsWith('image/')) {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      filePreview.value = e.target.result
+    }
+    reader.readAsDataURL(file)
+  } else {
+    filePreview.value = null
+  }
+}
+
+function removeFile() {
+  selectedFile.value = null
+  filePreview.value = null
+  if (fileInput.value) {
+    fileInput.value.value = ''
+  }
+}
+
+function formatFileSize(bytes) {
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`
+}
 
 async function handleSend() {
-  if (!messageText.value.trim() || sending.value) return
+  if ((!messageText.value.trim() && !selectedFile.value) || sending.value) return
 
   sending.value = true
+  uploadProgress.value = 0
+
   try {
-    await emit('send', messageText.value.trim())
+    // Create FormData
+    const formData = new FormData()
+    formData.append('recipient_id', props.conversation.sender_id)
+    formData.append('account_id', props.conversation.instagram_account_id)
+    formData.append('idempotency_key', `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
+
+    if (messageText.value.trim()) {
+      formData.append('message', messageText.value.trim())
+    }
+
+    if (selectedFile.value) {
+      formData.append('file', selectedFile.value)
+    }
+
+    // Send with progress callback
+    await emit('send', formData, (progress) => {
+      uploadProgress.value = progress
+    })
+
+    // Clear state on success
     messageText.value = ''
+    removeFile()
+    uploadProgress.value = 0
   } catch (err) {
     console.error('Failed to send message:', err)
+    alert('Failed to send message. Please try again.')
   } finally {
     sending.value = false
   }

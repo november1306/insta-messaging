@@ -64,23 +64,40 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
-  async function sendMessage(recipientId, text, accountId) {
+  async function sendMessage(formData, onProgress) {
     error.value = null
     try {
-      const response = await apiClient.post('/messages/send', {
-        recipient_id: recipientId,
-        message: text,  // API expects 'message', not 'text'
-        account_id: accountId,
-        idempotency_key: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`  // Required field
+      // Send FormData directly with progress tracking
+      const response = await apiClient.post('/messages/send', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        },
+        onUploadProgress: (progressEvent) => {
+          if (onProgress && progressEvent.total) {
+            const progress = Math.round((progressEvent.loaded / progressEvent.total) * 100)
+            onProgress(progress)
+          }
+        }
       })
+
+      // Extract values from FormData for optimistic update
+      const recipientId = formData.get('recipient_id')
+      const messageText = formData.get('message') || ''
+      const hasFile = formData.get('file') !== null
 
       // Add sent message to local state (optimistic update)
       const sentMessage = {
         id: response.data.message_id,
-        text: text,
+        text: messageText,
         direction: 'outbound',
         timestamp: new Date().toISOString(),
-        status: response.data.status || 'pending'
+        status: response.data.status || 'pending',
+        attachments: hasFile ? [{
+          id: `temp_${Date.now()}`,
+          media_type: response.data.attachment_type || 'image',
+          media_url_local: response.data.attachment_url || '',
+          media_mime_type: 'image/jpeg'  // Will be updated by SSE
+        }] : []
       }
 
       if (!messages.value[recipientId]) {
