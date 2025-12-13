@@ -60,6 +60,9 @@ jobs:
             # Database Configuration
             DATABASE_URL=sqlite+aiosqlite:////opt/insta-messaging/data/production.db
 
+            # Public Base URL (required for outbound media attachments)
+            PUBLIC_BASE_URL=${{ secrets.PUBLIC_BASE_URL || 'http://185.156.43.172' }}
+
             # CRM MySQL Configuration (optional)
             CRM_MYSQL_ENABLED=${{ secrets.CRM_MYSQL_ENABLED || 'false' }}
             CRM_MYSQL_HOST=${{ secrets.CRM_MYSQL_HOST || '' }}
@@ -291,6 +294,9 @@ jobs:
 
             # Database Configuration
             DATABASE_URL=sqlite+aiosqlite:////opt/insta-messaging/data/production.db
+
+            # Public Base URL (required for outbound media attachments)
+            PUBLIC_BASE_URL=${{ secrets.PUBLIC_BASE_URL || 'http://185.156.43.172' }}
 
             # CRM MySQL Configuration (optional)
             CRM_MYSQL_ENABLED=${{ secrets.CRM_MYSQL_ENABLED || 'false' }}

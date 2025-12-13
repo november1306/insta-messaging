@@ -126,7 +126,7 @@ class CRMOutboundMessage(Base):
     id = Column(String(50), primary_key=True)  # Our message ID
     account_id = Column(String(50), ForeignKey('accounts.id'), nullable=False)  # FK to accounts.id
     recipient_id = Column(String(50), nullable=False)  # Instagram PSID
-    message_text = Column(Text, nullable=False)  # Message content
+    message_text = Column(Text, nullable=True)  # Message content (nullable for media-only messages)
     idempotency_key = Column(String(100), unique=True, nullable=False)  # Prevent duplicates
     status = Column(String(20), nullable=False, default='pending', server_default='pending')  # Python + DB default
     instagram_message_id = Column(String(100), nullable=True)  # Instagram's message ID (set after successful send)
