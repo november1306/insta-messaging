@@ -16,7 +16,7 @@ import httpx
 
 from app.api.auth import verify_api_key, verify_jwt_or_api_key
 from app.db.connection import get_db_session
-from app.db.models import CRMOutboundMessage, Account, APIKey
+from app.db.models import CRMOutboundMessage, Account, APIKey, MessageAttachment
 from app.clients.instagram_client import InstagramClient, InstagramAPIError
 from app.config import settings
 from app.api.events import broadcast_new_message, broadcast_message_status
@@ -45,7 +45,7 @@ class SendMessageRequest(BaseModel):
 class SendMessageResponse(BaseModel):
     """
     Response from send message endpoint.
-    
+
     Note: OpenAPI spec defines status as [pending, accepted, failed] for async delivery.
     MVP implementation (Task 6) does synchronous delivery and returns [pending, sent, failed].
     This will be aligned when async queue is implemented in Priority 2.
@@ -53,7 +53,10 @@ class SendMessageResponse(BaseModel):
     message_id: str = Field(..., description="Message Router's message ID")
     status: str = Field(..., description="pending | sent | failed (MVP) | accepted (future)")
     created_at: datetime
-    
+    attachment_url: Optional[str] = Field(None, description="Public URL of attachment if file was uploaded")
+    attachment_type: Optional[str] = Field(None, description="Type of attachment: image | video | audio")
+    attachment_local_path: Optional[str] = Field(None, description="Local path for frontend to fetch authenticated media")
+
     class Config:
         from_attributes = True
 
@@ -158,10 +161,15 @@ async def send_message(
 
     if existing:
         logger.info(f"Duplicate request detected - returning existing message: {existing.id}")
+        # For duplicate requests, we don't track attachment info in CRMOutboundMessage
+        # so return None for attachment fields
         return SendMessageResponse(
             message_id=existing.id,
             status=existing.status,
-            created_at=existing.created_at
+            created_at=existing.created_at,
+            attachment_url=None,
+            attachment_type=None,
+            attachment_local_path=None
         )
 
     # 2. Handle file upload if present
@@ -310,14 +318,35 @@ async def send_message(
                     )
                     await message_repo.save(ui_message)
                     logger.info(f"✅ Message saved to messages table for UI: {ig_response.message_id}")
+
+                    # Save attachment to message_attachments table if present
+                    if attachment_url and attachment_type:
+                        attachment_id = f"{ig_response.message_id}_0"
+                        # Extract local path from public URL
+                        # attachment_url format: "http://example.com/media/outbound/{account_id}/{filename}"
+                        local_path = f"media/outbound/{account_id}/{unique_filename}"
+
+                        attachment = MessageAttachment(
+                            id=attachment_id,
+                            message_id=ig_response.message_id,
+                            attachment_index=0,
+                            media_type=attachment_type,
+                            media_url=attachment_url,  # Public URL for Instagram
+                            media_url_local=local_path,  # Local path for frontend
+                            media_mime_type=file.content_type
+                        )
+                        db.add(attachment)
+                        await db.flush()  # Flush to persist attachment
+                        logger.info(f"✅ Attachment saved: {attachment_id} ({attachment_type}, {file.content_type})")
+
                 except Exception as save_error:
                     # Log error but don't fail the request - message was sent successfully
                     logger.error(f"⚠️ Failed to save message to messages table: {save_error}", exc_info=True)
 
                 # Broadcast to SSE clients for real-time UI update
                 try:
-                    await broadcast_new_message({
-                        "id": message_id,
+                    message_data = {
+                        "id": ig_response.message_id,  # Use Instagram's message ID (not internal tracking ID)
                         "sender_id": account_id,
                         "recipient_id": recipient_id,
                         "text": message or '',
@@ -325,7 +354,20 @@ async def send_message(
                         "timestamp": outbound_message.created_at.isoformat(),
                         "status": "sent",
                         "instagram_account_id": account_id
-                    })
+                    }
+
+                    # Include attachment if present
+                    if attachment_url and attachment_type:
+                        message_data["attachments"] = [{
+                            "id": f"{ig_response.message_id}_0",
+                            "media_type": attachment_type,
+                            "media_url": attachment_url,
+                            "media_url_local": f"media/outbound/{account_id}/{unique_filename}",
+                            "media_mime_type": file.content_type,
+                            "attachment_index": 0
+                        }]
+
+                    await broadcast_new_message(message_data)
                 except Exception as sse_error:
                     logger.error(f"Failed to broadcast SSE message: {sse_error}")
                 
@@ -365,11 +407,14 @@ async def send_message(
     # 6. Single commit at the end - all state changes persisted together
     await db.commit()
     
-    # 7. Return response with current status
+    # 7. Return response with current status (including attachment info)
     return SendMessageResponse(
         message_id=outbound_message.id,
         status=outbound_message.status,
-        created_at=outbound_message.created_at
+        created_at=outbound_message.created_at,
+        attachment_url=attachment_url,  # Will be None if no file uploaded
+        attachment_type=attachment_type,  # Will be None if no file uploaded
+        attachment_local_path=f"media/outbound/{account_id}/{unique_filename}" if attachment_url else None
     )
 
 

@@ -92,12 +92,18 @@ export const useMessagesStore = defineStore('messages', () => {
         direction: 'outbound',
         timestamp: new Date().toISOString(),
         status: response.data.status || 'pending',
-        attachments: hasFile ? [{
-          id: `temp_${Date.now()}`,
+        attachments: []
+      }
+
+      // Add attachment if present in response
+      if (hasFile && response.data.attachment_local_path) {
+        sentMessage.attachments = [{
+          id: `${response.data.message_id}_0`,
           media_type: response.data.attachment_type || 'image',
-          media_url_local: response.data.attachment_url || '',
-          media_mime_type: 'image/jpeg'  // Will be updated by SSE
-        }] : []
+          media_url: response.data.attachment_url,  // Public URL
+          media_url_local: response.data.attachment_local_path,  // Local path for authenticated fetch
+          attachment_index: 0
+        }]
       }
 
       if (!messages.value[recipientId]) {

@@ -139,8 +139,24 @@ function handleSSEMessage(data) {
       if (data.data.direction === 'inbound') {
         store.addIncomingMessage(data.data)
       } else if (data.data.direction === 'outbound') {
-        // Update sent message status in real-time
-        store.updateMessageStatus(data.data.id, data.data.status)
+        // For outbound messages from SSE, check if message already exists (optimistic update)
+        // If it exists, update it with full data including attachments
+        // If not, add it (e.g., message sent from other session/tab)
+        const recipientId = data.data.recipient_id
+        const existingMessages = store.messages[recipientId] || []
+        const existingIndex = existingMessages.findIndex(m => m.id === data.data.id)
+
+        if (existingIndex >= 0) {
+          // Update existing message with SSE data (includes attachments)
+          store.messages[recipientId][existingIndex] = {
+            ...store.messages[recipientId][existingIndex],
+            ...data.data,
+            status: data.data.status || 'sent'
+          }
+        } else {
+          // Add new outbound message from SSE (e.g., sent from another tab)
+          store.addIncomingMessage(data.data)
+        }
       }
       break
     case 'message_status':
