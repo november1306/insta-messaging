@@ -142,9 +142,14 @@ function handleSSEMessage(data) {
         // For outbound messages from SSE, check if message already exists (optimistic update)
         // If it exists, update it with full data including attachments
         // If not, add it (e.g., message sent from other session/tab)
-        const recipientId = data.data.recipient_id
-        const existingMessages = store.messages[recipientId] || []
-        const existingIndex = existingMessages.findIndex(m => m.id === data.data.id)
+        const recipientId = data.data.recipient_id  // Customer ID (not business account)
+
+        // Initialize conversation array if needed
+        if (!store.messages[recipientId]) {
+          store.messages[recipientId] = []
+        }
+
+        const existingIndex = store.messages[recipientId].findIndex(m => m.id === data.data.id)
 
         if (existingIndex >= 0) {
           // Update existing message with SSE data (includes attachments)
@@ -155,7 +160,8 @@ function handleSSEMessage(data) {
           }
         } else {
           // Add new outbound message from SSE (e.g., sent from another tab)
-          store.addIncomingMessage(data.data)
+          // Add to recipient's conversation, not sender's
+          store.messages[recipientId].push(data.data)
         }
       }
       break
