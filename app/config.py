@@ -84,6 +84,9 @@ class Settings:
             "sqlite+aiosqlite:///./instagram_automation.db"
         )
 
+        # Public base URL for outbound media (required for Instagram API to fetch attachments)
+        self.public_base_url = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
+
         # CRM webhook configuration
         self.crm_webhook_timeout = float(os.getenv("CRM_WEBHOOK_TIMEOUT", "10.0"))  # seconds
 

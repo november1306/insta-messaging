@@ -282,3 +282,154 @@ class InstagramClient:
                 status_code=None,
                 response_body=None
             ) from e
+
+    async def send_message_with_attachment(
+        self,
+        recipient_id: str,
+        attachment_url: str,
+        attachment_type: str,
+        caption_text: Optional[str] = None
+    ) -> SendMessageResponse:
+        """
+        Send a message with media attachment to an Instagram user.
+
+        Args:
+            recipient_id: Instagram user's PSID (Page-Scoped ID)
+            attachment_url: Publicly accessible URL to the media file
+            attachment_type: Type of attachment ("image", "video", or "audio")
+            caption_text: Optional caption text (sent as separate message after attachment)
+
+        Returns:
+            SendMessageResponse with message_id and status
+
+        Raises:
+            ValueError: If inputs are invalid
+            InstagramAPIError: If the API request fails
+
+        Example:
+            response = await client.send_message_with_attachment(
+                recipient_id="1558635688632972",
+                attachment_url="https://example.com/media/image.jpg",
+                attachment_type="image",
+                caption_text="Check this out!"
+            )
+        """
+        # Input validation
+        if not recipient_id or not recipient_id.strip():
+            raise ValueError("recipient_id cannot be empty")
+
+        if not attachment_url or not attachment_url.strip():
+            raise ValueError("attachment_url cannot be empty")
+
+        if attachment_type not in ["image", "video", "audio"]:
+            raise ValueError(f"attachment_type must be 'image', 'video', or 'audio', got: {attachment_type}")
+
+        url = f"{self._api_base_url}/me/messages"
+
+        # Prepare request payload
+        payload = {
+            "recipient": {
+                "id": recipient_id
+            },
+            "message": {
+                "attachment": {
+                    "type": attachment_type,
+                    "payload": {
+                        "url": attachment_url,
+                        "is_reusable": False
+                    }
+                }
+            }
+        }
+
+        self._logger.info(
+            f"Sending {attachment_type} attachment to recipient {recipient_id}, URL: {attachment_url}"
+        )
+
+        try:
+            # Make API request
+            response = await self._http_client.post(
+                url,
+                params={"access_token": self._settings.instagram_page_access_token},
+                json=payload,
+                timeout=30.0  # Longer timeout for media uploads
+            )
+
+            # Check for successful response
+            if response.status_code == 200:
+                response_data = response.json()
+                message_id = response_data.get("message_id")
+                recipient_id_response = response_data.get("recipient_id")
+
+                # Validate required fields in response
+                if not message_id or not recipient_id_response:
+                    raise InstagramAPIError(
+                        "Invalid API response: missing message_id or recipient_id",
+                        status_code=200,
+                        response_body=response_data
+                    )
+
+                self._logger.info(
+                    f"✅ {attachment_type.capitalize()} attachment sent successfully - "
+                    f"message_id: {message_id}, recipient: {recipient_id_response}"
+                )
+
+                # If caption provided, send as separate text message
+                if caption_text and caption_text.strip():
+                    self._logger.info(f"Sending caption as separate message...")
+                    try:
+                        await self.send_message(recipient_id, caption_text.strip())
+                    except Exception as e:
+                        # Log caption failure but don't fail the whole request
+                        self._logger.warning(
+                            f"⚠️  Attachment sent but caption failed: {e}"
+                        )
+
+                return SendMessageResponse(
+                    message_id=message_id,
+                    recipient_id=recipient_id_response,
+                    success=True
+                )
+            else:
+                # API returned error
+                error_data = response.json() if response.text else {}
+                error_message = error_data.get("error", {}).get("message", "Unknown error")
+                error_code = error_data.get("error", {}).get("code")
+
+                self._logger.error(
+                    f"❌ Instagram API error sending attachment - "
+                    f"status: {response.status_code}, "
+                    f"code: {error_code}, "
+                    f"message: {error_message}, "
+                    f"recipient: {recipient_id}"
+                )
+
+                raise InstagramAPIError(
+                    message=f"Instagram API error: {error_message}",
+                    status_code=response.status_code,
+                    response_body=error_data
+                )
+
+        except httpx.TimeoutException as e:
+            self._logger.error(f"❌ Request timeout sending attachment to {recipient_id}: {e}")
+            raise InstagramAPIError(
+                message=f"Request timeout: {str(e)}",
+                status_code=None,
+                response_body=None
+            ) from e
+
+        except httpx.RequestError as e:
+            self._logger.error(f"❌ Request error sending attachment to {recipient_id}: {e}")
+            raise InstagramAPIError(
+                message=f"Request error: {str(e)}",
+                status_code=None,
+                response_body=None
+            ) from e
+
+        except Exception as e:
+            self._logger.error(f"❌ Unexpected error sending attachment to {recipient_id}: {e}", exc_info=True)
+            raise InstagramAPIError(
+                message=f"Unexpected error: {str(e)}",
+                status_code=None,
+                response_body=None
+            ) from e

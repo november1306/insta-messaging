@@ -160,16 +160,9 @@ async function handleSelectConversation(senderId) {
   }
 }
 
-async function handleSendMessage(text) {
-  const conversation = store.activeConversation
-  if (!conversation) return
-
+async function handleSendMessage(formData, onProgress) {
   try {
-    await store.sendMessage(
-      conversation.sender_id,
-      text,
-      conversation.instagram_account_id
-    )
+    await store.sendMessage(formData, onProgress)
   } catch (err) {
     console.error('Failed to send message:', err)
     // Error is already stored in store.error

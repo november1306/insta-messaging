@@ -12,9 +12,11 @@ from app.api import webhooks, accounts, messages, ui, events
 from app.config import settings
 from app.db import init_db, close_db
 from app.version import __version__
+from app.services.media_cleanup import periodic_cleanup_task
 import logging
 from pathlib import Path
 import aiomysql
+import asyncio
 
 # Custom logging filter to redact sensitive data
 class SensitiveDataFilter(logging.Filter):
@@ -72,7 +74,11 @@ async def lifespan(app: FastAPI):
     media_dir = Path(__file__).parent.parent / "media"
     try:
         media_dir.mkdir(parents=True, exist_ok=True)
+        # Create outbound subdirectory for temporary outbound media
+        outbound_dir = media_dir / "outbound"
+        outbound_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"✅ Media directory ready: {media_dir}")
+        logger.info(f"✅ Outbound media directory ready: {outbound_dir}")
     except Exception as e:
         logger.error(f"❌ Failed to create media directory: {e}")
         # Non-fatal - will retry when first media is downloaded
@@ -103,6 +109,10 @@ async def lifespan(app: FastAPI):
 
     app.state.crm_pool = crm_pool
 
+    # Start media cleanup background task
+    cleanup_task = asyncio.create_task(periodic_cleanup_task(media_dir))
+    logger.info("✅ Media cleanup task started")
+
     logger.info("✅ Configuration loaded successfully")
     logger.info("🔗 Webhook endpoint: /webhooks/instagram")
 
@@ -110,6 +120,13 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down...")
+
+    # Cancel cleanup task
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        logger.info("✅ Media cleanup task cancelled")
 
     # Close CRM pool
     if crm_pool:
@@ -311,6 +328,53 @@ async def serve_media(
     else:
         # Allow browser to preview (images, videos, audio)
         return FileResponse(file_path)
+
+
+@app.get("/media/outbound/{account_id}/{filename}")
+async def serve_outbound_media(
+    account_id: str,
+    filename: str
+):
+    """
+    Serve outbound media files - PUBLIC (no authentication required).
+
+    Instagram Graph API requires publicly accessible URLs to fetch media attachments.
+    These files are temporary (24-hour TTL) and stored in media/outbound/{account_id}/
+
+    Path format: /media/outbound/{account_id}/{filename}
+    Example: /media/outbound/page456/uuid_timestamp.jpg
+
+    Security:
+    - Files have random UUID filenames (not guessable)
+    - 24-hour automatic deletion limits exposure window
+    - Path traversal protection
+    """
+    # Construct file path
+    file_path = media_dir / "outbound" / account_id / filename
+
+    if not file_path.exists():
+        logger.warning(f"Outbound media file not found: {file_path}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media file not found or expired"
+        )
+
+    # Security: Verify the resolved path is still within outbound media directory
+    # Prevents path traversal attacks
+    outbound_dir = media_dir / "outbound"
+    try:
+        file_path.resolve().relative_to(outbound_dir.resolve())
+    except ValueError:
+        logger.error(f"Path traversal attempt detected in outbound media: {file_path}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid file path"
+        )
+
+    logger.debug(f"Serving outbound media file (public): {file_path}")
+
+    # Return file for Instagram to fetch
+    return FileResponse(file_path)
 
 # Media endpoint info logged at startup
 logger.info(f"✅ Authenticated media endpoint enabled at /media/{{account_id}}/{{sender_id}}/{{filename}}")
