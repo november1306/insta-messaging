@@ -74,6 +74,14 @@ class Settings:
         self.jwt_algorithm = os.getenv("JWT_ALGORITHM", "HS256")
         self.jwt_expiration_hours = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
 
+        # Instagram OAuth configuration
+        self.instagram_oauth_client_id = os.getenv("INSTAGRAM_OAUTH_CLIENT_ID", "")
+        self.instagram_oauth_client_secret = os.getenv("INSTAGRAM_OAUTH_CLIENT_SECRET", "")
+        self.instagram_oauth_redirect_uri = os.getenv(
+            "INSTAGRAM_OAUTH_REDIRECT_URI",
+            "http://localhost:8000/oauth/instagram/callback"
+        )
+
         # Server configuration
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "8000"))

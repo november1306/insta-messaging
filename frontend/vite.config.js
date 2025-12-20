@@ -17,6 +17,10 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true
       },
+      '/oauth': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
+      },
       '/webhooks': {
         target: 'http://localhost:8000',
         changeOrigin: true

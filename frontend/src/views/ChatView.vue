@@ -45,15 +45,27 @@
         <!-- Messages Header -->
         <div class="h-14 flex items-center justify-between px-6">
           <h1 class="text-xl font-bold">Messages</h1>
-          <button
-            @click="refreshConversations"
-            class="text-instagram-blue hover:text-blue-700 transition-colors p-2 hover:bg-gray-50 rounded-full"
-            title="Refresh conversations"
-          >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </button>
+          <div class="flex gap-2">
+            <button
+              @click="showOAuthModal = true"
+              class="text-instagram-blue hover:text-blue-700 transition-colors px-3 py-1.5 hover:bg-gray-50 rounded-lg text-sm font-medium flex items-center gap-1.5"
+              title="Add Instagram account"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+              Add Account
+            </button>
+            <button
+              @click="refreshConversations"
+              class="text-instagram-blue hover:text-blue-700 transition-colors p-2 hover:bg-gray-50 rounded-full"
+              title="Refresh conversations"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -93,6 +105,63 @@
       />
     </div>
 
+    <!-- OAuth Modal -->
+    <div
+      v-if="showOAuthModal"
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      @click.self="showOAuthModal = false"
+    >
+      <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-bold">Add Instagram Account</h2>
+          <button
+            @click="showOAuthModal = false"
+            class="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <p class="text-gray-600 mb-6">
+          Connect your Instagram Business Account to start managing messages.
+        </p>
+
+        <!-- Force Reauth Checkbox -->
+        <div class="mb-6">
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              v-model="forceReauth"
+              class="mt-1 w-4 h-4 text-instagram-blue border-gray-300 rounded focus:ring-instagram-blue"
+            />
+            <div class="flex-1">
+              <div class="font-medium text-sm">Force re-authentication</div>
+              <div class="text-xs text-gray-500 mt-0.5">
+                Require entering Instagram credentials even if already logged in
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <!-- OAuth Button -->
+        <button
+          @click="handleOAuthLogin"
+          class="w-full bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 text-white font-semibold py-3 px-6 rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+        >
+          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+          </svg>
+          Continue with Instagram
+        </button>
+
+        <p class="text-xs text-gray-400 mt-4 text-center">
+          You'll be redirected to Instagram to authorize access
+        </p>
+      </div>
+    </div>
+
     <!-- SSE Connection Status -->
     <div
       v-if="sseError"
@@ -110,7 +179,7 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionStore } from '../stores/session'
@@ -123,6 +192,10 @@ import ConversationDetails from '../components/ConversationDetails.vue'
 const router = useRouter()
 const store = useMessagesStore()
 const sessionStore = useSessionStore()
+
+// OAuth state
+const showOAuthModal = ref(false)
+const forceReauth = ref(false)
 
 // SSE connection for real-time updates
 const { connected: sseConnected, error: sseError } = useSSE(
@@ -211,18 +284,41 @@ function handleLogout() {
   router.push('/login')
 }
 
+async function handleOAuthLogin() {
+  try {
+    const response = await fetch(`${window.location.origin}/oauth/instagram/init`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
+
+    if (!response.ok) {
+      alert('Failed to start Instagram authentication. Please try again.')
+      return
+    }
+
+    const data = await response.json()
+    let authUrl = data.auth_url
+
+    if (forceReauth.value) {
+      authUrl += '&force_reauth=true'
+    }
+
+    window.location.href = authUrl
+  } catch (err) {
+    console.error('OAuth init error:', err)
+    alert('Failed to start Instagram authentication. Please try again.')
+  }
+}
+
 onMounted(async () => {
-  // Initialize session before making any API calls
-  // This will either restore from localStorage or redirect to login
   const sessionReady = await sessionStore.ensureSession()
 
   if (!sessionReady) {
-    console.error('Failed to initialize session - redirecting to login')
-    // Router guard will handle redirect to login page
     return
   }
 
-  // Session is ready, fetch data
   await Promise.all([
     store.fetchCurrentAccount(),
     store.fetchConversations()

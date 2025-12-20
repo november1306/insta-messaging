@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
-from app.api import webhooks, accounts, messages, ui, events
+from app.api import webhooks, accounts, messages, ui, events, oauth
 from app.config import settings
 from app.db import init_db, close_db
 from app.version import __version__
@@ -113,6 +113,11 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(periodic_cleanup_task(media_dir))
     logger.info("✅ Media cleanup task started")
 
+    # Start OAuth state cleanup background task
+    from app.services.oauth_cleanup import periodic_oauth_state_cleanup
+    oauth_cleanup_task = asyncio.create_task(periodic_oauth_state_cleanup())
+    logger.info("✅ OAuth state cleanup task started")
+
     logger.info("✅ Configuration loaded successfully")
     logger.info("🔗 Webhook endpoint: /webhooks/instagram")
 
@@ -121,12 +126,17 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down...")
 
-    # Cancel cleanup task
+    # Cancel cleanup tasks
     cleanup_task.cancel()
+    oauth_cleanup_task.cancel()
     try:
         await cleanup_task
     except asyncio.CancelledError:
         logger.info("✅ Media cleanup task cancelled")
+    try:
+        await oauth_cleanup_task
+    except asyncio.CancelledError:
+        logger.info("✅ OAuth state cleanup task cancelled")
 
     # Close CRM pool
     if crm_pool:
@@ -209,6 +219,9 @@ app.include_router(messages.router, prefix="/api/v1", tags=["messages"])
 # Register UI API routes (for web frontend)
 app.include_router(ui.router, prefix="/api/v1", tags=["ui"])
 app.include_router(events.router, prefix="/api/v1", tags=["events"])
+
+# Register OAuth routes
+app.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
 
 
 @app.get("/")
