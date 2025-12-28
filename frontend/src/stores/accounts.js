@@ -10,9 +10,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import axios from 'axios'
+import apiClient from '@/api/client'
 import { useSessionStore } from './session'
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
 export const useAccountsStore = defineStore('accounts', () => {
   // State
@@ -48,7 +47,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     error.value = null
 
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/v1/accounts/me`, {
+      const response = await apiClient.get('/accounts/me', {
         headers: {
           Authorization: `Bearer ${sessionStore.token}`
         }
@@ -82,8 +81,8 @@ export const useAccountsStore = defineStore('accounts', () => {
     error.value = null
 
     try {
-      await axios.post(
-        `${API_BASE_URL}/api/v1/accounts/${accountId}/set-primary`,
+      await apiClient.post(
+        `/accounts/${accountId}/set-primary`,
         {},
         {
           headers: {
@@ -121,7 +120,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     error.value = null
 
     try {
-      await axios.delete(`${API_BASE_URL}/api/v1/accounts/${accountId}`, {
+      await apiClient.delete(`/accounts/${accountId}`, {
         headers: {
           Authorization: `Bearer ${sessionStore.token}`
         }
@@ -156,9 +155,9 @@ export const useAccountsStore = defineStore('accounts', () => {
     error.value = null
 
     try {
-      // Initialize OAuth flow
+      // Initialize OAuth flow (OAuth endpoints are at /oauth, not /api/v1)
       const response = await axios.post(
-        `${API_BASE_URL}/oauth/instagram/init`,
+        '/oauth/instagram/init',
         {},
         {
           headers: {
