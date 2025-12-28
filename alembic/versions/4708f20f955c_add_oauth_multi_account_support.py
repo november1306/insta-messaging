@@ -70,13 +70,28 @@ def upgrade() -> None:
         op.add_column('accounts', sa.Column('last_synced_at', sa.DateTime(), nullable=True))
 
     # Use batch operations for SQLite compatibility (alter nullable columns only)
-    with op.batch_alter_table('accounts', schema=None) as batch_op:
-        batch_op.alter_column('crm_webhook_url',
-                   existing_type=sa.VARCHAR(length=500),
-                   nullable=True)
-        batch_op.alter_column('webhook_secret',
-                   existing_type=sa.VARCHAR(length=100),
-                   nullable=True)
+    # Check if columns are already nullable to avoid re-running batch operation
+    accounts_columns_detailed = {col['name']: col for col in inspector.get_columns('accounts')}
+    crm_webhook_url_nullable = accounts_columns_detailed.get('crm_webhook_url', {}).get('nullable', True)
+    webhook_secret_nullable = accounts_columns_detailed.get('webhook_secret', {}).get('nullable', True)
+
+    # Only run batch operation if columns need to be made nullable
+    if not (crm_webhook_url_nullable and webhook_secret_nullable):
+        # Clean up any leftover temp tables from previous failed runs
+        try:
+            op.execute('DROP TABLE IF EXISTS _alembic_tmp_accounts')
+        except:
+            pass
+
+        with op.batch_alter_table('accounts', schema=None) as batch_op:
+            if not crm_webhook_url_nullable:
+                batch_op.alter_column('crm_webhook_url',
+                           existing_type=sa.VARCHAR(length=500),
+                           nullable=True)
+            if not webhook_secret_nullable:
+                batch_op.alter_column('webhook_secret',
+                           existing_type=sa.VARCHAR(length=100),
+                           nullable=True)
 
     # Add index for token expiration if it doesn't exist
     accounts_indexes = [idx['name'] for idx in inspector.get_indexes('accounts')]
