@@ -10,7 +10,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import axios from 'axios'
-import apiClient from '@/api/client'
+import apiClient from '../api/client'
 import { useSessionStore } from './session'
 
 export const useAccountsStore = defineStore('accounts', () => {
