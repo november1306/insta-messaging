@@ -424,6 +424,13 @@ async def serve_media(
             )
             account = result.scalar_one_or_none()
 
+        # If still not found, try messaging_channel_id (webhook recipient ID)
+        if not account:
+            result = await db.execute(
+                select(Account).where(Account.messaging_channel_id == account_id)
+            )
+            account = result.scalar_one_or_none()
+
         if not account:
             logger.warning(f"Account {account_id} not found in database")
             raise HTTPException(
