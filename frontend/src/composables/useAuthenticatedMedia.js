@@ -14,7 +14,7 @@ export function useAuthenticatedMedia() {
 
   /**
    * Fetch media file with authentication and return blob URL
-   * @param {string} mediaPath - Relative path like "media/account/sender/file.jpg"
+   * @param {string} mediaPath - Relative path like "media/attachments/mid_abc123_0.jpg"
    * @returns {Promise<string>} - Blob URL for the media
    */
   async function fetchAuthenticatedMedia(mediaPath) {
@@ -31,10 +31,19 @@ export function useAuthenticatedMedia() {
         return null
       }
 
+      // Extract attachment ID from path
+      // Path format: "media/attachments/mid_abc123_0.jpg"
+      // Extract: "mid_abc123_0"
+      const attachmentId = extractAttachmentId(mediaPath)
+      if (!attachmentId) {
+        console.error(`Invalid media path format: ${mediaPath}`)
+        return null
+      }
+
       // Fetch media with Authorization header
-      // Use relative URL to work in both development and production
+      // Use new endpoint: /media/attachments/{attachment_id}
       const baseUrl = import.meta.env.DEV ? 'http://localhost:8000' : ''
-      const response = await fetch(`${baseUrl}/${mediaPath}`, {
+      const response = await fetch(`${baseUrl}/media/attachments/${attachmentId}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -62,7 +71,7 @@ export function useAuthenticatedMedia() {
 
   /**
    * Download file attachment with authentication
-   * @param {string} mediaPath - Relative path like "media/account/sender/file.pdf"
+   * @param {string} mediaPath - Relative path like "media/attachments/mid_abc123_0.pdf"
    * @param {string} filename - Desired filename for download
    */
   async function downloadAuthenticatedFile(mediaPath, filename) {
@@ -74,10 +83,17 @@ export function useAuthenticatedMedia() {
         return
       }
 
+      // Extract attachment ID from path
+      const attachmentId = extractAttachmentId(mediaPath)
+      if (!attachmentId) {
+        console.error(`Invalid media path format: ${mediaPath}`)
+        return
+      }
+
       // Fetch file with Authorization header
-      // Use relative URL to work in both development and production
+      // Use new endpoint: /media/attachments/{attachment_id}?download=true
       const baseUrl = import.meta.env.DEV ? 'http://localhost:8000' : ''
-      const response = await fetch(`${baseUrl}/${mediaPath}?download=true`, {
+      const response = await fetch(`${baseUrl}/media/attachments/${attachmentId}?download=true`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -105,6 +121,18 @@ export function useAuthenticatedMedia() {
     } catch (error) {
       console.error('Error downloading authenticated file:', error)
     }
+  }
+
+  /**
+   * Extract attachment ID from media path
+   * @param {string} mediaPath - Path like "media/attachments/mid_abc123_0.jpg"
+   * @returns {string|null} - Attachment ID like "mid_abc123_0" or null if invalid
+   */
+  function extractAttachmentId(mediaPath) {
+    // Path format: "media/attachments/{attachment_id}.{ext}"
+    // Example: "media/attachments/mid_abc123_0.jpg" -> "mid_abc123_0"
+    const match = mediaPath.match(/media\/attachments\/([^/.]+)/)
+    return match ? match[1] : null
   }
 
   /**

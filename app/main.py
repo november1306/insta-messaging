@@ -374,65 +374,75 @@ async def serve_outbound_media(
     return FileResponse(file_path)
 
 
-@app.get("/media/{account_id}/{sender_id}/{filename}")
+@app.get("/media/attachments/{attachment_id}")
 async def serve_media(
-    account_id: str,
-    sender_id: str,
-    filename: str,
+    attachment_id: str,
     download: bool = False,
     auth_context: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Serve media files with authentication.
+    Serve media files with authentication (message-based access control).
 
     Requires valid JWT token or API key. Users can only access media from
-    their authenticated account to prevent unauthorized access to private
-    Instagram DM attachments.
+    messages they own (via account ownership).
 
-    Path format: /media/{account_id}/{sender_id}/{filename}
-    Example: /media/page456/user123/mid_abc123_0.jpg
-    OR: /media/24370771369265571/user123/mid_abc123_0.jpg (Instagram account ID)
+    Path format: /media/attachments/{attachment_id}
+    Example: /media/attachments/mid_abc123_0
 
     Query parameters:
         download: If True, force download with Content-Disposition: attachment
     """
     # Import here to avoid circular dependency
-    from app.db.models import Account, UserAccount
+    from app.db.models import MessageAttachment, MessageModel, Account, UserAccount
     from sqlalchemy import select
 
-    # Verify user has access to this account's media
-    # JWT tokens contain user_id, API keys have broader access
+    # Look up attachment in database
+    result = await db.execute(
+        select(MessageAttachment).where(MessageAttachment.id == attachment_id)
+    )
+    attachment = result.scalar_one_or_none()
+
+    if not attachment:
+        logger.warning(f"Attachment {attachment_id} not found in database")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attachment not found"
+        )
+
+    # Verify user has access to this attachment's message
     if auth_context.get("auth_type") == "jwt":
         user_id = auth_context.get("user_id")
 
-        # account_id in URL can be either:
-        # 1. Database account ID (e.g., acc_d13380e14f8c)
-        # 2. Instagram business account ID (e.g., 24370771369265571)
-        # We need to check if the user has access to this account
-
-        # First, try to find account by database ID
+        # Get the message for this attachment
         result = await db.execute(
-            select(Account).where(Account.id == account_id)
+            select(MessageModel).where(MessageModel.id == attachment.message_id)
+        )
+        message = result.scalar_one_or_none()
+
+        if not message:
+            logger.error(f"Message {attachment.message_id} not found for attachment {attachment_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Message not found"
+            )
+
+        # Find which account owns this message (recipient_id contains account ID)
+        # Try to find account by messaging_channel_id first (most common for webhooks)
+        result = await db.execute(
+            select(Account).where(Account.messaging_channel_id == message.recipient_id)
         )
         account = result.scalar_one_or_none()
 
-        # If not found, try to find by Instagram account ID
+        # Fallback to instagram_account_id if not found
         if not account:
             result = await db.execute(
-                select(Account).where(Account.instagram_account_id == account_id)
-            )
-            account = result.scalar_one_or_none()
-
-        # If still not found, try messaging_channel_id (webhook recipient ID)
-        if not account:
-            result = await db.execute(
-                select(Account).where(Account.messaging_channel_id == account_id)
+                select(Account).where(Account.instagram_account_id == message.recipient_id)
             )
             account = result.scalar_one_or_none()
 
         if not account:
-            logger.warning(f"Account {account_id} not found in database")
+            logger.warning(f"Account not found for message recipient {message.recipient_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Account not found"
@@ -449,17 +459,25 @@ async def serve_media(
 
         if not user_account_link:
             logger.warning(
-                f"Unauthorized media access attempt: user {user_id} "
-                f"tried to access media from account {account.id}"
+                f"Unauthorized media access: user {user_id} tried to access "
+                f"attachment {attachment_id} from account {account.id}"
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to access this media"
             )
-    # API keys have access to all accounts (for CRM integration)
+    # API keys have access to all attachments (for CRM integration)
 
-    # Construct file path and verify it exists
-    file_path = media_dir / account_id / sender_id / filename
+    # Get file path from database (stored as relative path)
+    if not attachment.media_url_local:
+        logger.warning(f"Attachment {attachment_id} has no local file path")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media file not downloaded"
+        )
+
+    # Construct absolute file path
+    file_path = Path(__file__).parent.parent / attachment.media_url_local
 
     if not file_path.exists():
         logger.warning(f"Media file not found: {file_path}")
@@ -488,13 +506,13 @@ async def serve_media(
     # Force download if explicitly requested OR if it's a file attachment type
     should_download = download or (file_extension in downloadable_extensions)
 
-    logger.debug(f"Serving media file: {file_path} (auth: {auth_context.get('auth_type')}, download: {should_download})")
+    logger.debug(f"Serving attachment: {attachment_id} (auth: {auth_context.get('auth_type')}, download: {should_download})")
 
     if should_download:
         # Force download with proper filename
         return FileResponse(
             file_path,
-            filename=filename,
+            filename=file_path.name,
             media_type='application/octet-stream'
         )
     else:
@@ -502,7 +520,7 @@ async def serve_media(
         return FileResponse(file_path)
 
 # Media endpoint info logged at startup
-logger.info(f"✅ Authenticated media endpoint enabled at /media/{{account_id}}/{{sender_id}}/{{filename}}")
+logger.info(f"✅ Authenticated media endpoint enabled at /media/attachments/{{attachment_id}}")
 
 
 # ============================================

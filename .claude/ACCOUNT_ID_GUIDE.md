@@ -209,6 +209,93 @@ fetch('/api/v1/messages/send', {
 
 ---
 
+## Media Storage: Message-Based Paths (Not Account-Based)
+
+### The Problem with Account-Based Paths
+
+Initially, media files were stored using account-based paths:
+```
+media/{account_id}/{sender_id}/{message_id}_{index}.ext
+```
+
+This created ambiguity because:
+- Which `account_id` to use? Database ID (`acc_xxx`) or Instagram ID?
+- `messaging_channel_id` ≠ `instagram_account_id` in some cases
+- Path relied on external account identifiers that could change
+
+### Current Solution: Attachment-Based Paths
+
+Media files are now stored using **message attachment IDs** only:
+```
+media/attachments/{attachment_id}.{ext}
+```
+
+Where `attachment_id` = `{message_id}_{attachment_index}`
+
+**Example:**
+- Message ID: `mid_abc123`
+- First attachment: `mid_abc123_0.jpg`
+- Second attachment: `mid_abc123_1.mp4`
+
+### Benefits
+
+1. **No Account ID Ambiguity**: Path doesn't depend on which account ID to use
+2. **Globally Unique**: Message IDs from Instagram are globally unique
+3. **Simple Lookup**: Backend looks up attachment by ID, verifies ownership via message → account relationship
+4. **Clean URLs**: Frontend uses `/media/attachments/mid_abc123_0` (no need to know account/sender)
+
+### Implementation Details
+
+**Backend Storage** (`app/services/media_downloader.py`):
+```python
+# Generate attachment ID from message metadata
+attachment_id = f"{message_id}_{attachment_index}"
+
+# Store at: media/attachments/{attachment_id}.{ext}
+local_path = self.base_dir / "attachments" / f"{attachment_id}{extension}"
+```
+
+**Backend Serving** (`app/main.py`):
+```python
+@app.get("/media/attachments/{attachment_id}")
+async def serve_media(
+    attachment_id: str,
+    auth_context: dict = Depends(verify_jwt_or_api_key),
+    db: AsyncSession = Depends(get_db_session)
+):
+    # Look up attachment in database
+    attachment = await db.get(MessageAttachment, attachment_id)
+
+    # Verify user owns the message via account ownership
+    message = await db.get(MessageModel, attachment.message_id)
+    account = await get_account_by_recipient_id(message.recipient_id)
+    verify_user_has_access(user_id, account.id)
+
+    # Serve file
+    return FileResponse(attachment.media_url_local)
+```
+
+**Frontend Extraction** (`useAuthenticatedMedia.js`):
+```javascript
+// Database stores: "media/attachments/mid_abc123_0.jpg"
+// Extract attachment ID: "mid_abc123_0"
+const attachmentId = mediaPath.match(/media\/attachments\/([^/.]+)/)[1]
+
+// Request: /media/attachments/mid_abc123_0
+const response = await fetch(`/media/attachments/${attachmentId}`)
+```
+
+### Access Control
+
+Access is verified through the **message ownership chain**:
+1. User owns account (via `UserAccount` table)
+2. Account received the message (via `MessageModel.recipient_id` matching `Account.messaging_channel_id` or `Account.instagram_account_id`)
+3. Message contains the attachment (via `MessageAttachment.message_id`)
+
+This ensures users can only access media from conversations they own, without needing account IDs in the URL.
+
+---
+
 ## Future Consideration
 
 **Option to Simplify** (Breaking Change):

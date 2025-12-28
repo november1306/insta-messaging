@@ -210,8 +210,6 @@ async def handle_webhook(
                                         instagram_url=att_data["media_url"],
                                         message_id=message.id,
                                         attachment_index=att_data["index"],
-                                        account_id=message.recipient_id,  # Instagram business account ID
-                                        sender_id=message.sender_id,
                                         media_type=att_data["media_type"]
                                     )
 

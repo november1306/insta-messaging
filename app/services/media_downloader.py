@@ -106,8 +106,6 @@ class MediaDownloader:
         instagram_url: str,
         message_id: str,
         attachment_index: int,
-        account_id: str,
-        sender_id: str,
         media_type: str = "file"  # Fallback if MIME type unknown
     ) -> MediaFile:
         """
@@ -117,8 +115,6 @@ class MediaDownloader:
             instagram_url: Instagram CDN URL (expires in 7 days)
             message_id: Parent message ID (e.g., "mid_abc123")
             attachment_index: Attachment order (0, 1, 2...)
-            account_id: Instagram business account ID
-            sender_id: Instagram user ID who sent the media
             media_type: Instagram media type ("image", "video", "audio", "file")
 
         Returns:
@@ -163,12 +159,11 @@ class MediaDownloader:
                         f"Using fallback extension: {extension}"
                     )
 
-                # Generate local file path: media/{account_id}/{sender_id}/{message_id}_{index}.{ext}
+                # Generate local file path: media/attachments/{attachment_id}.{ext}
+                # attachment_id format: {message_id}_{index} (e.g., mid_abc123_0)
+                attachment_id = f"{message_id}_{attachment_index}"
                 local_path = self._build_file_path(
-                    account_id=account_id,
-                    sender_id=sender_id,
-                    message_id=message_id,
-                    attachment_index=attachment_index,
+                    attachment_id=attachment_id,
                     extension=extension
                 )
 
@@ -211,30 +206,24 @@ class MediaDownloader:
 
     def _build_file_path(
         self,
-        account_id: str,
-        sender_id: str,
-        message_id: str,
-        attachment_index: int,
+        attachment_id: str,
         extension: str
     ) -> Path:
         """
         Build local file path for media attachment.
 
-        Path format: media/{account_id}/{sender_id}/{message_id}_{index}{ext}
-        Example: media/page456/user123/mid_abc123_0.jpg
+        Path format: media/attachments/{attachment_id}{ext}
+        Example: media/attachments/mid_abc123_0.jpg
 
         Args:
-            account_id: Instagram business account ID
-            sender_id: Instagram user ID
-            message_id: Message ID
-            attachment_index: Attachment order (0, 1, 2...)
+            attachment_id: Unique attachment identifier (message_id_index)
             extension: File extension including dot (e.g., ".jpg")
 
         Returns:
             Absolute Path object
         """
-        filename = f"{message_id}_{attachment_index}{extension}"
-        return self.base_dir / account_id / sender_id / filename
+        filename = f"{attachment_id}{extension}"
+        return self.base_dir / "attachments" / filename
 
     def get_media_url_for_frontend(self, media_url_local: Optional[str]) -> Optional[str]:
         """
