@@ -14,7 +14,7 @@ export function useAuthenticatedMedia() {
 
   /**
    * Fetch media file with authentication and return blob URL
-   * @param {string} mediaPath - Relative path like "media/attachments/mid_abc123_0.jpg"
+   * @param {string} mediaPath - Relative path like "media/attachments/mid_abc123_0.jpg" or "media/outbound/acc_xxx/file.png"
    * @returns {Promise<string>} - Blob URL for the media
    */
   async function fetchAuthenticatedMedia(mediaPath) {
@@ -31,19 +31,32 @@ export function useAuthenticatedMedia() {
         return null
       }
 
-      // Extract attachment ID from path
-      // Path format: "media/attachments/mid_abc123_0.jpg"
-      // Extract: "mid_abc123_0"
-      const attachmentId = extractAttachmentId(mediaPath)
-      if (!attachmentId) {
-        console.error(`Invalid media path format: ${mediaPath}`)
+      // Determine endpoint based on path type
+      const baseUrl = import.meta.env.DEV ? 'http://localhost:8000' : ''
+      let fetchUrl
+
+      if (mediaPath.startsWith('media/attachments/')) {
+        // Inbound media (new format): Extract attachment ID
+        // Path format: "media/attachments/mid_abc123_0.jpg"
+        // Extract: "mid_abc123_0"
+        const attachmentId = extractAttachmentId(mediaPath)
+        if (!attachmentId) {
+          console.error(`Invalid attachment path format: ${mediaPath}`)
+          return null
+        }
+        fetchUrl = `${baseUrl}/media/attachments/${attachmentId}`
+      } else if (mediaPath.startsWith('media/outbound/')) {
+        // Outbound media (old format): Use full path
+        // Path format: "media/outbound/acc_xxx/filename.png"
+        // Note: Outbound endpoint is public (no auth required), but we send token anyway
+        fetchUrl = `${baseUrl}/${mediaPath}`
+      } else {
+        console.error(`Unknown media path format: ${mediaPath}`)
         return null
       }
 
       // Fetch media with Authorization header
-      // Use new endpoint: /media/attachments/{attachment_id}
-      const baseUrl = import.meta.env.DEV ? 'http://localhost:8000' : ''
-      const response = await fetch(`${baseUrl}/media/attachments/${attachmentId}`, {
+      const response = await fetch(fetchUrl, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -71,7 +84,7 @@ export function useAuthenticatedMedia() {
 
   /**
    * Download file attachment with authentication
-   * @param {string} mediaPath - Relative path like "media/attachments/mid_abc123_0.pdf"
+   * @param {string} mediaPath - Relative path like "media/attachments/mid_abc123_0.pdf" or "media/outbound/acc_xxx/file.pdf"
    * @param {string} filename - Desired filename for download
    */
   async function downloadAuthenticatedFile(mediaPath, filename) {
@@ -83,17 +96,28 @@ export function useAuthenticatedMedia() {
         return
       }
 
-      // Extract attachment ID from path
-      const attachmentId = extractAttachmentId(mediaPath)
-      if (!attachmentId) {
-        console.error(`Invalid media path format: ${mediaPath}`)
+      // Determine endpoint based on path type
+      const baseUrl = import.meta.env.DEV ? 'http://localhost:8000' : ''
+      let fetchUrl
+
+      if (mediaPath.startsWith('media/attachments/')) {
+        // Inbound media (new format): Extract attachment ID
+        const attachmentId = extractAttachmentId(mediaPath)
+        if (!attachmentId) {
+          console.error(`Invalid attachment path format: ${mediaPath}`)
+          return
+        }
+        fetchUrl = `${baseUrl}/media/attachments/${attachmentId}?download=true`
+      } else if (mediaPath.startsWith('media/outbound/')) {
+        // Outbound media (old format): Use full path
+        fetchUrl = `${baseUrl}/${mediaPath}?download=true`
+      } else {
+        console.error(`Unknown media path format: ${mediaPath}`)
         return
       }
 
       // Fetch file with Authorization header
-      // Use new endpoint: /media/attachments/{attachment_id}?download=true
-      const baseUrl = import.meta.env.DEV ? 'http://localhost:8000' : ''
-      const response = await fetch(`${baseUrl}/media/attachments/${attachmentId}?download=true`, {
+      const response = await fetch(fetchUrl, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
