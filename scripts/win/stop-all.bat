@@ -59,9 +59,20 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":4040.*LISTENING"') do (
 )
 if %FOUND_PROCESS%==0 echo [INFO] ngrok not running
 
-REM Also kill any stray processes by name
+REM Also kill any stray ngrok processes by name (ngrok doesn't always release port)
 taskkill /F /IM ngrok.exe >nul 2>&1
-taskkill /F /IM node.exe /FI "WINDOWTITLE eq frontend*" >nul 2>&1
+
+REM Close CMD terminal windows by title
+echo.
+echo Closing terminal windows...
+
+REM Kill CMD windows with specific titles using PowerShell (more reliable)
+powershell -Command "$windows = (Get-Process -Name cmd -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like 'backend*' -or $_.MainWindowTitle -like 'frontend*' }); if ($windows) { $windows | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } }"
+
+REM Kill any remaining ngrok windows
+powershell -Command "$windows = (Get-Process -Name ngrok -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like 'ngrok*' }); if ($windows) { $windows | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } }"
+
+echo [OK] Terminal windows closed
 
 echo.
 echo ========================================

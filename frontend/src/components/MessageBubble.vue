@@ -6,37 +6,73 @@
         <div v-if="hasAttachments" class="space-y-2 mb-2">
           <div v-for="attachment in message.attachments" :key="attachment.id">
             <!-- Images (JPG, PNG, GIF, WebP) -->
-            <img
-              v-if="attachment.media_type === 'image'"
-              :src="getMediaUrl(attachment)"
-              :alt="`${attachment.media_type} attachment`"
-              class="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
-              loading="lazy"
-              @click="openMediaLightbox(getMediaUrl(attachment))"
-              @error="handleImageError(attachment)"
-            />
+            <div v-if="attachment.media_type === 'image'" class="relative">
+              <img
+                v-if="getMediaUrl(attachment)"
+                :src="getMediaUrl(attachment)"
+                :alt="`${attachment.media_type} attachment`"
+                class="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
+                loading="lazy"
+                @click="openMediaLightbox(getMediaUrl(attachment))"
+                @error="handleImageError(attachment)"
+              />
+              <!-- Loading placeholder while blob URL is being fetched -->
+              <div
+                v-else
+                class="rounded-lg bg-gray-200 animate-pulse flex items-center justify-center"
+                style="min-width: 200px; min-height: 150px;"
+              >
+                <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+            </div>
 
             <!-- Videos (MP4, MOV) -->
-            <video
-              v-else-if="attachment.media_type === 'video'"
-              :src="getMediaUrl(attachment)"
-              controls
-              class="rounded-lg max-w-full h-auto"
-              preload="metadata"
-            >
-              Your browser does not support video playback.
-            </video>
+            <div v-else-if="attachment.media_type === 'video'">
+              <video
+                v-if="getMediaUrl(attachment)"
+                :src="getMediaUrl(attachment)"
+                controls
+                class="rounded-lg max-w-full h-auto"
+                preload="metadata"
+              >
+                Your browser does not support video playback.
+              </video>
+              <!-- Loading placeholder -->
+              <div
+                v-else
+                class="rounded-lg bg-gray-200 animate-pulse flex items-center justify-center"
+                style="min-width: 200px; min-height: 150px;"
+              >
+                <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+            </div>
 
             <!-- Audio (MP3, M4A, OGG) -->
-            <audio
-              v-else-if="attachment.media_type === 'audio'"
-              :src="getMediaUrl(attachment)"
-              controls
-              class="w-full"
-              preload="metadata"
-            >
-              Your browser does not support audio playback.
-            </audio>
+            <div v-else-if="attachment.media_type === 'audio'">
+              <audio
+                v-if="getMediaUrl(attachment)"
+                :src="getMediaUrl(attachment)"
+                controls
+                class="w-full"
+                preload="metadata"
+              >
+                Your browser does not support audio playback.
+              </audio>
+              <!-- Loading placeholder -->
+              <div
+                v-else
+                class="rounded-lg bg-gray-200 animate-pulse flex items-center justify-center p-4"
+              >
+                <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                </svg>
+              </div>
+            </div>
 
             <!-- Files (PDF, DOC, etc.) -->
             <button
@@ -115,9 +151,9 @@ onMounted(async () => {
   }
 })
 
-// Get blob URL for attachment or fallback to original
+// Get blob URL for attachment or return null if not loaded yet
 function getMediaUrl(attachment) {
-  return mediaBlobUrls.value.get(attachment.id) || `/${attachment.media_url_local}`
+  return mediaBlobUrls.value.get(attachment.id) || null
 }
 
 const bubbleClasses = computed(() => {

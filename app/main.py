@@ -8,10 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
-from app.api import webhooks, accounts, messages, ui, events, oauth
+from app.api import webhooks, accounts, messages, ui, events, oauth, auth
 from app.config import settings
 from app.db import init_db, close_db
+from app.db.connection import get_db_session
 from app.version import __version__
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.media_cleanup import periodic_cleanup_task
 import logging
 from pathlib import Path
@@ -223,6 +225,9 @@ app.include_router(events.router, prefix="/api/v1", tags=["events"])
 # Register OAuth routes
 app.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
 
+# Register Auth routes (registration)
+app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
+
 
 @app.get("/")
 async def root():
@@ -316,7 +321,8 @@ async def serve_media(
     sender_id: str,
     filename: str,
     download: bool = False,
-    auth_context: dict = Depends(verify_jwt_or_api_key)
+    auth_context: dict = Depends(verify_jwt_or_api_key),
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Serve media files with authentication.
@@ -327,18 +333,58 @@ async def serve_media(
 
     Path format: /media/{account_id}/{sender_id}/{filename}
     Example: /media/page456/user123/mid_abc123_0.jpg
+    OR: /media/24370771369265571/user123/mid_abc123_0.jpg (Instagram account ID)
 
     Query parameters:
         download: If True, force download with Content-Disposition: attachment
     """
+    # Import here to avoid circular dependency
+    from app.db.models import Account, UserAccount
+    from sqlalchemy import select
+
     # Verify user has access to this account's media
-    # JWT tokens contain account_id, API keys have broader access
+    # JWT tokens contain user_id, API keys have broader access
     if auth_context.get("auth_type") == "jwt":
-        user_account_id = auth_context.get("account_id")
-        if user_account_id != account_id:
+        user_id = auth_context.get("user_id")
+
+        # account_id in URL can be either:
+        # 1. Database account ID (e.g., acc_d13380e14f8c)
+        # 2. Instagram business account ID (e.g., 24370771369265571)
+        # We need to check if the user has access to this account
+
+        # First, try to find account by database ID
+        result = await db.execute(
+            select(Account).where(Account.id == account_id)
+        )
+        account = result.scalar_one_or_none()
+
+        # If not found, try to find by Instagram account ID
+        if not account:
+            result = await db.execute(
+                select(Account).where(Account.instagram_account_id == account_id)
+            )
+            account = result.scalar_one_or_none()
+
+        if not account:
+            logger.warning(f"Account {account_id} not found in database")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Account not found"
+            )
+
+        # Check if user has access to this account
+        result = await db.execute(
+            select(UserAccount).where(
+                UserAccount.user_id == user_id,
+                UserAccount.account_id == account.id
+            )
+        )
+        user_account_link = result.scalar_one_or_none()
+
+        if not user_account_link:
             logger.warning(
-                f"Unauthorized media access attempt: user account {user_account_id} "
-                f"tried to access media from account {account_id}"
+                f"Unauthorized media access attempt: user {user_id} "
+                f"tried to access media from account {account.id}"
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

@@ -252,30 +252,15 @@ class MessageRepository(IMessageRepository):
             logger.debug(f"Username cache hit for {user_id}: {self._username_cache[user_id]}")
             return self._username_cache[user_id]
 
-        # Not in cache, fetch from API
-        try:
-            from app.config import settings
+        # OAuth system: No global token available for username fetching
+        # Username should be fetched via per-account OAuth tokens when needed
+        # For CRM MySQL dual storage, user_id is acceptable fallback
+        logger.debug(
+            f"Username not in cache for {user_id}. "
+            "OAuth system should fetch usernames via per-account tokens. "
+            "Using user_id as fallback for CRM storage."
+        )
 
-            # Instagram Graph API endpoint for user info
-            url = f"https://graph.instagram.com/{user_id}"
-            params = {
-                "fields": "username",
-                "access_token": settings.instagram_page_access_token
-            }
-
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-                data = response.json()
-                username = data.get("username", user_id)
-
-                # Cache the result
-                self._username_cache[user_id] = username
-                logger.info(f"Fetched and cached username for {user_id}: {username}")
-                return username
-
-        except Exception as e:
-            logger.warning(f"Failed to fetch username for {user_id}: {e}. Using user_id as fallback.")
-            # Cache the fallback to avoid repeated failed API calls
-            self._username_cache[user_id] = user_id
-            return user_id
+        # Cache the user_id to avoid repeated lookups
+        self._username_cache[user_id] = user_id
+        return user_id

@@ -75,6 +75,24 @@ async def get_db_session() -> AsyncSession:
             await session.close()
 
 
+async def get_db_session_context():
+    """
+    Get database session for standalone scripts (non-FastAPI context).
+
+    Usage in scripts:
+        async with get_db_session_context() as db:
+            # Use db session here
+            result = await db.execute(select(User))
+
+    This is a proper async context manager, unlike get_db_session which is
+    designed for FastAPI dependency injection.
+    """
+    if async_session_maker is None:
+        raise RuntimeError("Database not initialized. Call init_db() first.")
+
+    return async_session_maker()
+
+
 async def close_db():
     """Close database connection."""
     global engine

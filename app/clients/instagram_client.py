@@ -1,14 +1,12 @@
 """
 Instagram Graph API client for sending messages.
 
-MVP: Uses global access token from settings (single account).
-Phase 6: Will support multiple accounts with account-specific tokens.
+Uses per-account OAuth tokens for multi-account support.
 """
 import httpx
 import logging
 from dataclasses import dataclass
 from typing import Optional
-from app.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -34,34 +32,39 @@ class InstagramAPIError(Exception):
 class InstagramClient:
     """
     Client for Instagram Graph API.
-    
+
     Handles sending messages to Instagram users via the Instagram Graph API.
-    
-    MVP: Uses global access token from settings (single account).
-    TODO (Phase 6): Accept account_id parameter and fetch account-specific token from database.
+    Uses per-account OAuth access tokens from the database.
     """
-    
+
     def __init__(
-        self, 
+        self,
         http_client: httpx.AsyncClient,
-        settings: Settings,
+        access_token: str,
         logger_instance: logging.Logger = logger
     ):
         """
-        Initialize Instagram API client.
-        
+        Initialize Instagram API client with per-account OAuth token.
+
         Args:
             http_client: httpx AsyncClient for making HTTP requests
-            settings: Application settings containing access token
+            access_token: Per-account Instagram access token (required)
             logger_instance: Logger for tracking API calls
-            
-        Note:
-            Assumes access token is valid. Caller should validate before instantiation.
+
+        Raises:
+            ValueError: If access_token is empty or None
         """
+        if not access_token:
+            raise ValueError(
+                "access_token is required. OAuth accounts must provide a valid access token."
+            )
+
         self._http_client = http_client
-        self._settings = settings
         self._logger = logger_instance
         self._api_base_url = "https://graph.instagram.com/v21.0"
+        self._token = access_token
+
+        self._logger.debug("InstagramClient initialized with per-account OAuth token")
     
     async def get_user_profile(self, user_id: str) -> Optional[dict]:
         """
@@ -84,7 +87,7 @@ class InstagramClient:
                 url,
                 params={
                     "fields": "name,username,profile_pic",
-                    "access_token": self._settings.instagram_page_access_token
+                    "access_token": self._token
                 },
                 timeout=5.0
             )
@@ -132,7 +135,7 @@ class InstagramClient:
                 url,
                 params={
                     "fields": "username,profile_picture_url,biography,followers_count",
-                    "access_token": self._settings.instagram_page_access_token
+                    "access_token": self._token
                 },
                 timeout=5.0
             )
@@ -210,7 +213,7 @@ class InstagramClient:
             # Make API request (access token as URL parameter per Instagram best practices)
             response = await self._http_client.post(
                 url,
-                params={"access_token": self._settings.instagram_page_access_token},
+                params={"access_token": self._token},
                 json=payload,
                 timeout=10.0
             )
@@ -350,7 +353,7 @@ class InstagramClient:
             # Make API request
             response = await self._http_client.post(
                 url,
-                params={"access_token": self._settings.instagram_page_access_token},
+                params={"access_token": self._token},
                 json=payload,
                 timeout=30.0  # Longer timeout for media uploads
             )

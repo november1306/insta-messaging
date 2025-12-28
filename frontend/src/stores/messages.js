@@ -66,6 +66,37 @@ export const useMessagesStore = defineStore('messages', () => {
 
   async function sendMessage(formData, onProgress) {
     error.value = null
+
+    // Extract values for optimistic update BEFORE making the request
+    const recipientId = formData.get('recipient_id')
+    const messageText = formData.get('message') || ''
+    const hasFile = formData.get('file') !== null
+
+    // Generate temporary ID for optimistic update
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
+    // Add optimistic update IMMEDIATELY (before API call)
+    const sentMessage = {
+      id: tempId,
+      text: messageText,
+      direction: 'outbound',
+      timestamp: new Date().toISOString(),
+      status: 'pending',
+      attachments: []
+    }
+
+    if (!messages.value[recipientId]) {
+      messages.value[recipientId] = []
+    }
+    messages.value[recipientId].push(sentMessage)
+
+    console.log('[Optimistic] Adding message BEFORE API call:', {
+      id: tempId,
+      text: messageText,
+      recipient_id: recipientId,
+      status: 'pending'
+    })
+
     try {
       // Send FormData directly with progress tracking
       const response = await apiClient.post('/messages/send', formData, {
@@ -80,40 +111,38 @@ export const useMessagesStore = defineStore('messages', () => {
         }
       })
 
-      // Extract values from FormData for optimistic update
-      const recipientId = formData.get('recipient_id')
-      const messageText = formData.get('message') || ''
-      const hasFile = formData.get('file') !== null
+      console.log('[Optimistic] API response received, updating temp message:', {
+        tempId,
+        trackingId: response.data.message_id
+      })
 
-      // Add sent message to local state (optimistic update)
-      const sentMessage = {
-        id: response.data.message_id,
-        text: messageText,
-        direction: 'outbound',
-        timestamp: new Date().toISOString(),
-        status: response.data.status || 'pending',
-        attachments: []
-      }
+      // Update the optimistic message with tracking ID from response
+      const msgIndex = messages.value[recipientId].findIndex(m => m.id === tempId)
+      if (msgIndex >= 0) {
+        messages.value[recipientId][msgIndex].id = response.data.message_id  // Replace temp ID with tracking ID
+        messages.value[recipientId][msgIndex].status = response.data.status || 'sent'
 
-      // Add attachment if present in response
-      if (hasFile && response.data.attachment_local_path) {
-        sentMessage.attachments = [{
-          id: `${response.data.message_id}_0`,
-          media_type: response.data.attachment_type || 'image',
-          media_url: response.data.attachment_url,  // Public URL
-          media_url_local: response.data.attachment_local_path,  // Local path for authenticated fetch
-          attachment_index: 0
-        }]
+        // Add attachment if present in response
+        if (hasFile && response.data.attachment_local_path) {
+          messages.value[recipientId][msgIndex].attachments = [{
+            id: `${response.data.message_id}_0`,
+            media_type: response.data.attachment_type || 'image',
+            media_url: response.data.attachment_url,  // Public URL
+            media_url_local: response.data.attachment_local_path,  // Local path for authenticated fetch
+            attachment_index: 0
+          }]
+        }
       }
-
-      if (!messages.value[recipientId]) {
-        messages.value[recipientId] = []
-      }
-      messages.value[recipientId].push(sentMessage)
 
       // Note: SSE will update the status to 'sent' or 'failed' in real-time
       return response.data
     } catch (err) {
+      // Remove optimistic message on error
+      const msgIndex = messages.value[recipientId].findIndex(m => m.id === tempId)
+      if (msgIndex >= 0) {
+        messages.value[recipientId].splice(msgIndex, 1)
+      }
+
       error.value = err.message
       console.error('Failed to send message:', err)
       throw err
@@ -136,7 +165,8 @@ export const useMessagesStore = defineStore('messages', () => {
         last_message: message.text,
         last_message_time: message.timestamp,
         unread_count: 1,
-        instagram_account_id: message.instagram_account_id
+        messaging_channel_id: message.messaging_channel_id,  // Messaging channel that received the message
+        account_id: message.account_id  // Database account ID for sending messages
       })
     }
 

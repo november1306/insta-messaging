@@ -16,7 +16,7 @@
       </svg>
       <p class="font-semibold text-gray-700 mb-2">No messages yet</p>
       <p class="text-sm text-gray-500 px-4">
-        Start a conversation when someone messages you. You can respond within 24 hours of their last message.
+        Start a conversation when someone messages you.
       </p>
     </div>
 
@@ -66,13 +66,16 @@
               v-if="conversation.hours_remaining !== undefined"
               :class="[
                 'text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap',
+                conversation.hours_remaining <= 0 ? 'bg-gray-200 text-gray-700' :
                 conversation.hours_remaining <= 2 ? 'bg-red-100 text-red-700' :
                 conversation.hours_remaining <= 6 ? 'bg-orange-100 text-orange-700' :
                 'bg-green-100 text-green-700'
               ]"
-              :title="`You can respond for ${conversation.hours_remaining} more hour${conversation.hours_remaining !== 1 ? 's' : ''}`"
+              :title="conversation.hours_remaining <= 0
+                ? 'Response window expired. User must send a new message to reopen.'
+                : `You can respond for ${conversation.hours_remaining} more hour${conversation.hours_remaining !== 1 ? 's' : ''}`"
             >
-              {{ conversation.hours_remaining }}h left
+              {{ conversation.hours_remaining <= 0 ? 'Expired' : `${conversation.hours_remaining}h left` }}
             </span>
           </div>
         </div>

@@ -3,19 +3,115 @@ Authentication dependencies for CRM Integration API
 
 Implements API key validation with database lookup and bcrypt verification.
 Also provides JWT session validation for UI authentication.
+Also provides user registration endpoint for master account creation.
 """
-from fastapi import Header, HTTPException, status, Depends
+from fastapi import Header, HTTPException, status, Depends, APIRouter
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
+from pydantic import BaseModel, Field, field_validator
 import logging
 import jwt
+import re
 
 from app.db.connection import get_db_session
 from app.db.models import APIKey
 from app.services.api_key_service import APIKeyService
+from app.services.user_service import UserService
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Create router for auth endpoints
+router = APIRouter()
+
+
+# ============================================
+# Request/Response Models
+# ============================================
+
+class RegisterRequest(BaseModel):
+    """Request model for user registration"""
+    username: str = Field(..., min_length=3, max_length=50, description="Username for login (3-50 characters)")
+    password: str = Field(..., min_length=8, description="Password (minimum 8 characters)")
+
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        """Validate username format (alphanumeric + underscore)"""
+        if not re.match(r'^[a-zA-Z0-9_]+$', v):
+            raise ValueError('Username must contain only letters, numbers, and underscores')
+        return v
+
+
+class RegisterResponse(BaseModel):
+    """Response model for successful registration"""
+    message: str
+    username: str
+    user_id: int
+
+
+# ============================================
+# Registration Endpoint
+# ============================================
+
+@router.post("/auth/register", response_model=RegisterResponse)
+async def register_user(
+    request: RegisterRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Register a new master user account.
+
+    This creates a master account that can link and manage multiple Instagram OAuth accounts.
+    After registration, the user should login with their credentials to receive a JWT token.
+
+    Args:
+        request: Registration request with username and password
+        db: Database session
+
+    Returns:
+        RegisterResponse: Success message with username and user_id
+
+    Raises:
+        HTTPException: 400 if username already exists
+        HTTPException: 422 if validation fails
+    """
+    try:
+        # Create user via UserService
+        user = await UserService.create_user(
+            db=db,
+            username=request.username,
+            password=request.password
+        )
+
+        logger.info(f"User registered successfully: {user.username} (id={user.id})")
+
+        return RegisterResponse(
+            message="Registration successful. Please login with your credentials.",
+            username=user.username,
+            user_id=user.id
+        )
+
+    except ValueError as e:
+        # Username already exists
+        logger.warning(f"Registration failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        # Unexpected error
+        logger.error(f"Registration error: {type(e).__name__}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Registration failed. Please try again."
+        )
+
+
+# ============================================
+# Authentication Dependencies
+# ============================================
 
 
 async def verify_api_key(
@@ -125,17 +221,26 @@ async def verify_ui_session(
                 detail="Invalid token type. Please login again."
             )
 
-        # Extract account context
-        account_id = payload.get("account_id")
-        if not account_id:
-            logger.warning("UI session rejected: Missing account_id in token")
+        # Extract session context (user_id, username, primary_account_id)
+        user_id = payload.get("user_id")
+        username = payload.get("username")
+        # Support both old "account_id" and new "primary_account_id" for backward compatibility
+        primary_account_id = payload.get("primary_account_id") or payload.get("account_id")
+
+        # user_id is required, but primary_account_id may be None for new users
+        if not user_id:
+            logger.warning("UI session rejected: Missing user_id in token")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token structure. Please login again."
             )
 
-        logger.debug(f"UI session validated for account: {account_id}")
-        return {"account_id": account_id}
+        logger.debug(f"UI session validated for user: {user_id} (account: {primary_account_id})")
+        return {
+            "account_id": primary_account_id,  # Return as account_id for backward compatibility
+            "user_id": user_id,
+            "username": username
+        }
 
     except jwt.ExpiredSignatureError:
         logger.warning("UI session rejected: Token expired")
@@ -189,12 +294,13 @@ async def verify_jwt_or_api_key(
             logger.debug(f"JWT decoded successfully. Payload: {payload}")
 
             if payload.get("type") == "ui_session":
-                account_id = payload.get("account_id")
+                # Support both new "primary_account_id" and old "account_id" for backward compatibility
+                account_id = payload.get("primary_account_id") or payload.get("account_id")
                 if account_id:
                     logger.debug(f"Authenticated via JWT for account: {account_id}")
-                    return {"account_id": account_id, "auth_type": "jwt"}
+                    return {"account_id": account_id, "auth_type": "jwt", "user_id": payload.get("user_id")}
                 else:
-                    logger.warning("JWT validation failed: Missing account_id in token")
+                    logger.warning("JWT validation failed: Missing account_id/primary_account_id in token")
             else:
                 logger.warning(f"JWT validation failed: Invalid token type '{payload.get('type')}'")
         except Exception as e:
