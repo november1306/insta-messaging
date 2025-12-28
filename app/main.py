@@ -33,6 +33,23 @@ class SensitiveDataFilter(logging.Filter):
             if 'access_token=' in msg:
                 msg = msg.split('access_token=')[0] + 'access_token=[REDACTED]'
 
+            # Redact access tokens in JSON/dict representations (defense-in-depth)
+            # Catches: 'access_token': 'IGAA...' or "access_token": "IGAA..."
+            msg = re.sub(
+                r"(['\"]access_token['\"]:\s*['\"])(IG[A-Za-z0-9_-]+|EA[A-Za-z0-9]+)(['\"])",
+                r"\1[REDACTED]\3",
+                msg
+            )
+
+            # Redact user_id in OAuth contexts (can be used to identify accounts)
+            # Only redact when appears with access_token context
+            if 'access_token' in msg.lower() or 'oauth' in msg.lower():
+                msg = re.sub(
+                    r"(['\"]user_id['\"]:\s*['\"]?)(\d{10,})(['\"]?)",
+                    r"\1[REDACTED]\3",
+                    msg
+                )
+
             # Redact JWT tokens
             if 'eyJ' in msg and 'token' in msg.lower():
                 msg = re.sub(r'eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*', '[JWT_REDACTED]', msg)
@@ -71,6 +88,48 @@ async def lifespan(app: FastAPI):
 
     # Initialize database
     await init_db()
+
+    # Check for encrypted data with ephemeral SESSION_SECRET (development only)
+    if hasattr(settings, '_using_ephemeral_secret') and settings._using_ephemeral_secret:
+        try:
+            from app.db.connection import get_db_session
+            from app.db.models import Account
+            from sqlalchemy import select
+
+            async for db in get_db_session():
+                result = await db.execute(
+                    select(Account).where(Account.access_token_encrypted.isnot(None))
+                )
+                accounts_with_tokens = result.scalars().all()
+
+                if accounts_with_tokens:
+                    logger.error(
+                        "\n"
+                        "╔════════════════════════════════════════════════════════════════════════════╗\n"
+                        "║  🚨 DATA LOSS WARNING: Encrypted tokens found with ephemeral secret!      ║\n"
+                        "╠════════════════════════════════════════════════════════════════════════════╣\n"
+                        "║                                                                            ║\n"
+                        f"║  Found {len(accounts_with_tokens)} account(s) with encrypted OAuth tokens in database.          ║\n"
+                        "║                                                                            ║\n"
+                        "║  ⚠️  These tokens are encrypted with a PREVIOUS SESSION_SECRET.            ║\n"
+                        "║  ⚠️  Current session is using a RANDOM ephemeral secret.                  ║\n"
+                        "║  ⚠️  Tokens CANNOT be decrypted - accounts cannot authenticate!           ║\n"
+                        "║                                                                            ║\n"
+                        "║  SOLUTIONS:                                                                ║\n"
+                        "║                                                                            ║\n"
+                        "║  Option 1: Use the original SESSION_SECRET from when tokens were stored   ║\n"
+                        "║            (recommended if you have it)                                    ║\n"
+                        "║                                                                            ║\n"
+                        "║  Option 2: Delete database and have users re-authenticate                 ║\n"
+                        "║            rm instagram_automation.db                                      ║\n"
+                        "║                                                                            ║\n"
+                        "║  Then set a permanent SESSION_SECRET in .env to prevent this again.       ║\n"
+                        "║                                                                            ║\n"
+                        "╚════════════════════════════════════════════════════════════════════════════╝\n"
+                    )
+                break  # Exit async generator
+        except Exception as e:
+            logger.error(f"Failed to check for encrypted data: {e}")
 
     # Create media directory for Instagram attachments
     media_dir = Path(__file__).parent.parent / "media"

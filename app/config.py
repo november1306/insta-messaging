@@ -55,6 +55,9 @@ class Settings:
             self._warn_missing_credentials()
 
         # JWT/Session configuration for UI authentication
+        # Track whether we're using an ephemeral (non-persistent) secret
+        self._using_ephemeral_secret = False
+
         if self.environment == "production":
             self.session_secret = self._get_required("SESSION_SECRET")
         else:
@@ -67,10 +70,34 @@ class Settings:
                 import secrets
                 self.session_secret = secrets.token_urlsafe(32)
                 import logging
-                logging.getLogger(__name__).warning(
-                    "⚠️  No SESSION_SECRET provided - generated random secret for this session. "
-                    "JWT tokens will not persist across restarts. Set SESSION_SECRET in .env for persistent tokens."
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "\n"
+                    "╔════════════════════════════════════════════════════════════════════════════╗\n"
+                    "║  ⚠️  CRITICAL SECURITY WARNING: No SESSION_SECRET configured               ║\n"
+                    "╠════════════════════════════════════════════════════════════════════════════╣\n"
+                    "║                                                                            ║\n"
+                    "║  Generated random SESSION_SECRET for this session ONLY.                   ║\n"
+                    "║                                                                            ║\n"
+                    "║  CONSEQUENCES:                                                             ║\n"
+                    "║  ❌ JWT tokens will be INVALID after restart (users logged out)            ║\n"
+                    "║  ❌ Encrypted OAuth tokens in database will become UNDECRYPTABLE           ║\n"
+                    "║  ❌ All connected Instagram accounts will need to re-authenticate          ║\n"
+                    "║                                                                            ║\n"
+                    "║  ACTION REQUIRED:                                                          ║\n"
+                    "║  1. Generate a permanent secret:                                          ║\n"
+                    "║     python -c \"import secrets; print(secrets.token_urlsafe(32))\"          ║\n"
+                    "║                                                                            ║\n"
+                    "║  2. Add to .env file:                                                      ║\n"
+                    "║     SESSION_SECRET=<generated-secret-here>                                 ║\n"
+                    "║                                                                            ║\n"
+                    "║  3. NEVER change SESSION_SECRET after storing encrypted data              ║\n"
+                    "║     (requires re-encrypting all OAuth tokens in production)                ║\n"
+                    "║                                                                            ║\n"
+                    "╚════════════════════════════════════════════════════════════════════════════╝\n"
                 )
+                # Store flag to check for encrypted data later
+                self._using_ephemeral_secret = True
 
         self.jwt_algorithm = os.getenv("JWT_ALGORITHM", "HS256")
         self.jwt_expiration_hours = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))

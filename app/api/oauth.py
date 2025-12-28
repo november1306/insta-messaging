@@ -314,8 +314,12 @@ async def instagram_oauth_callback(
 
             token_data = token_response.json()
 
-            # Log the FULL token response to see what Instagram returns
-            logger.info(f"Instagram OAuth token response: {token_data}")
+            # Log sanitized token response (SECURITY: Never log access tokens)
+            sanitized_token_data = {
+                k: '[REDACTED]' if k in ['access_token', 'user_id'] else v
+                for k, v in token_data.items()
+            }
+            logger.info(f"Instagram OAuth token response: {sanitized_token_data}")
 
             if "error_type" in token_data or "error" in token_data:
                 error_msg = token_data.get("error_message") or token_data.get("error", {}).get("message", "Unknown error")
