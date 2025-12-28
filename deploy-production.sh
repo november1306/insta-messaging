@@ -338,92 +338,20 @@ echo -e "${GREEN}[11/13] Configuring Nginx reverse proxy...${NC}"
 # Remove default site
 rm -f /etc/nginx/sites-enabled/default
 
-# Create nginx config
-cat > /etc/nginx/sites-available/${APP_NAME} <<'EOF'
-server {
-    listen 80;
-    listen [::]:80;
-    server_name _;
-
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-
-    # Client body size
-    client_max_body_size 10M;
-
-    # Logging
-    access_log /var/log/nginx/insta-messaging-access.log;
-    error_log /var/log/nginx/insta-messaging-error.log;
-
-    # Frontend (served from /chat/ path)
-    location /chat/ {
-        alias /opt/insta-messaging/frontend/dist/;
-        try_files $uri $uri/ /chat/index.html;
-        add_header Cache-Control "no-cache";
-    }
-
-    # Root redirects to /chat/
-    location = / {
-        return 301 /chat/;
-    }
-
-    # API endpoints
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000/api/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-    }
-
-    # Webhooks
-    location /webhooks/ {
-        proxy_pass http://127.0.0.1:8000/webhooks/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Media files (authenticated Instagram attachments)
-    location /media/ {
-        proxy_pass http://127.0.0.1:8000/media/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Health check endpoint
-    location /health {
-        proxy_pass http://127.0.0.1:8000/health;
-        access_log off;
-    }
-
-    # API docs
-    location /docs {
-        proxy_pass http://127.0.0.1:8000/docs;
-    }
-
-    location /openapi.json {
-        proxy_pass http://127.0.0.1:8000/openapi.json;
-    }
-}
-EOF
+# Copy nginx config from repository (includes SSE support)
+echo "Installing nginx configuration from repository..."
+cp ${INSTALL_DIR}/deploy/nginx/insta-messaging.conf /etc/nginx/sites-available/${APP_NAME}
 
 # Enable site
 ln -sf /etc/nginx/sites-available/${APP_NAME} /etc/nginx/sites-enabled/
 
 # Test nginx config
-nginx -t
+if nginx -t; then
+    echo "✅ Nginx configuration is valid"
+else
+    echo "❌ Nginx configuration test failed!"
+    exit 1
+fi
 
 echo -e "${GREEN}[12/13] Configuring firewall (UFW)...${NC}"
 # Allow SSH, HTTP, HTTPS
