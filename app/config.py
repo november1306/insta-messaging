@@ -99,6 +99,20 @@ class Settings:
         # Frontend URL for OAuth redirects
         self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
+        # CORS origins (comma-separated list)
+        # Defaults to PUBLIC_BASE_URL and FRONTEND_URL in production
+        cors_origins_env = os.getenv("CORS_ORIGINS", "")
+        if cors_origins_env:
+            self.cors_origins = cors_origins_env
+        else:
+            # Auto-generate from PUBLIC_BASE_URL and FRONTEND_URL
+            origins = []
+            if self.public_base_url and self.public_base_url != "http://localhost:8000":
+                origins.append(self.public_base_url)
+            if self.frontend_url and self.frontend_url != "http://localhost:5173":
+                origins.append(self.frontend_url)
+            self.cors_origins = ",".join(origins) if origins else ""
+
         # CRM webhook configuration
         self.crm_webhook_timeout = float(os.getenv("CRM_WEBHOOK_TIMEOUT", "10.0"))  # seconds
 
