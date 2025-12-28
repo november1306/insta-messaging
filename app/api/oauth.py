@@ -110,7 +110,7 @@ def create_oauth_error_html(title: str, message: str, details: str = None) -> st
                 <h1>{title}</h1>
                 <p>{message}</p>
                 {details_html}
-                <a href="{settings.frontend_url}/chat/">Return to Chat</a>
+                <a href="{settings.frontend_url}">Return to Chat</a>
             </div>
         </body>
     </html>
@@ -245,7 +245,7 @@ async def instagram_oauth_callback(
                         <h1 style="color: #e74c3c;">OAuth Error</h1>
                         <p><strong>Error:</strong> {error}</p>
                         <p><strong>Description:</strong> {error_description or 'No description provided'}</p>
-                        <p><a href="{settings.frontend_url}/chat/">Return to Chat</a></p>
+                        <p><a href="{settings.frontend_url}">Return to Chat</a></p>
                     </body>
                 </html>
                 """,
@@ -517,7 +517,7 @@ async def instagram_oauth_callback(
                                     </a>
                                 </p>
 
-                                <a href="{settings.frontend_url}/chat/" class="button">
+                                <a href="{settings.frontend_url}" class="button">
                                     Return to Chat
                                 </a>
                             </div>
@@ -686,7 +686,7 @@ async def instagram_oauth_callback(
                             localStorage.removeItem('session_expires_at');
 
                             // Redirect to frontend chat
-                            window.location.href = '{settings.frontend_url}/chat/';
+                            window.location.href = '{settings.frontend_url}';
                         }}
 
                         // Auto-refresh after 3 seconds
@@ -737,7 +737,7 @@ async def instagram_oauth_callback(
                     <h1 style="color: #e74c3c;">❌ OAuth Error</h1>
                     <p><strong>Error:</strong> {str(e)}</p>
                     <p>Please check the logs for more details.</p>
-                    <p><a href="{settings.frontend_url}/chat/">Return to Chat</a></p>
+                    <p><a href="{settings.frontend_url}">Return to Chat</a></p>
                 </body>
             </html>
             """,
