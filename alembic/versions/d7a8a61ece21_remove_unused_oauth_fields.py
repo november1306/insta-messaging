@@ -29,22 +29,66 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Remove unused fields from accounts table
+    from sqlalchemy import inspect
+    from sqlalchemy.exc import OperationalError
+
+    bind = op.get_bind()
+    inspector = inspect(bind)
+
+    # Remove unused fields from accounts table if they exist
+    accounts_columns = [col['name'] for col in inspector.get_columns('accounts')]
+
+    # Clean up any leftover temp tables from previous failed runs
+    try:
+        op.execute('DROP TABLE IF EXISTS _alembic_tmp_accounts')
+    except:
+        pass
+
     with op.batch_alter_table('accounts', schema=None) as batch_op:
-        batch_op.drop_column('refresh_token_encrypted')
-        batch_op.drop_column('last_synced_at')
-        batch_op.drop_column('oauth_user_id')
+        if 'refresh_token_encrypted' in accounts_columns:
+            batch_op.drop_column('refresh_token_encrypted')
+        if 'last_synced_at' in accounts_columns:
+            batch_op.drop_column('last_synced_at')
+        if 'oauth_user_id' in accounts_columns:
+            batch_op.drop_column('oauth_user_id')
 
-    # Remove unused OAuth fields from users table
+    # Remove unused OAuth fields from users table if they exist
+    users_columns = [col['name'] for col in inspector.get_columns('users')]
+    users_indexes = [idx['name'] for idx in inspector.get_indexes('users')]
+
+    # Clean up any leftover temp tables from previous failed runs
+    try:
+        op.execute('DROP TABLE IF EXISTS _alembic_tmp_users')
+    except:
+        pass
+
     with op.batch_alter_table('users', schema=None) as batch_op:
-        batch_op.drop_index('idx_users_oauth_provider')
-        batch_op.drop_column('oauth_provider')
-        batch_op.drop_column('oauth_provider_id')
-        batch_op.drop_column('oauth_email')
+        # Drop index idx_oauth_provider (not idx_users_oauth_provider!)
+        if 'idx_oauth_provider' in users_indexes:
+            try:
+                batch_op.drop_index('idx_oauth_provider')
+            except (OperationalError, KeyError, ValueError):
+                pass  # Index doesn't exist or already dropped
 
-    # Remove role field from user_accounts table
+        if 'oauth_provider' in users_columns:
+            batch_op.drop_column('oauth_provider')
+        if 'oauth_provider_id' in users_columns:
+            batch_op.drop_column('oauth_provider_id')
+        if 'oauth_email' in users_columns:
+            batch_op.drop_column('oauth_email')
+
+    # Remove role field from user_accounts table if it exists
+    user_accounts_columns = [col['name'] for col in inspector.get_columns('user_accounts')]
+
+    # Clean up any leftover temp tables from previous failed runs
+    try:
+        op.execute('DROP TABLE IF EXISTS _alembic_tmp_user_accounts')
+    except:
+        pass
+
     with op.batch_alter_table('user_accounts', schema=None) as batch_op:
-        batch_op.drop_column('role')
+        if 'role' in user_accounts_columns:
+            batch_op.drop_column('role')
 
 
 def downgrade() -> None:
@@ -57,7 +101,8 @@ def downgrade() -> None:
         batch_op.add_column(sa.Column('oauth_provider', sa.String(50), nullable=True))
         batch_op.add_column(sa.Column('oauth_provider_id', sa.String(100), nullable=True))
         batch_op.add_column(sa.Column('oauth_email', sa.String(255), nullable=True))
-        batch_op.create_index('idx_users_oauth_provider', ['oauth_provider', 'oauth_provider_id'])
+        # Use correct index name: idx_oauth_provider (not idx_users_oauth_provider)
+        batch_op.create_index('idx_oauth_provider', ['oauth_provider', 'oauth_provider_id'])
 
     # Re-add Account unused fields
     with op.batch_alter_table('accounts', schema=None) as batch_op:
