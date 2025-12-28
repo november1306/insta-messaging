@@ -21,8 +21,9 @@ class Settings:
             self.facebook_verify_token = self._get_required("FACEBOOK_VERIFY_TOKEN")
             self.facebook_app_secret = self._get_required("FACEBOOK_APP_SECRET")
             self.instagram_app_secret = self._get_required("INSTAGRAM_APP_SECRET")
-            self.instagram_page_access_token = self._get_required("INSTAGRAM_PAGE_ACCESS_TOKEN")
-            self.instagram_business_account_id = self._get_required("INSTAGRAM_BUSINESS_ACCOUNT_ID")
+            # Legacy credentials removed - OAuth system uses per-account tokens stored in database
+            self.instagram_page_access_token = os.getenv("INSTAGRAM_PAGE_ACCESS_TOKEN", "")
+            self.instagram_business_account_id = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
             
             # Reject test secrets in production
             if self.facebook_app_secret == DEV_SECRET_PLACEHOLDER:
@@ -74,6 +75,14 @@ class Settings:
         self.jwt_algorithm = os.getenv("JWT_ALGORITHM", "HS256")
         self.jwt_expiration_hours = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
 
+        # Instagram OAuth configuration
+        self.instagram_oauth_client_id = os.getenv("INSTAGRAM_OAUTH_CLIENT_ID", "")
+        self.instagram_oauth_client_secret = os.getenv("INSTAGRAM_OAUTH_CLIENT_SECRET", "")
+        self.instagram_oauth_redirect_uri = os.getenv(
+            "INSTAGRAM_OAUTH_REDIRECT_URI",
+            "http://localhost:8000/oauth/instagram/callback"
+        )
+
         # Server configuration
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "8000"))
@@ -86,6 +95,9 @@ class Settings:
 
         # Public base URL for outbound media (required for Instagram API to fetch attachments)
         self.public_base_url = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
+
+        # Frontend URL for OAuth redirects
+        self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
         # CRM webhook configuration
         self.crm_webhook_timeout = float(os.getenv("CRM_WEBHOOK_TIMEOUT", "10.0"))  # seconds
@@ -119,9 +131,8 @@ class Settings:
         required_credentials = {
             "FACEBOOK_VERIFY_TOKEN": "Required for webhook verification. Create a custom token string (e.g., 'my_webhook_token_123').",
             "FACEBOOK_APP_SECRET": "Required for Facebook webhook signature validation. Get from: https://developers.facebook.com/apps/YOUR_APP_ID/settings/basic/",
-            "INSTAGRAM_APP_SECRET": "Required for Instagram webhook signature validation. Get from Instagram app settings.",
-            "INSTAGRAM_PAGE_ACCESS_TOKEN": "Required for sending messages. Generate from Facebook App Dashboard → Instagram → User Token Generator.",
-            "INSTAGRAM_BUSINESS_ACCOUNT_ID": "Required for send message API. This is your Instagram Business Account ID (recipient_id from inbound messages)."
+            "INSTAGRAM_APP_SECRET": "Required for Instagram webhook signature validation. Get from Instagram app settings."
+            # Legacy credentials removed - OAuth system stores per-account tokens in database
         }
         
         # Check which credentials are missing or empty

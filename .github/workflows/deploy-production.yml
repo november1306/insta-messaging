@@ -49,8 +49,12 @@ jobs:
             FACEBOOK_VERIFY_TOKEN=${{ secrets.FACEBOOK_VERIFY_TOKEN }}
             FACEBOOK_APP_SECRET=${{ secrets.FACEBOOK_APP_SECRET }}
             INSTAGRAM_APP_SECRET=${{ secrets.INSTAGRAM_APP_SECRET }}
-            INSTAGRAM_PAGE_ACCESS_TOKEN=${{ secrets.INSTAGRAM_PAGE_ACCESS_TOKEN }}
-            INSTAGRAM_BUSINESS_ACCOUNT_ID=${{ secrets.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
+            # Legacy credentials removed - OAuth system uses per-account tokens in database
+
+            # Instagram OAuth Configuration (Multi-Account Support)
+            INSTAGRAM_OAUTH_CLIENT_ID=${{ secrets.INSTAGRAM_OAUTH_CLIENT_ID }}
+            INSTAGRAM_OAUTH_CLIENT_SECRET=${{ secrets.INSTAGRAM_OAUTH_CLIENT_SECRET }}
+            INSTAGRAM_OAUTH_REDIRECT_URI=${{ secrets.INSTAGRAM_OAUTH_REDIRECT_URI }}
 
             # Server Configuration
             HOST=0.0.0.0
@@ -62,6 +66,9 @@ jobs:
 
             # Public Base URL (required for outbound media attachments)
             PUBLIC_BASE_URL=${{ secrets.PUBLIC_BASE_URL || 'http://185.156.43.172' }}
+
+            # Frontend URL (for OAuth redirects)
+            FRONTEND_URL=${{ secrets.FRONTEND_URL || 'http://185.156.43.172/chat' }}
 
             # CRM MySQL Configuration (optional)
             CRM_MYSQL_ENABLED=${{ secrets.CRM_MYSQL_ENABLED || 'false' }}
@@ -284,8 +291,12 @@ jobs:
             FACEBOOK_VERIFY_TOKEN=${{ secrets.FACEBOOK_VERIFY_TOKEN }}
             FACEBOOK_APP_SECRET=${{ secrets.FACEBOOK_APP_SECRET }}
             INSTAGRAM_APP_SECRET=${{ secrets.INSTAGRAM_APP_SECRET }}
-            INSTAGRAM_PAGE_ACCESS_TOKEN=${{ secrets.INSTAGRAM_PAGE_ACCESS_TOKEN }}
-            INSTAGRAM_BUSINESS_ACCOUNT_ID=${{ secrets.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
+            # Legacy credentials removed - OAuth system uses per-account tokens in database
+
+            # Instagram OAuth Configuration (Multi-Account Support)
+            INSTAGRAM_OAUTH_CLIENT_ID=${{ secrets.INSTAGRAM_OAUTH_CLIENT_ID }}
+            INSTAGRAM_OAUTH_CLIENT_SECRET=${{ secrets.INSTAGRAM_OAUTH_CLIENT_SECRET }}
+            INSTAGRAM_OAUTH_REDIRECT_URI=${{ secrets.INSTAGRAM_OAUTH_REDIRECT_URI }}
 
             # Server Configuration
             HOST=0.0.0.0
@@ -297,6 +308,9 @@ jobs:
 
             # Public Base URL (required for outbound media attachments)
             PUBLIC_BASE_URL=${{ secrets.PUBLIC_BASE_URL || 'http://185.156.43.172' }}
+
+            # Frontend URL (for OAuth redirects)
+            FRONTEND_URL=${{ secrets.FRONTEND_URL || 'http://185.156.43.172/chat' }}
 
             # CRM MySQL Configuration (optional)
             CRM_MYSQL_ENABLED=${{ secrets.CRM_MYSQL_ENABLED || 'false' }}

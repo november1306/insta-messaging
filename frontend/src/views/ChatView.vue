@@ -1,50 +1,42 @@
 <template>
   <div class="flex h-screen bg-white">
-    <!-- Left Sidebar: Conversation List -->
+    <!-- Left Sidebar: Account Selector (Master Account + Instagram Accounts) -->
+    <div class="w-72 border-r border-instagram-border">
+      <AccountSelector :sse-connected="sseConnected" :sse-error="sseError" />
+    </div>
+
+    <!-- Center: Conversation List (Contacts for Selected Instagram Account) -->
     <div class="w-96 border-r border-instagram-border flex flex-col">
-      <!-- Header -->
+      <!-- Contacts Header -->
       <div class="border-b border-instagram-border bg-white">
-        <!-- Account Info -->
-        <div class="px-6 py-4 border-b border-instagram-border">
-          <div v-if="store.currentAccount" class="flex items-center gap-3">
+        <!-- Active Instagram Account Header -->
+        <div v-if="accountsStore.selectedAccount" class="px-6 py-4 border-b border-instagram-border">
+          <div class="flex items-center gap-3">
             <img
-              v-if="store.currentAccount.profile_picture_url"
-              :src="getProxiedImageUrl(store.currentAccount.profile_picture_url)"
-              :alt="store.currentAccount.username"
-              class="w-12 h-12 rounded-full object-cover shadow-sm"
+              v-if="accountsStore.selectedAccount.profile_picture_url"
+              :src="getProxiedImageUrl(accountsStore.selectedAccount.profile_picture_url)"
+              :alt="accountsStore.selectedAccount.username"
+              class="w-10 h-10 rounded-full object-cover shadow-sm"
             />
             <div
               v-else
-              class="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-500 flex items-center justify-center text-white font-bold text-lg shadow-sm"
+              class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-500 flex items-center justify-center text-white font-bold shadow-sm"
             >
-              {{ getAccountInitial(store.currentAccount.username) }}
+              {{ getAccountInitial(accountsStore.selectedAccount.username) }}
             </div>
             <div class="flex-1 min-w-0">
-              <div class="font-semibold text-base truncate">{{ store.currentAccount.username }}</div>
-              <div class="text-xs text-gray-500 truncate">Business account</div>
-            </div>
-            <button
-              @click="handleLogout"
-              class="text-gray-600 hover:text-red-600 transition-colors p-2 hover:bg-gray-50 rounded-full"
-              title="Logout"
-            >
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
-          </div>
-          <div v-else class="flex items-center gap-3">
-            <div class="w-12 h-12 rounded-full bg-gray-200 animate-pulse"></div>
-            <div class="flex-1">
-              <div class="h-4 bg-gray-200 rounded animate-pulse mb-2"></div>
-              <div class="h-3 bg-gray-200 rounded animate-pulse w-2/3"></div>
+              <div class="font-semibold text-sm truncate">@{{ accountsStore.selectedAccount.username }}</div>
+              <div class="text-xs text-gray-500 truncate">Active Instagram account</div>
             </div>
           </div>
+        </div>
+        <div v-else class="px-6 py-4 border-b border-instagram-border">
+          <div class="text-sm text-gray-500 text-center">No Instagram account selected</div>
         </div>
 
         <!-- Messages Header -->
         <div class="h-14 flex items-center justify-between px-6">
-          <h1 class="text-xl font-bold">Messages</h1>
+          <h1 class="text-xl font-bold">Contacts</h1>
           <button
             @click="refreshConversations"
             class="text-instagram-blue hover:text-blue-700 transition-colors p-2 hover:bg-gray-50 rounded-full"
@@ -59,14 +51,14 @@
 
       <!-- Conversation List -->
       <ConversationList
-        :conversations="store.conversations"
+        :conversations="filteredConversations"
         :active-id="store.activeConversationId"
         :loading="store.loading"
         @select="handleSelectConversation"
       />
     </div>
 
-    <!-- Center: Message Thread -->
+    <!-- Right: Message Thread -->
     <div class="flex-1 flex flex-col">
       <MessageThread
         v-if="store.activeConversationId"
@@ -84,45 +76,49 @@
         </div>
       </div>
     </div>
-
-    <!-- Right Sidebar: Details -->
-    <div class="w-80 border-l border-instagram-border">
-      <ConversationDetails
-        v-if="store.activeConversation"
-        :conversation="store.activeConversation"
-      />
-    </div>
-
-    <!-- SSE Connection Status -->
-    <div
-      v-if="sseError"
-      class="fixed bottom-4 right-4 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg"
-    >
-      {{ sseError }}
-    </div>
-    <div
-      v-else-if="sseConnected"
-      class="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg text-sm"
-    >
-      ✓ Real-time updates active
-    </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessagesStore } from '../stores/messages'
 import { useSessionStore } from '../stores/session'
+import { useAccountsStore } from '../stores/accounts'
 import { useSSE } from '../composables/useSSE'
 import { getProxiedImageUrl } from '../composables/useImageProxy'
+import apiClient from '../api/client'
 import ConversationList from '../components/ConversationList.vue'
 import MessageThread from '../components/MessageThread.vue'
-import ConversationDetails from '../components/ConversationDetails.vue'
+import AccountSelector from '../components/AccountSelector.vue'
 
 const router = useRouter()
 const store = useMessagesStore()
 const sessionStore = useSessionStore()
+const accountsStore = useAccountsStore()
+
+// Filter conversations by selected messaging channel
+const filteredConversations = computed(() => {
+  if (!accountsStore.selectedAccount) {
+    return []
+  }
+
+  // Filter conversations where the messaging_channel_id matches selected account's channel
+  return store.conversations.filter(conversation => {
+    // Conversations have messaging_channel_id which is the unique channel that received the message
+    return conversation.messaging_channel_id === accountsStore.selectedAccount.messaging_channel_id
+  })
+})
+
+// Watch for account changes and refresh conversations
+watch(
+  () => accountsStore.selectedAccountId,
+  async (newAccountId, oldAccountId) => {
+    if (newAccountId && newAccountId !== oldAccountId) {
+      await refreshConversations()
+    }
+  }
+)
 
 // SSE connection for real-time updates
 const { connected: sseConnected, error: sseError } = useSSE(
@@ -131,8 +127,6 @@ const { connected: sseConnected, error: sseError } = useSSE(
 )
 
 function handleSSEMessage(data) {
-  console.log('SSE message received:', data)
-
   switch (data.event) {
     case 'new_message':
       // Handle both inbound and outbound messages
@@ -149,7 +143,22 @@ function handleSSEMessage(data) {
           store.messages[recipientId] = []
         }
 
-        const existingIndex = store.messages[recipientId].findIndex(m => m.id === data.data.id)
+        // Match by tracking_message_id (optimistic update) or id (Instagram message ID)
+        let existingIndex = store.messages[recipientId].findIndex(m =>
+          m.id === data.data.id ||
+          (data.data.tracking_message_id && m.id === data.data.tracking_message_id)
+        )
+
+        // Fallback: If not found by ID, check for recent outbound message with same text
+        // This handles race condition where SSE arrives before temp ID is updated to tracking ID
+        if (existingIndex === -1) {
+          const fiveSecondsAgo = Date.now() - 5000
+          existingIndex = store.messages[recipientId].findIndex(m =>
+            m.direction === 'outbound' &&
+            m.text === data.data.text &&
+            new Date(m.timestamp).getTime() > fiveSecondsAgo
+          )
+        }
 
         if (existingIndex >= 0) {
           // Update existing message with SSE data (includes attachments)
@@ -160,7 +169,6 @@ function handleSSEMessage(data) {
           }
         } else {
           // Add new outbound message from SSE (e.g., sent from another tab)
-          // Add to recipient's conversation, not sender's
           store.messages[recipientId].push(data.data)
         }
       }
@@ -168,8 +176,6 @@ function handleSSEMessage(data) {
     case 'message_status':
       store.updateMessageStatus(data.data.message_id, data.data.status, data.data.error)
       break
-    default:
-      console.warn('Unknown SSE event:', data.event)
   }
 }
 
@@ -205,24 +211,13 @@ function getAccountInitial(username) {
   return cleanName[0]?.toUpperCase() || '?'
 }
 
-function handleLogout() {
-  console.log('[ChatView] Logging out...')
-  sessionStore.logout()
-  router.push('/login')
-}
-
 onMounted(async () => {
-  // Initialize session before making any API calls
-  // This will either restore from localStorage or redirect to login
   const sessionReady = await sessionStore.ensureSession()
 
   if (!sessionReady) {
-    console.error('Failed to initialize session - redirecting to login')
-    // Router guard will handle redirect to login page
     return
   }
 
-  // Session is ready, fetch data
   await Promise.all([
     store.fetchCurrentAccount(),
     store.fetchConversations()

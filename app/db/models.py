@@ -3,7 +3,7 @@ SQLAlchemy ORM models for database tables.
 
 YAGNI: Start minimal, add tables only when needed.
 """
-from sqlalchemy import Column, String, Text, DateTime, Index, ForeignKey, Boolean, Integer, Enum
+from sqlalchemy import Column, String, Text, DateTime, Index, ForeignKey, Boolean, Integer, Enum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
@@ -90,23 +90,39 @@ class MessageAttachment(Base):
 
 class Account(Base):
     """
-    Instagram business accounts for CRM integration.
-    
+    Instagram business accounts for CRM integration and OAuth.
+
     Stores account credentials and webhook configuration.
-    Minimal fields for MVP - add more later if needed.
+    Now supports both CRM-configured accounts and OAuth-linked accounts.
+
+    OAuth fields: token_expires_at, profile_picture_url, account_type
+    CRM fields: crm_webhook_url, webhook_secret (now nullable for OAuth-only accounts)
     """
     __tablename__ = "accounts"
-    
+
     id = Column(String(50), primary_key=True)  # Our internal account ID
-    instagram_account_id = Column(String(50), unique=True, nullable=False)  # Instagram's account ID
+    instagram_account_id = Column(String(50), unique=True, nullable=False)  # Instagram's OAuth profile ID (public)
     username = Column(String(100), nullable=False)  # Instagram username
-    access_token_encrypted = Column(Text, nullable=False)  # Encrypted Instagram access token
-    crm_webhook_url = Column(String(500), nullable=False)  # Where to send webhooks
-    webhook_secret = Column(String(100), nullable=False)  # For webhook signature
+    messaging_channel_id = Column(String(50), unique=True, nullable=True)  # Messaging channel ID from webhook entry.id (stable, used for routing)
+    access_token_encrypted = Column(Text, nullable=False)  # Encrypted Instagram access token (Fernet)
+
+    # OAuth-specific fields
+    token_expires_at = Column(DateTime, nullable=True)  # When access token expires (60 days for long-lived tokens)
+    profile_picture_url = Column(String(500), nullable=True)  # Profile picture URL from Instagram Graph API
+
+    # OAuth tracking fields (for debugging and support)
+    account_type = Column(String(20), nullable=True)  # 'business', 'creator', 'unknown' - kept for debugging
+
+    # CRM integration fields (now nullable for OAuth-only accounts)
+    crm_webhook_url = Column(String(500), nullable=True)  # Where to send webhooks (optional for OAuth accounts)
+    webhook_secret = Column(String(100), nullable=True)  # For webhook signature (optional for OAuth accounts)
+
     created_at = Column(DateTime, nullable=False, default=func.now())  # Python + DB default for defense-in-depth
-    
+
     __table_args__ = (
         Index('idx_instagram_account_id', 'instagram_account_id'),
+        Index('idx_messaging_channel_id', 'messaging_channel_id'),  # For webhook routing by entry.id
+        Index('idx_token_expires_at', 'token_expires_at'),  # For token refresh background tasks
     )
 
 
@@ -164,8 +180,8 @@ class APIKey(Base):
     expires_at = Column(DateTime, nullable=True)  # Optional expiration
 
     __table_args__ = (
-        Index('idx_key_prefix', 'key_prefix'),
-        Index('idx_is_active', 'is_active'),
+        Index('idx_api_keys_key_prefix', 'key_prefix'),
+        Index('idx_api_keys_is_active', 'is_active'),
     )
 
 
@@ -201,10 +217,71 @@ class User(Base):
     username = Column(String(50), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)  # bcrypt hash
     is_active = Column(Boolean, nullable=False, default=True)  # Allow deactivation
+
     created_at = Column(DateTime, nullable=False, default=func.now())
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 
     __table_args__ = (
-        Index('idx_username', 'username'),
-        Index('idx_is_active', 'is_active'),
+        Index('idx_users_username', 'username'),
+        Index('idx_users_is_active', 'is_active'),
+    )
+
+
+# ============================================
+# OAuth Models
+# ============================================
+
+class UserAccount(Base):
+    """
+    User-Account relationship (many-to-many).
+
+    Links users to their Instagram business accounts.
+    Supports multiple accounts per user and multiple users per account (team collaboration).
+
+    Fields:
+    - is_primary: User's default account for sending messages
+    """
+    __tablename__ = "user_accounts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    account_id = Column(String(50), ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
+    is_primary = Column(Boolean, nullable=False, default=False)  # User's default account
+    linked_at = Column(DateTime, nullable=False, default=func.now())
+
+    __table_args__ = (
+        Index('idx_user_accounts_user_id', 'user_id'),
+        Index('idx_user_accounts_account_id', 'account_id'),
+        Index('idx_user_accounts_user_primary', 'user_id', 'is_primary'),  # Fast lookup for primary account
+        UniqueConstraint('user_id', 'account_id', name='uq_user_account'),  # Prevent duplicate links
+        {'sqlite_autoincrement': True}  # Ensure autoincrement works on SQLite
+    )
+
+
+class OAuthState(Base):
+    """
+    OAuth state tokens for CSRF protection.
+
+    Stores random state tokens generated during OAuth flow.
+    Used to prevent CSRF attacks by validating the state parameter in the callback.
+
+    Lifecycle:
+    1. Create state token when user clicks "Connect Instagram"
+    2. Store state with user_id and redirect_uri
+    3. Validate state in callback (must match and not be expired)
+    4. Delete state after successful validation (one-time use)
+
+    Cleanup: Background task deletes expired states (expires_at < now)
+    """
+    __tablename__ = "oauth_states"
+
+    state = Column(String(64), primary_key=True)  # Random URL-safe token
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    redirect_uri = Column(String(500), nullable=False)  # Where to redirect after OAuth
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    expires_at = Column(DateTime, nullable=False)  # 10-minute expiration
+
+    __table_args__ = (
+        Index('idx_oauth_states_expires_at', 'expires_at'),  # For cleanup queries
+        Index('idx_oauth_states_user_id', 'user_id'),
     )

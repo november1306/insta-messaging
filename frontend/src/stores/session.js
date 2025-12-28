@@ -6,6 +6,8 @@ export const useSessionStore = defineStore('session', () => {
   // State
   const token = ref(null)
   const accountId = ref(null)
+  const username = ref(null)
+  const userId = ref(null)
   const expiresAt = ref(null)
   const loading = ref(false)
   const error = ref(null)
@@ -20,13 +22,13 @@ export const useSessionStore = defineStore('session', () => {
   })
 
   // Actions
-  async function login(username, password) {
+  async function login(usernameInput, passwordInput) {
     loading.value = true
     error.value = null
 
     try {
       // Encode credentials as Basic Auth
-      const credentials = btoa(`${username}:${password}`)
+      const credentials = btoa(`${usernameInput}:${passwordInput}`)
 
       // Call session endpoint with Basic Auth header
       const response = await apiClient.post('/ui/session', null, {
@@ -42,6 +44,8 @@ export const useSessionStore = defineStore('session', () => {
       // Store session data
       token.value = response.data.token
       accountId.value = response.data.account_id
+      username.value = response.data.username
+      userId.value = response.data.user_id
 
       // Calculate expiration time
       const expiresInSeconds = response.data.expires_in
@@ -52,6 +56,8 @@ export const useSessionStore = defineStore('session', () => {
       // Persist to localStorage
       localStorage.setItem('session_token', token.value)
       localStorage.setItem('session_account_id', accountId.value)
+      localStorage.setItem('session_username', username.value)
+      localStorage.setItem('session_user_id', userId.value)
       localStorage.setItem('session_expires_at', expiresAt.value)
 
       // Configure API client to use session token
@@ -83,20 +89,24 @@ export const useSessionStore = defineStore('session', () => {
     // Restore session from localStorage
     const storedToken = localStorage.getItem('session_token')
     const storedAccountId = localStorage.getItem('session_account_id')
+    const storedUsername = localStorage.getItem('session_username')
+    const storedUserId = localStorage.getItem('session_user_id')
     const storedExpiresAt = localStorage.getItem('session_expires_at')
 
-    if (storedToken && storedAccountId && storedExpiresAt) {
+    if (storedToken && storedExpiresAt) {
       // Check if token is expired
       const expirationDate = new Date(storedExpiresAt)
       if (new Date() < expirationDate) {
         token.value = storedToken
         accountId.value = storedAccountId
+        username.value = storedUsername
+        userId.value = storedUserId
         expiresAt.value = storedExpiresAt
 
         // Configure API client to use restored token
         apiClient.defaults.headers.Authorization = `Bearer ${storedToken}`
 
-        console.log('Session restored from localStorage for account:', accountId.value)
+        console.log('Session restored from localStorage for user:', username.value)
         return true
       } else {
         // Token expired, clear localStorage
@@ -112,12 +122,16 @@ export const useSessionStore = defineStore('session', () => {
     // Clear state
     token.value = null
     accountId.value = null
+    username.value = null
+    userId.value = null
     expiresAt.value = null
     error.value = null
 
     // Clear localStorage
     localStorage.removeItem('session_token')
     localStorage.removeItem('session_account_id')
+    localStorage.removeItem('session_username')
+    localStorage.removeItem('session_user_id')
     localStorage.removeItem('session_expires_at')
 
     // Remove Authorization header from API client
@@ -153,6 +167,8 @@ export const useSessionStore = defineStore('session', () => {
     // State
     token,
     accountId,
+    username,
+    userId,
     expiresAt,
     loading,
     error,

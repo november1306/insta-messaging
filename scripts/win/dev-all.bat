@@ -68,8 +68,5 @@ echo.
 echo All services are running in separate windows.
 echo To stop all services, run: scripts\win\stop-all.bat
 echo Or manually close the backend, ngrok, and frontend windows.
-echo.
-echo Press any key to exit...
-pause >nul
 
 endlocal

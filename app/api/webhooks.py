@@ -88,18 +88,18 @@ async def handle_webhook(
         )
     
     logger.info("✅ Webhook signature validated")
-    
+
     messages_processed = 0
-    
+
     try:
         # Parse the JSON body (json.loads handles bytes directly)
         body = json.loads(raw_body)
-        
+
         # Validate request body structure
         if not isinstance(body, dict):
             logger.warning("Invalid webhook payload: not a dictionary")
             return {"status": "ok", "messages_processed": 0}
-        
+
         if "entry" not in body:
             logger.warning("Invalid webhook payload: missing 'entry' field")
             return {"status": "ok", "messages_processed": 0}
@@ -110,156 +110,247 @@ async def handle_webhook(
 
         logger.info(f"📨 Webhook POST request received - object: {object_type}, entries: {entry_count}")
 
+        # DEBUG: Pretty-print FULL webhook body (sanitize sensitive data)
+        # This helps debug what Instagram sends (especially after OAuth or for unknown events)
+        try:
+            # Create sanitized version of body for logging
+            sanitized_body = json.loads(raw_body)  # Fresh copy
+
+            # Recursively sanitize message text and media URLs (keep structure)
+            def sanitize_dict(obj, depth=0):
+                if depth > 10:  # Prevent infinite recursion
+                    return obj
+                if isinstance(obj, dict):
+                    sanitized = {}
+                    for key, value in obj.items():
+                        # Sanitize message text (show only length)
+                        if key == "text" and isinstance(value, str):
+                            sanitized[key] = f"[TEXT:{len(value)} chars]"
+                        # Sanitize media URLs (keep type, hide URL)
+                        elif key == "url" and isinstance(value, str):
+                            sanitized[key] = "[URL_REDACTED]"
+                        # Keep other fields, recursively sanitize nested objects
+                        else:
+                            sanitized[key] = sanitize_dict(value, depth + 1)
+                    return sanitized
+                elif isinstance(obj, list):
+                    return [sanitize_dict(item, depth + 1) for item in obj]
+                else:
+                    return obj
+
+            sanitized_body = sanitize_dict(sanitized_body)
+
+            # Pretty-print the sanitized webhook body
+            logger.info(
+                f"📥 FULL WEBHOOK BODY (sanitized):\n"
+                f"{json.dumps(sanitized_body, indent=2, ensure_ascii=False)}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to pretty-print webhook body: {e}")
+
         # Initialize repository
         message_repo = MessageRepository(db, request.app.state.crm_pool)
 
-        # Create HTTP client and Instagram client once for all auto-replies
-        async with httpx.AsyncClient() as http_client:
-            instagram_client = InstagramClient(
-                http_client=http_client,
-                settings=settings,
-                logger_instance=logger
-            )
-            
-            # Parse and store messages from webhook payload
-            for entry in body.get("entry", []):
-                # Each entry can contain multiple messaging events
-                for messaging_event in entry.get("messaging", []):
-                    try:
-                        # Extract message data
-                        message_data = _extract_message_data(messaging_event)
+        # Parse and store messages from webhook payload
+        for entry in body.get("entry", []):
+            # CRITICAL: Extract messaging_channel_id from entry.id (stable identifier for routing)
+            # This is the ONLY reliable way to identify which account received this webhook
+            # entry.id is NOT the same as OAuth profile ID - it's the messaging channel ID
+            messaging_channel_id = entry.get("id")
 
-                        if message_data:
-                            # Create domain Message object
-                            message = Message(
-                                id=message_data["id"],
-                                sender_id=message_data["sender_id"],
-                                recipient_id=message_data["recipient_id"],
-                                message_text=message_data["text"],
-                                direction="inbound",  # Webhooks only receive inbound messages
-                                timestamp=message_data["timestamp"],
-                                attachments=[]  # Will populate if media present
-                            )
+            if messaging_channel_id:
+                # Bind channel ID to account (idempotent - safe to call multiple times)
+                await _bind_channel_id(db, messaging_channel_id)
+            else:
+                logger.warning("Webhook entry missing 'id' field - cannot route messages")
+                continue
+            # Log if entry has no messaging events (binding-only webhook)
+            messaging_events = entry.get("messaging", [])
+            if not messaging_events:
+                logger.info(
+                    f"📌 Webhook entry {messaging_channel_id} has no messaging events "
+                    f"- channel ID bound but no messages to process (this is normal for verification webhooks)"
+                )
 
-                            # Download and process attachments (if any)
-                            if "attachments" in message_data and message_data["attachments"]:
-                                downloader = MediaDownloader()
+            # Each entry can contain multiple messaging events
+            for messaging_event in messaging_events:
+                try:
+                    # Extract message data
+                    message_data = _extract_message_data(messaging_event)
 
-                                for att_data in message_data["attachments"]:
-                                    try:
-                                        # Download media from Instagram CDN (URL expires in 7 days)
-                                        media_file = await downloader.download_media(
-                                            instagram_url=att_data["media_url"],
-                                            message_id=message.id,
-                                            attachment_index=att_data["index"],
-                                            account_id=message.recipient_id,  # Instagram business account ID
-                                            sender_id=message.sender_id,
-                                            media_type=att_data["media_type"]
-                                        )
+                    if message_data:
+                        # Add messaging_channel_id to message data for routing
+                        message_data["messaging_channel_id"] = messaging_channel_id
 
-                                        # Create Attachment domain object
-                                        attachment = Attachment(
-                                            id=f"{message.id}_{att_data['index']}",
-                                            message_id=message.id,
-                                            attachment_index=att_data["index"],
-                                            media_type=att_data["media_type"],
-                                            media_url=att_data["media_url"],
-                                            media_url_local=media_file.local_path,
-                                            media_mime_type=media_file.mime_type
-                                        )
-                                        message.attachments.append(attachment)
+                        # CRITICAL: Use messaging_channel_id as recipient_id for message routing
+                        # This is the ONLY way to correctly route messages to the right account
+                        # because multiple users can share the same Instagram Business Account ID
+                        # The messaging_channel_id (from webhook entry.id) is unique per channel
+                        recipient_id = messaging_channel_id
 
-                                    except Exception as download_error:
-                                        # Log error but continue - save message with URL only
-                                        logger.error(
-                                            f"❌ Failed to download attachment {att_data['index']} "
-                                            f"for message {message.id}: {download_error}"
-                                        )
-                                        # Create attachment with URL only (no local copy)
-                                        attachment = Attachment(
-                                            id=f"{message.id}_{att_data['index']}",
-                                            message_id=message.id,
-                                            attachment_index=att_data["index"],
-                                            media_type=att_data["media_type"],
-                                            media_url=att_data["media_url"],
-                                            media_url_local=None,  # Download failed
-                                            media_mime_type=None
-                                        )
-                                        message.attachments.append(attachment)
+                        # Create domain Message object
+                        message = Message(
+                            id=message_data["id"],
+                            sender_id=message_data["sender_id"],
+                            recipient_id=recipient_id,  # Use messaging_channel_id
+                            message_text=message_data["text"],
+                            direction="inbound",  # Webhooks only receive inbound messages
+                            timestamp=message_data["timestamp"],
+                            attachments=[]  # Will populate if media present
+                        )
 
-                            # Save to database (handle duplicates from webhook retries)
-                            try:
-                                await message_repo.save(message)
-                                messages_processed += 1
+                        # Download and process attachments (if any)
+                        if "attachments" in message_data and message_data["attachments"]:
+                            downloader = MediaDownloader()
 
-                                attachment_summary = f" with {len(message.attachments)} attachment(s)" if message.attachments else ""
-                                logger.info(f"✅ Stored message {message.id} from {message.sender_id}{attachment_summary}")
-
-                                # Broadcast to SSE clients (real-time UI update)
+                            for att_data in message_data["attachments"]:
                                 try:
-                                    # Build attachments data for frontend
-                                    attachments_data = []
-                                    if message.attachments:
-                                        for att in message.attachments:
-                                            attachments_data.append({
-                                                "id": att.id,
-                                                "index": att.attachment_index,
-                                                "media_type": att.media_type,
-                                                "media_url": att.media_url,
-                                                "media_url_local": att.media_url_local,
-                                                "media_mime_type": att.media_mime_type
-                                            })
-
-                                    await broadcast_new_message({
-                                        "id": message.id,
-                                        "sender_id": message.sender_id,
-                                        "sender_name": message.sender_id,  # TODO: Fetch actual name
-                                        "text": message.message_text,
-                                        "direction": "inbound",
-                                        "timestamp": message.timestamp.isoformat() if message.timestamp else None,
-                                        "instagram_account_id": message.recipient_id,
-                                        "attachments": attachments_data  # NEW: Array of attachments
-                                    })
-                                except Exception as sse_error:
-                                    logger.error(f"Failed to broadcast SSE message: {sse_error}")
-
-                                # Handle auto-reply ONLY for newly saved messages (not duplicates)
-                                # Wrapped in try/except to ensure CRM forwarding happens even if auto-reply fails
-                                try:
-                                    # Reuse instagram_client for all messages in this webhook batch
-                                    await _handle_auto_reply(message, message_repo, instagram_client)
-                                except Exception as auto_reply_error:
-                                    # Log error but continue to CRM forwarding
-                                    logger.error(
-                                        f"⚠️ Auto-reply failed for message {message.id}, "
-                                        f"continuing with CRM forwarding: {auto_reply_error}",
-                                        exc_info=True
+                                    # Download media from Instagram CDN (URL expires in 7 days)
+                                    media_file = await downloader.download_media(
+                                        instagram_url=att_data["media_url"],
+                                        message_id=message.id,
+                                        attachment_index=att_data["index"],
+                                        account_id=message.recipient_id,  # Instagram business account ID
+                                        sender_id=message.sender_id,
+                                        media_type=att_data["media_type"]
                                     )
 
-                                # Forward to CRM webhook (Task 9 - CRITICAL for CRM chat window)
-                                # Fire-and-forget to avoid blocking Instagram webhook response
-                                # _forward_to_crm creates its own DB session and HTTP client to avoid race conditions
-                                asyncio.create_task(_forward_to_crm(message))
+                                    # Create Attachment domain object
+                                    attachment = Attachment(
+                                        id=f"{message.id}_{att_data['index']}",
+                                        message_id=message.id,
+                                        attachment_index=att_data["index"],
+                                        media_type=att_data["media_type"],
+                                        media_url=att_data["media_url"],
+                                        media_url_local=media_file.local_path,
+                                        media_mime_type=media_file.mime_type
+                                    )
+                                    message.attachments.append(attachment)
 
-                            except ValueError:
-                                # Message already exists - this is ok for webhook retries
-                                # Rollback the failed transaction to clean up session state
-                                await db.rollback()
-                                # Skip auto-reply to prevent duplicate responses
-                                logger.info(f"ℹ️ Message {message.id} already exists, skipping auto-reply")
-                                continue
-                            except Exception as save_error:
-                                # Other database errors (connection issues, etc.)
-                                logger.error(f"Failed to save message {message.id}: {save_error}", exc_info=True)
-                                continue
-                        else:
-                            # Non-text message or unsupported event type
-                            logger.info(f"ℹ️ Skipped non-text message or unsupported event")
-                    
-                    except Exception as msg_error:
-                        # Log error but continue processing other messages
-                        logger.error(f"Error processing individual message: {msg_error}", exc_info=True)
-                        continue
+                                except Exception as download_error:
+                                    # Log error but continue - save message with URL only
+                                    logger.error(
+                                        f"❌ Failed to download attachment {att_data['index']} "
+                                        f"for message {message.id}: {download_error}"
+                                    )
+                                    # Create attachment with URL only (no local copy)
+                                    attachment = Attachment(
+                                        id=f"{message.id}_{att_data['index']}",
+                                        message_id=message.id,
+                                        attachment_index=att_data["index"],
+                                        media_type=att_data["media_type"],
+                                        media_url=att_data["media_url"],
+                                        media_url_local=None,  # Download failed
+                                        media_mime_type=None
+                                    )
+                                    message.attachments.append(attachment)
+
+                        # Save to database (handle duplicates from webhook retries)
+                        try:
+                            await message_repo.save(message)
+                            messages_processed += 1
+
+                            attachment_summary = f" with {len(message.attachments)} attachment(s)" if message.attachments else ""
+                            logger.info(f"✅ Stored message {message.id} from {message.sender_id}{attachment_summary}")
+
+                            # Broadcast to SSE clients (real-time UI update)
+                            try:
+                                # Look up account by messaging_channel_id (stable routing identifier)
+                                result = await db.execute(
+                                    select(Account).where(Account.messaging_channel_id == message_data["messaging_channel_id"])
+                                )
+                                account = result.scalar_one_or_none()
+                                db_account_id = account.id if account else None
+
+                                if not account:
+                                    logger.warning(
+                                        f"Could not find account for messaging_channel_id {message_data['messaging_channel_id']} "
+                                        f"- SSE broadcast may not route correctly"
+                                    )
+
+                                # Build attachments data for frontend
+                                attachments_data = []
+                                if message.attachments:
+                                    for att in message.attachments:
+                                        attachments_data.append({
+                                            "id": att.id,
+                                            "index": att.attachment_index,
+                                            "media_type": att.media_type,
+                                            "media_url": att.media_url,
+                                            "media_url_local": att.media_url_local,
+                                            "media_mime_type": att.media_mime_type
+                                        })
+
+                                await broadcast_new_message({
+                                    "id": message.id,
+                                    "sender_id": message.sender_id,
+                                    "sender_name": message.sender_id,  # TODO: Fetch actual name
+                                    "text": message.message_text,
+                                    "direction": "inbound",
+                                    "timestamp": message.timestamp.isoformat() if message.timestamp else None,
+                                    "messaging_channel_id": message.recipient_id,  # Use messaging_channel_id for routing
+                                    "account_id": db_account_id,  # Database account ID for sending replies
+                                    "attachments": attachments_data  # NEW: Array of attachments
+                                })
+                            except Exception as sse_error:
+                                logger.error(f"Failed to broadcast SSE message: {sse_error}")
+
+                            # Handle auto-reply ONLY for newly saved messages (not duplicates)
+                            # Wrapped in try/except to ensure CRM forwarding happens even if auto-reply fails
+                            try:
+                                # Pass account for per-account OAuth token
+                                if account:
+                                    await _handle_auto_reply(message, message_repo, account)
+                                else:
+                                    logger.warning(f"No account found for messaging_channel_id {messaging_channel_id}, skipping auto-reply")
+                            except Exception as auto_reply_error:
+                                # Log error but continue to CRM forwarding
+                                logger.error(
+                                    f"⚠️ Auto-reply failed for message {message.id}, "
+                                    f"continuing with CRM forwarding: {auto_reply_error}",
+                                    exc_info=True
+                                )
+
+                            # Forward to CRM webhook (Task 9 - CRITICAL for CRM chat window)
+                            # Fire-and-forget to avoid blocking Instagram webhook response
+                            # _forward_to_crm creates its own DB session and HTTP client to avoid race conditions
+                            asyncio.create_task(_forward_to_crm(message, message_data["messaging_channel_id"]))
+
+                        except ValueError:
+                            # Message already exists - this is ok for webhook retries
+                            # Rollback the failed transaction to clean up session state
+                            await db.rollback()
+                            # Skip auto-reply to prevent duplicate responses
+                            logger.info(f"ℹ️ Message {message.id} already exists, skipping auto-reply")
+                            continue
+                        except Exception as save_error:
+                            # Other database errors (connection issues, etc.)
+                            logger.error(f"Failed to save message {message.id}: {save_error}", exc_info=True)
+                            continue
+                    else:
+                        # Non-text message or unsupported event type
+                        # Log the event type to help debug what we're skipping
+                        event_type = "unknown"
+                        if "message" in messaging_event:
+                            event_type = "message (failed extraction)"
+                        elif "delivery" in messaging_event:
+                            event_type = "delivery_receipt"
+                        elif "read" in messaging_event:
+                            event_type = "read_receipt"
+                        elif "echo" in messaging_event:
+                            event_type = "echo"
+                        elif "reaction" in messaging_event:
+                            event_type = "reaction"
+
+                        logger.info(
+                            f"ℹ️ Skipped event type: {event_type} "
+                            f"(channel_id: {messaging_channel_id}, keys: {list(messaging_event.keys())})"
+                        )
+                
+                except Exception as msg_error:
+                    # Log error but continue processing other messages
+                    logger.error(f"Error processing individual message: {msg_error}", exc_info=True)
+                    continue
 
         logger.info(f"✅ Processed {messages_processed} messages from webhook")
 
@@ -275,67 +366,88 @@ async def handle_webhook(
 async def _handle_auto_reply(
     inbound_message: Message,
     message_repo: MessageRepository,
-    instagram_client: InstagramClient
+    account: Account
 ) -> None:
     """
     Handle auto-reply logic for inbound messages.
-    
+
     Uses user-defined rules from app.rules.reply_rules to determine
     if and how to reply to messages.
-    
+
     This function is called AFTER the inbound message is saved to avoid
     transaction rollback if reply fails.
-    
+
     Args:
         inbound_message: The inbound message that was just received
         message_repo: Repository for storing outbound messages
-        instagram_client: Instagram API client (reused to avoid creating multiple instances)
+        account: The Account object with OAuth access token for this messaging channel
     """
     try:
         # Check if message should trigger a reply (without username first)
         reply_text = get_reply_text(inbound_message.message_text)
-        
+
         if not reply_text:
             logger.info(f"No reply rule matched, skipping auto-reply")
             return
-        
-        # Only fetch username if reply contains {username} placeholder
-        if "{username}" in reply_text:
-            profile = await instagram_client.get_user_profile(inbound_message.sender_id)
-            if profile and "username" in profile:
-                username = profile["username"]
-                logger.info(f"👤 Retrieved username: @{username}")
-                # Replace placeholder with actual username
-                reply_text = reply_text.replace("{username}", f"@{username}")
-            else:
-                # Fallback: remove placeholder if profile fetch failed
-                reply_text = reply_text.replace("{username}", "")
-        
-        logger.info(f"📤 Sending auto-reply...")
-        
-        # Send message (sender becomes recipient for reply)
-        response = await instagram_client.send_message(
-            recipient_id=inbound_message.sender_id,
-            message_text=reply_text
-        )
-        
-        if response.success:
-            # Create outbound message record
-            outbound_message = Message(
-                id=response.message_id,
-                sender_id=inbound_message.recipient_id,  # Our page ID
-                recipient_id=inbound_message.sender_id,  # Customer ID
-                message_text=reply_text,
-                direction="outbound",
-                timestamp=datetime.now(timezone.utc)
+
+        # Decrypt account access token
+        from app.services.encryption_service import decrypt_credential
+        try:
+            access_token = decrypt_credential(account.access_token_encrypted, settings.session_secret) if account.access_token_encrypted else None
+        except Exception as e:
+            logger.error(f"Failed to decrypt access token for account {account.id}: {e}")
+            return
+
+        if not access_token:
+            logger.warning(f"No access token available for account {account.id}, skipping auto-reply")
+            return
+
+        # Create Instagram client with per-account OAuth token
+        async with httpx.AsyncClient() as http_client:
+            instagram_client = InstagramClient(
+                http_client=http_client,
+                access_token=access_token,
+                settings=settings,
+                logger_instance=logger
             )
-            
-            # Store outbound message in database
-            await message_repo.save(outbound_message)
-            logger.info(f"✅ Auto-reply sent and stored: {response.message_id}")
-        else:
-            logger.error(f"❌ Failed to send auto-reply: {response.error_message}")
-            
+
+            # Only fetch username if reply contains {username} placeholder
+            if "{username}" in reply_text:
+                profile = await instagram_client.get_user_profile(inbound_message.sender_id)
+                if profile and "username" in profile:
+                    username = profile["username"]
+                    logger.info(f"👤 Retrieved username: @{username}")
+                    # Replace placeholder with actual username
+                    reply_text = reply_text.replace("{username}", f"@{username}")
+                else:
+                    # Fallback: remove placeholder if profile fetch failed
+                    reply_text = reply_text.replace("{username}", "")
+
+            logger.info(f"📤 Sending auto-reply...")
+
+            # Send message (sender becomes recipient for reply)
+            response = await instagram_client.send_message(
+                recipient_id=inbound_message.sender_id,
+                message_text=reply_text
+            )
+
+            if response.success:
+                # Create outbound message record
+                outbound_message = Message(
+                    id=response.message_id,
+                    sender_id=inbound_message.recipient_id,  # Our page ID
+                    recipient_id=inbound_message.sender_id,  # Customer ID
+                    message_text=reply_text,
+                    direction="outbound",
+                    timestamp=datetime.now(timezone.utc)
+                )
+
+                # Store outbound message in database
+                await message_repo.save(outbound_message)
+                logger.info(f"✅ Auto-reply sent and stored: {response.message_id}")
+            else:
+                logger.error(f"❌ Failed to send auto-reply: {response.error_message}")
+
     except Exception as e:
         # Log error but don't fail the webhook processing
         # Inbound message is already saved, so webhook won't be retried
@@ -497,7 +609,86 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
         return None
 
 
-async def _forward_to_crm(message: Message) -> None:
+async def _bind_channel_id(db: AsyncSession, messaging_channel_id: str) -> None:
+    """
+    Bind messaging_channel_id to an account.
+
+    This function is called for EVERY webhook entry to capture the stable
+    messaging channel ID (entry.id) and associate it with an account.
+
+    The channel ID is the ONLY reliable way to route messages when multiple
+    accounts are authorized. It comes from webhook entry.id, NOT from OAuth.
+
+    Args:
+        db: Database session
+        messaging_channel_id: The entry.id from webhook (messaging channel identifier)
+
+    Note:
+        - Idempotent: Safe to call multiple times with same channel_id
+        - If channel_id already bound, does nothing
+        - If not bound, tries to bind to first account without a channel_id
+        - Logs warning if cannot bind (no available accounts)
+    """
+    try:
+        # Check if this channel ID is already bound to an account
+        result = await db.execute(
+            select(Account).where(Account.messaging_channel_id == messaging_channel_id)
+        )
+        existing_account = result.scalar_one_or_none()
+
+        if existing_account:
+            # Already bound - nothing to do
+            logger.debug(f"Channel ID {messaging_channel_id} already bound to account {existing_account.id}")
+            return
+
+        # Channel ID not bound - try to bind to an account without a channel ID
+        # Prefer accounts that match this channel ID as their instagram_account_id
+        # (in case OAuth profile ID == messaging channel ID, though this is rare)
+        result = await db.execute(
+            select(Account).where(
+                Account.instagram_account_id == messaging_channel_id
+            )
+        )
+        matching_account = result.scalar_one_or_none()
+
+        if matching_account and not matching_account.messaging_channel_id:
+            # Bind to matching account
+            matching_account.messaging_channel_id = messaging_channel_id
+            await db.commit()
+            logger.info(
+                f"✅ Bound channel ID {messaging_channel_id} to account {matching_account.id} "
+                f"(@{matching_account.username}) - matched by instagram_account_id"
+            )
+            return
+
+        # No matching account - bind to first account without a channel ID
+        result = await db.execute(
+            select(Account).where(Account.messaging_channel_id.is_(None))
+        )
+        available_account = result.scalars().first()
+
+        if available_account:
+            # Bind to first available account
+            available_account.messaging_channel_id = messaging_channel_id
+            await db.commit()
+            logger.info(
+                f"✅ Bound channel ID {messaging_channel_id} to account {available_account.id} "
+                f"(@{available_account.username}) - first available account"
+            )
+        else:
+            logger.warning(
+                f"⚠️ Cannot bind channel ID {messaging_channel_id} - no available accounts. "
+                f"All accounts already have channel IDs or no accounts exist."
+            )
+
+    except Exception as e:
+        # Log error but don't fail webhook processing
+        logger.error(f"Error binding channel ID {messaging_channel_id}: {e}", exc_info=True)
+        # Rollback failed transaction
+        await db.rollback()
+
+
+async def _forward_to_crm(message: Message, messaging_channel_id: str) -> None:
     """
     Forward inbound message to CRM webhook (Task 9).
 
@@ -509,6 +700,7 @@ async def _forward_to_crm(message: Message) -> None:
 
     Args:
         message: The inbound message to forward
+        messaging_channel_id: The stable messaging channel ID from webhook entry.id
 
     Note:
         - Errors are logged but don't fail the webhook handler
@@ -522,16 +714,17 @@ async def _forward_to_crm(message: Message) -> None:
     try:
         # Create our own database session (request-scoped session is not available in background task)
         async with async_session_maker() as db:
-            # Look up account by Instagram account ID (recipient is our business account)
+            # Look up account by messaging_channel_id (stable routing identifier)
             result = await db.execute(
-                select(Account).where(Account.instagram_account_id == message.recipient_id)
+                select(Account).where(Account.messaging_channel_id == messaging_channel_id)
             )
             account = result.scalar_one_or_none()
 
             if not account:
                 logger.warning(
-                    f"No account configuration found for {message.recipient_id}, "
-                    f"skipping CRM webhook forwarding - message will not reach CRM"
+                    f"No account configuration found for messaging_channel_id {messaging_channel_id}, "
+                    f"skipping CRM webhook forwarding - message will not reach CRM. "
+                    f"This may happen if the account hasn't received a webhook yet to bind the channel ID."
                 )
                 return
 
@@ -581,109 +774,6 @@ async def _forward_to_crm(message: Message) -> None:
 
 
 # ============================================================================
-# Send Message API Endpoint
+# Note: Send message API moved to /api/v1/messages/send (OAuth-based)
+# Legacy /webhooks/send endpoint removed - use multi-account OAuth system
 # ============================================================================
-
-class SendMessageRequest(BaseModel):
-    """Request model for sending messages"""
-    recipient_id: str
-    message_text: str
-
-class SendMessageResponse(BaseModel):
-    """Response model for send message endpoint"""
-    success: bool
-    message_id: str | None = None
-    error: str | None = None
-
-
-@router.post("/send", response_model=SendMessageResponse)
-async def send_message_api(
-    send_request: SendMessageRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """
-    API endpoint to send a message from the business account to a user.
-
-    Usage:
-        POST /webhooks/send
-        {
-            "recipient_id": "1558635688632972",
-            "message_text": "Hello from the business!"
-        }
-
-    Returns:
-        {
-            "success": true,
-            "message_id": "message_id_from_instagram",
-            "error": null
-        }
-    """
-    logger.info(f"📤 API request to send message to {send_request.recipient_id}")
-    
-    try:
-        # Create Instagram client (MVP: one client per request)
-        async with httpx.AsyncClient() as http_client:
-            instagram_client = InstagramClient(
-                http_client=http_client,
-                settings=settings,
-                logger_instance=logger
-            )
-            
-            # Send message via Instagram API
-            response = await instagram_client.send_message(
-                recipient_id=send_request.recipient_id,
-                message_text=send_request.message_text
-            )
-
-            if response.success:
-                # Store outbound message in database
-                message_repo = MessageRepository(db, request.app.state.crm_pool)
-
-                outbound_message = Message(
-                    id=response.message_id,
-                    sender_id=settings.instagram_business_account_id,
-                    recipient_id=send_request.recipient_id,
-                    message_text=send_request.message_text,
-                    direction="outbound",
-                    timestamp=datetime.now(timezone.utc)
-                )
-                
-                try:
-                    await message_repo.save(outbound_message)
-                    logger.info(f"✅ Message sent and stored - ID: {response.message_id}")
-                    
-                    return SendMessageResponse(
-                        success=True,
-                        message_id=response.message_id,
-                        error=None
-                    )
-                except Exception as db_error:
-                    # Message was sent successfully but failed to store in DB
-                    # Log the error but still return success since Instagram API succeeded
-                    logger.error(f"⚠️ Message sent but failed to store in DB: {db_error}", exc_info=True)
-                    
-                    return SendMessageResponse(
-                        success=True,
-                        message_id=response.message_id,
-                        error=f"Message sent but not stored: {str(db_error)}"
-                    )
-            else:
-                logger.error(f"❌ Failed to send message: {response.error_message}")
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Failed to send message: {response.error_message}"
-                )
-                
-    except InstagramAPIError as e:
-        logger.error(f"❌ Instagram API error: {e.message}")
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to send message: {e.message}"
-        )
-    except Exception as e:
-        logger.error(f"❌ Unexpected error in send message API: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error"
-        )

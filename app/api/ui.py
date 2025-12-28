@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_
 from sqlalchemy.orm import selectinload
 from app.db.connection import get_db_session
-from app.db.models import MessageModel, APIKey
+from app.db.models import MessageModel, APIKey, UserAccount, Account
 from app.clients.instagram_client import InstagramClient
 from app.config import settings
 from app.api.auth import verify_api_key, verify_ui_session
@@ -108,22 +108,23 @@ async def create_session(
             headers={"WWW-Authenticate": "Basic"}
         )
 
-    # Get Instagram business account ID
-    account_id = settings.instagram_business_account_id
-
-    if not account_id:
-        logger.error("Instagram business account ID not configured")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Account not configured"
+    # Query user's primary Instagram account (if any)
+    result = await db.execute(
+        select(UserAccount).where(
+            UserAccount.user_id == user.id,
+            UserAccount.is_primary == True
         )
+    )
+    primary_link = result.scalar_one_or_none()
+    primary_account_id = primary_link.account_id if primary_link else None
 
-    # Create JWT with account context
+    # Create JWT with user and account context
+    # Note: primary_account_id can be None if user hasn't linked any Instagram accounts yet
     expiration_time = datetime.now(timezone.utc) + timedelta(hours=settings.jwt_expiration_hours)
     payload = {
-        "account_id": account_id,
-        "user_id": user.id,  # Include user ID in JWT for audit trail
-        "username": user.username,  # Include username for logging
+        "user_id": user.id,
+        "username": user.username,
+        "primary_account_id": primary_account_id,  # Can be None for new users
         "exp": expiration_time,
         "type": "ui_session"
     }
@@ -135,11 +136,13 @@ async def create_session(
         algorithm=settings.jwt_algorithm
     )
 
-    logger.info(f"Created UI session for user '{user.username}' (account: {account_id})")
+    logger.info(f"Created UI session for user '{user.username}' (id={user.id}, primary_account={primary_account_id})")
 
     return {
         "token": token,
-        "account_id": account_id,
+        "account_id": primary_account_id,  # For backward compatibility (may be None)
+        "user_id": user.id,
+        "username": user.username,
         "expires_in": settings.jwt_expiration_hours * 3600  # Convert hours to seconds
     }
 
@@ -151,63 +154,90 @@ async def create_session(
 
 @router.get("/ui/account/me")
 async def get_current_account(
-    session: dict = Depends(verify_ui_session)
+    account_id: Optional[str] = Query(None, description="Instagram account ID. If not provided, uses user's primary account."),
+    session: dict = Depends(verify_ui_session),
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Get current user's Instagram account information.
 
-    Returns the business account ID, username, profile picture, and Instagram handle
-    from the session context.
+    Returns the business account ID, username, profile picture, and Instagram handle.
 
     Requires JWT session authentication.
+
+    Args:
+        account_id: Optional account ID. If not provided, uses user's primary account from session.
     """
     try:
-        business_account_id = settings.instagram_business_account_id
+        user_id = session.get("user_id")
 
-        if not business_account_id:
-            logger.warning("Instagram business account ID not configured")
-            return {
-                "account_id": None,
-                "username": "Not configured",
-                "instagram_handle": None,
-                "profile_picture_url": None
-            }
+        # If no account_id provided, use primary account from session
+        if not account_id:
+            account_id = session.get("account_id")  # This is primary_account_id
+            if not account_id:
+                # User has no linked accounts yet
+                logger.info(f"User {user_id} has no linked accounts")
+                return {
+                    "account_id": None,
+                    "username": "No account linked",
+                    "instagram_handle": None,
+                    "profile_picture_url": None
+                }
 
-        # Fetch business account profile from Instagram Graph API
-        async with httpx.AsyncClient() as http_client:
-            instagram_client = InstagramClient(
-                http_client=http_client,
-                settings=settings,
-                logger_instance=logger
+        # Verify user has access to this account
+        result = await db.execute(
+            select(UserAccount).where(
+                UserAccount.user_id == user_id,
+                UserAccount.account_id == account_id
             )
-            profile = await instagram_client.get_business_account_profile(business_account_id)
+        )
+        user_account_link = result.scalar_one_or_none()
 
-        if not profile:
-            logger.warning(f"Failed to fetch business account profile for {business_account_id}")
-            return {
-                "account_id": business_account_id,
-                "username": f"@{business_account_id}",
-                "instagram_handle": business_account_id,
-                "profile_picture_url": None
-            }
+        if not user_account_link:
+            logger.warning(f"User {user_id} attempted to access account info for {account_id} without permission")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this account"
+            )
 
-        username = profile.get("username", "")
-        profile_pic_url = profile.get("profile_picture_url")
+        # Get account from database
+        result = await db.execute(
+            select(Account).where(Account.id == account_id)
+        )
+        account = result.scalar_one_or_none()
 
-        logger.info(f"✅ Business account: @{username}, has_pic={bool(profile_pic_url)}")
+        if not account:
+            logger.error(f"Account {account_id} not found in database")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Account not found"
+            )
+
+        business_account_id = account.instagram_account_id
+
+        # Use cached profile data from database (fetched during OAuth)
+        # This works for both Instagram Business and Basic Display accounts
+        # We already fetch and store this data during the OAuth callback
+        username = account.username or business_account_id
+        profile_pic_url = account.profile_picture_url
+
+        logger.info(f"✅ Account info: @{username}, has_pic={bool(profile_pic_url)}")
 
         return {
-            "account_id": business_account_id,
+            "account_id": account_id,
+            "instagram_account_id": business_account_id,
             "username": f"@{username}" if username else f"@{business_account_id}",
             "instagram_handle": username or business_account_id,
             "profile_picture_url": profile_pic_url
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to fetch current account info: {e}", exc_info=True)
         return {
-            "account_id": settings.instagram_business_account_id,
-            "username": f"@{settings.instagram_business_account_id}" if settings.instagram_business_account_id else "Unknown",
-            "instagram_handle": settings.instagram_business_account_id,
+            "account_id": None,
+            "username": "Error loading account",
+            "instagram_handle": None,
             "profile_picture_url": None
         }
 
@@ -249,12 +279,13 @@ async def _get_instagram_username(sender_id: str, is_business_account: bool = Fa
     return sender_id
 
 
-async def _get_instagram_profile(sender_id: str) -> dict:
+async def _get_instagram_profile(sender_id: str, access_token: str = None) -> dict:
     """
     Get Instagram profile data for a sender ID.
 
     Args:
-        sender_id: Instagram user ID
+        sender_id: Instagram user ID (IGID scoped to messaging channel)
+        access_token: Optional account-specific access token. If not provided, uses global settings token (legacy).
 
     Returns:
         Dictionary with username and profile_picture_url, or default values if fetch fails
@@ -262,11 +293,20 @@ async def _get_instagram_profile(sender_id: str) -> dict:
     # Fetch from Instagram API
     try:
         async with httpx.AsyncClient() as http_client:
-            instagram_client = InstagramClient(
-                http_client=http_client,
-                settings=settings,
-                logger_instance=logger
-            )
+            # Use account-specific token if provided (multi-account), otherwise fallback to global settings
+            if access_token:
+                instagram_client = InstagramClient(
+                    http_client=http_client,
+                    access_token=access_token,
+                    logger_instance=logger
+                )
+            else:
+                instagram_client = InstagramClient(
+                    http_client=http_client,
+                    settings=settings,
+                    logger_instance=logger
+                )
+
             profile = await instagram_client.get_user_profile(sender_id)
 
             if profile and "username" in profile:
@@ -286,41 +326,89 @@ async def _get_instagram_profile(sender_id: str) -> dict:
 
 @router.get("/ui/conversations")
 async def get_conversations(
+    account_id: Optional[str] = Query(None, description="Instagram account ID to filter by"),
     session: dict = Depends(verify_ui_session),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
     Get list of all conversations grouped by sender.
-    Returns only conversations with valid response tokens (within 24-hour window).
+    Returns all conversations with time remaining indicator.
 
     Business accounts can only initiate/respond to messages within 24 hours
-    of the last inbound message from the user.
+    of the last inbound message from the user. The response includes hours_remaining
+    which can be negative for expired conversations.
 
     Requires JWT session authentication.
+
+    Args:
+        account_id: Optional Instagram account ID to filter conversations.
+                   If not provided, uses user's primary account from session.
     """
     try:
-        # Calculate cutoff time for 24-hour response window
-        now = datetime.now(timezone.utc)
-        cutoff_time = now - timedelta(hours=RESPONSE_WINDOW_HOURS)
+        user_id = session.get("user_id")
 
-        # Get business account ID from session (user's account perspective)
-        business_account_id = settings.instagram_business_account_id
+        # If no account_id provided, use primary account from session
+        if not account_id:
+            account_id = session.get("account_id")  # This is primary_account_id
+            if not account_id:
+                # User has no linked accounts yet
+                logger.info(f"User {user_id} has no linked accounts, returning empty conversations")
+                return {"conversations": []}
+
+        # Verify user has access to this account
+        result = await db.execute(
+            select(UserAccount).where(
+                UserAccount.user_id == user_id,
+                UserAccount.account_id == account_id
+            )
+        )
+        user_account_link = result.scalar_one_or_none()
+
+        if not user_account_link:
+            logger.warning(f"User {user_id} attempted to access conversations for account {account_id} without permission")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this account"
+            )
+
+        # Get the messaging_channel_id from Account table
+        result = await db.execute(
+            select(Account).where(Account.id == account_id)
+        )
+        account = result.scalar_one_or_none()
+
+        if not account:
+            logger.error(f"Account {account_id} not found in database")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Account not found"
+            )
+
+        messaging_channel_id = account.messaging_channel_id
+
+        if not messaging_channel_id:
+            logger.warning(f"Account {account_id} has no messaging_channel_id bound yet")
+            # Return empty conversations if channel not bound yet
+            return {"conversations": []}
+
+        # Get current time for calculating response window status
+        now = datetime.now(timezone.utc)
 
         # Subquery to get the latest message ID for each sender
-        # Filter by recipient_id to ensure only messages TO this account are included
+        # Filter by recipient_id (messaging_channel_id) to ensure only messages TO this channel are included
         subq = (
             select(
                 MessageModel.sender_id,
                 func.max(MessageModel.id).label('latest_message_id')
             )
             .where(MessageModel.direction == 'inbound')
-            .where(MessageModel.recipient_id == business_account_id)  # Only messages to this account
+            .where(MessageModel.recipient_id == messaging_channel_id)  # Only messages to this messaging channel
             .group_by(MessageModel.sender_id)
             .subquery()
         )
 
-        # Join to get full message details, filter by 24-hour window
-        # IMPORTANT: Filter by account to show only this account's contacts
+        # Join to get full message details
+        # IMPORTANT: Filter by messaging_channel_id to show only this account's contacts
         stmt = (
             select(MessageModel)
             .join(
@@ -328,22 +416,29 @@ async def get_conversations(
                 (MessageModel.sender_id == subq.c.sender_id) &
                 (MessageModel.id == subq.c.latest_message_id)
             )
-            .where(MessageModel.timestamp >= cutoff_time)  # Only conversations within response window
-            .where(MessageModel.recipient_id == business_account_id)  # Only messages to this account
-            .where(MessageModel.sender_id != business_account_id)  # Exclude business account from contacts
+            .where(MessageModel.recipient_id == messaging_channel_id)  # Only messages to this messaging channel
+            .where(MessageModel.sender_id != messaging_channel_id)  # Exclude messaging channel from contacts
             .order_by(desc(MessageModel.timestamp))
         )
 
         result = await db.execute(stmt)
         messages = result.scalars().all()
 
+        # Decrypt account access token for profile fetching
+        from app.services.encryption_service import decrypt_credential
+        try:
+            access_token = decrypt_credential(account.access_token_encrypted, settings.session_secret) if account.access_token_encrypted else None
+        except Exception as e:
+            logger.warning(f"Failed to decrypt access token for account {account_id}: {e}")
+            access_token = None
+
         # Batch fetch profiles in parallel to avoid N+1 query problem
         # Collect unique sender IDs
         unique_sender_ids = list(set(msg.sender_id for msg in messages))
 
-        # Fetch all profiles concurrently
+        # Fetch all profiles concurrently using account-specific token
         import asyncio
-        profile_tasks = [_get_instagram_profile(sender_id) for sender_id in unique_sender_ids]
+        profile_tasks = [_get_instagram_profile(sender_id, access_token) for sender_id in unique_sender_ids]
         profiles = await asyncio.gather(*profile_tasks)
 
         # Create sender_id -> profile mapping
@@ -361,7 +456,7 @@ async def get_conversations(
                 msg_timestamp = msg_timestamp.replace(tzinfo=timezone.utc)
 
             time_remaining = (msg_timestamp + timedelta(hours=RESPONSE_WINDOW_HOURS)) - now
-            hours_remaining = max(0, int(time_remaining.total_seconds() / 3600))
+            hours_remaining = int(time_remaining.total_seconds() / 3600)  # Can be negative if expired
 
             conversations.append({
                 "sender_id": msg.sender_id,
@@ -370,7 +465,8 @@ async def get_conversations(
                 "last_message": msg.message_text or "",
                 "last_message_time": msg_timestamp.isoformat() if msg_timestamp else None,
                 "unread_count": 0,  # TODO: Implement read/unread tracking
-                "instagram_account_id": msg.recipient_id,  # The business account that received the message
+                "messaging_channel_id": msg.recipient_id,  # The messaging channel that received the message
+                "account_id": account_id,  # The database account ID (e.g., acc_xxx)
                 "hours_remaining": hours_remaining,  # Hours left to respond
                 "can_respond": hours_remaining > 0
             })
@@ -385,6 +481,7 @@ async def get_conversations(
 @router.get("/ui/messages/{sender_id}")
 async def get_messages(
     sender_id: str,
+    account_id: Optional[str] = Query(None, description="Instagram account ID to filter by"),
     session: dict = Depends(verify_ui_session),
     db: AsyncSession = Depends(get_db_session)
 ):
@@ -393,26 +490,78 @@ async def get_messages(
     Returns both inbound and outbound messages with Instagram username.
 
     Requires JWT session authentication.
+
+    Args:
+        sender_id: Instagram user ID of the conversation partner
+        account_id: Optional Instagram account ID. If not provided, uses user's primary account.
     """
     try:
-        # Get business account ID from session (user's account perspective)
-        business_account_id = settings.instagram_business_account_id
+        user_id = session.get("user_id")
+
+        # If no account_id provided, use primary account from session
+        if not account_id:
+            account_id = session.get("account_id")  # This is primary_account_id
+            if not account_id:
+                # User has no linked accounts yet
+                logger.warning(f"User {user_id} has no linked accounts, cannot fetch messages")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No account linked. Please link an Instagram account first."
+                )
+
+        # Verify user has access to this account
+        result = await db.execute(
+            select(UserAccount).where(
+                UserAccount.user_id == user_id,
+                UserAccount.account_id == account_id
+            )
+        )
+        user_account_link = result.scalar_one_or_none()
+
+        if not user_account_link:
+            logger.warning(f"User {user_id} attempted to access messages for account {account_id} without permission")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this account"
+            )
+
+        # Get the messaging_channel_id from Account table
+        result = await db.execute(
+            select(Account).where(Account.id == account_id)
+        )
+        account = result.scalar_one_or_none()
+
+        if not account:
+            logger.error(f"Account {account_id} not found in database")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Account not found"
+            )
+
+        messaging_channel_id = account.messaging_channel_id
+
+        if not messaging_channel_id:
+            logger.warning(f"Account {account_id} has no messaging_channel_id bound yet")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Account has no messaging channel bound yet. Please receive a message first."
+            )
 
         # Get all messages for this conversation thread (both inbound and outbound)
-        # Filter by account to ensure only messages for THIS business account are returned
-        # - Inbound: user sends TO business account
-        # - Outbound: business account sends TO user
+        # Filter by messaging_channel_id to ensure only messages for THIS channel are returned
+        # - Inbound: user sends TO this messaging channel
+        # - Outbound: this messaging channel sends TO user
         stmt = (
             select(MessageModel)
             .options(selectinload(MessageModel.attachments))  # Eagerly load attachments
             .where(
                 or_(
-                    # Inbound: user sends to this business account
+                    # Inbound: user sends to this messaging channel
                     (MessageModel.sender_id == sender_id) &
-                    (MessageModel.recipient_id == business_account_id),
+                    (MessageModel.recipient_id == messaging_channel_id),
 
-                    # Outbound: this business account sends to user
-                    (MessageModel.sender_id == business_account_id) &
+                    # Outbound: this messaging channel sends to user
+                    (MessageModel.sender_id == messaging_channel_id) &
                     (MessageModel.recipient_id == sender_id)
                 )
             )

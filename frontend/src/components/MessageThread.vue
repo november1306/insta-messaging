@@ -142,6 +142,9 @@ import { ref, watch, nextTick } from 'vue'
 import MessageBubble from './MessageBubble.vue'
 import { getInitials } from '../composables/useUserUtils'
 import { getProxiedImageUrl } from '../composables/useImageProxy'
+import { useAccountsStore } from '../stores/accounts'
+
+const accountsStore = useAccountsStore()
 
 const props = defineProps({
   conversation: {
@@ -230,7 +233,12 @@ async function handleSend() {
     // Create FormData
     const formData = new FormData()
     formData.append('recipient_id', props.conversation.sender_id)
-    formData.append('account_id', props.conversation.instagram_account_id)
+    // Use account_id from conversation if available, otherwise use selected account from store
+    const accountId = props.conversation.account_id || accountsStore.selectedAccount?.account_id
+    if (!accountId) {
+      throw new Error('No account selected. Please select an Instagram account.')
+    }
+    formData.append('account_id', accountId)
     formData.append('idempotency_key', `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
 
     if (messageText.value.trim()) {

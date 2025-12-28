@@ -18,19 +18,22 @@
         <h4 class="text-xs font-semibold text-gray-500 uppercase mb-3">Response Window</h4>
         <div :class="[
           'rounded-lg p-4 border',
+          conversation.hours_remaining <= 0 ? 'bg-gray-50 border-gray-300' :
           conversation.hours_remaining <= 2 ? 'bg-red-50 border-red-200' :
           conversation.hours_remaining <= 6 ? 'bg-orange-50 border-orange-200' :
           'bg-green-50 border-green-200'
         ]">
           <div class="flex items-center justify-between mb-2">
             <span class="text-sm font-semibold" :class="[
+              conversation.hours_remaining <= 0 ? 'text-gray-700' :
               conversation.hours_remaining <= 2 ? 'text-red-700' :
               conversation.hours_remaining <= 6 ? 'text-orange-700' :
               'text-green-700'
             ]">
-              {{ conversation.hours_remaining }}h remaining
+              {{ conversation.hours_remaining <= 0 ? 'Expired' : `${conversation.hours_remaining}h remaining` }}
             </span>
             <svg class="w-5 h-5" :class="[
+              conversation.hours_remaining <= 0 ? 'text-gray-500' :
               conversation.hours_remaining <= 2 ? 'text-red-500' :
               conversation.hours_remaining <= 6 ? 'text-orange-500' :
               'text-green-500'
@@ -42,19 +45,24 @@
             <div
               class="h-2 rounded-full transition-all"
               :class="[
+                conversation.hours_remaining <= 0 ? 'bg-gray-400' :
                 conversation.hours_remaining <= 2 ? 'bg-red-500' :
                 conversation.hours_remaining <= 6 ? 'bg-orange-500' :
                 'bg-green-500'
               ]"
-              :style="{ width: `${Math.min(100, (conversation.hours_remaining / 24) * 100)}%` }"
+              :style="{ width: conversation.hours_remaining <= 0 ? '100%' : `${Math.min(100, (conversation.hours_remaining / 24) * 100)}%` }"
             ></div>
           </div>
           <p class="text-xs mt-2" :class="[
+            conversation.hours_remaining <= 0 ? 'text-gray-600' :
             conversation.hours_remaining <= 2 ? 'text-red-600' :
             conversation.hours_remaining <= 6 ? 'text-orange-600' :
             'text-green-600'
           ]">
-            You can respond until {{ getExpiryTime(conversation.last_message_time, conversation.hours_remaining) }}
+            {{ conversation.hours_remaining <= 0
+              ? 'Response window expired. User must send a new message to reopen.'
+              : `You can respond until ${getExpiryTime(conversation.last_message_time, conversation.hours_remaining)}`
+            }}
           </p>
         </div>
       </div>
