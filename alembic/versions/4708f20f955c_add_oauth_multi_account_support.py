@@ -96,7 +96,11 @@ def upgrade() -> None:
     # Add index for token expiration if it doesn't exist
     accounts_indexes = [idx['name'] for idx in inspector.get_indexes('accounts')]
     if 'idx_token_expires_at' not in accounts_indexes:
-        op.create_index('idx_token_expires_at', 'accounts', ['token_expires_at'], unique=False)
+        try:
+            op.create_index('idx_token_expires_at', 'accounts', ['token_expires_at'], unique=False)
+        except OperationalError:
+            # Index already exists, skip
+            pass
 
     # Add new columns to users table if they don't exist
     users_columns = [col['name'] for col in inspector.get_columns('users')]
@@ -109,10 +113,21 @@ def upgrade() -> None:
 
     # Create indexes for users if they don't exist
     users_indexes = [idx['name'] for idx in inspector.get_indexes('users')]
+
+    # Use try/except as final safety net for truly idempotent behavior
     if 'idx_is_active' not in users_indexes:
-        op.create_index('idx_is_active', 'users', ['is_active'], unique=False)
+        try:
+            op.create_index('idx_is_active', 'users', ['is_active'], unique=False)
+        except OperationalError:
+            # Index already exists (possibly from earlier migration), skip
+            pass
+
     if 'idx_oauth_provider' not in users_indexes:
-        op.create_index('idx_oauth_provider', 'users', ['oauth_provider', 'oauth_provider_id'], unique=False)
+        try:
+            op.create_index('idx_oauth_provider', 'users', ['oauth_provider', 'oauth_provider_id'], unique=False)
+        except OperationalError:
+            # Index already exists, skip
+            pass
     # ### end Alembic commands ###
 
 
