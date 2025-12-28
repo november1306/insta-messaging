@@ -198,9 +198,11 @@ async function handleSendMessage(formData, onProgress) {
 }
 
 async function refreshConversations() {
+  // Pass selected account ID to fetch conversations for the active account
+  const accountId = accountsStore.selectedAccount?.account_id || null
   await Promise.all([
     store.fetchCurrentAccount(),
-    store.fetchConversations()
+    store.fetchConversations(accountId)
   ])
 }
 
@@ -218,9 +220,13 @@ onMounted(async () => {
     return
   }
 
+  // Load accounts first, then fetch conversations for selected account
+  await accountsStore.fetchAccounts()
+
+  const accountId = accountsStore.selectedAccount?.account_id || null
   await Promise.all([
     store.fetchCurrentAccount(),
-    store.fetchConversations()
+    store.fetchConversations(accountId)
   ])
 })
 </script>

@@ -242,13 +242,14 @@ async def get_current_account(
         }
 
 
-async def _get_instagram_username(sender_id: str, is_business_account: bool = False) -> str:
+async def _get_instagram_username(sender_id: str, access_token: str = None, is_business_account: bool = False) -> str:
     """
     Get Instagram username for a sender ID.
     Uses cache to avoid repeated API calls.
 
     Args:
         sender_id: Instagram user ID
+        access_token: Instagram access token for API calls. If not provided, returns sender_id.
         is_business_account: If True, fetch business account username properly
 
     Returns:
@@ -258,12 +259,16 @@ async def _get_instagram_username(sender_id: str, is_business_account: bool = Fa
     if not is_business_account and sender_id in username_cache:
         return username_cache[sender_id]
 
+    # If no access token provided, return sender_id (can't fetch from API)
+    if not access_token:
+        return sender_id
+
     # Fetch from Instagram API
     try:
         async with httpx.AsyncClient() as http_client:
             instagram_client = InstagramClient(
                 http_client=http_client,
-                settings=settings,
+                access_token=access_token,
                 logger_instance=logger
             )
             profile = await instagram_client.get_user_profile(sender_id)
@@ -424,6 +429,10 @@ async def get_conversations(
         result = await db.execute(stmt)
         messages = result.scalars().all()
 
+        # Debug logging to understand what conversations are found
+        sender_ids_found = [msg.sender_id for msg in messages]
+        logger.info(f"🔍 Conversations query for account {account_id} (channel:{messaging_channel_id}): Found {len(messages)} conversations with sender_ids: {sender_ids_found}")
+
         # Decrypt account access token for profile fetching
         from app.services.encryption_service import decrypt_credential
         try:
@@ -547,6 +556,14 @@ async def get_messages(
                 detail="Account has no messaging channel bound yet. Please receive a message first."
             )
 
+        # Decrypt account access token for profile fetching
+        from app.services.encryption_service import decrypt_credential
+        try:
+            access_token = decrypt_credential(account.access_token_encrypted, settings.session_secret) if account.access_token_encrypted else None
+        except Exception as e:
+            logger.warning(f"Failed to decrypt access token for account {account_id}: {e}")
+            access_token = None
+
         # Get all messages for this conversation thread (both inbound and outbound)
         # Filter by messaging_channel_id to ensure only messages for THIS channel are returned
         # - Inbound: user sends TO this messaging channel
@@ -597,14 +614,14 @@ async def get_messages(
 
             # Capture sender info from first message
             if sender_info is None:
-                sender_name = await _get_instagram_username(msg.sender_id)
+                sender_name = await _get_instagram_username(msg.sender_id, access_token)
                 sender_info = {
                     "id": msg.sender_id,
                     "name": sender_name
                 }
 
         if sender_info is None:
-            sender_name = await _get_instagram_username(sender_id)
+            sender_name = await _get_instagram_username(sender_id, access_token)
             sender_info = {
                 "id": sender_id,
                 "name": sender_name
@@ -617,10 +634,10 @@ async def get_messages(
 
     except Exception as e:
         logger.error(f"Failed to fetch messages for {sender_id}: {e}")
-        sender_name = await _get_instagram_username(sender_id)
+        # In exception handler, we don't have access_token available, so use sender_id as fallback
         return {
             "messages": [],
-            "sender_info": {"id": sender_id, "name": sender_name}
+            "sender_info": {"id": sender_id, "name": sender_id}
         }
 
 

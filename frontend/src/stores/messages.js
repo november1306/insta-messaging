@@ -35,11 +35,12 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
-  async function fetchConversations() {
+  async function fetchConversations(accountId = null) {
     loading.value = true
     error.value = null
     try {
-      const response = await apiClient.get('/ui/conversations')
+      const params = accountId ? { account_id: accountId } : {}
+      const response = await apiClient.get('/ui/conversations', { params })
       conversations.value = response.data.conversations
     } catch (err) {
       error.value = err.message
