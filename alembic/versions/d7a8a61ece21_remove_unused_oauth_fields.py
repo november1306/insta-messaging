@@ -37,6 +37,13 @@ def upgrade() -> None:
 
     # Remove unused fields from accounts table if they exist
     accounts_columns = [col['name'] for col in inspector.get_columns('accounts')]
+
+    # Clean up any leftover temp tables from previous failed runs
+    try:
+        op.execute('DROP TABLE IF EXISTS _alembic_tmp_accounts')
+    except:
+        pass
+
     with op.batch_alter_table('accounts', schema=None) as batch_op:
         if 'refresh_token_encrypted' in accounts_columns:
             batch_op.drop_column('refresh_token_encrypted')
@@ -48,6 +55,12 @@ def upgrade() -> None:
     # Remove unused OAuth fields from users table if they exist
     users_columns = [col['name'] for col in inspector.get_columns('users')]
     users_indexes = [idx['name'] for idx in inspector.get_indexes('users')]
+
+    # Clean up any leftover temp tables from previous failed runs
+    try:
+        op.execute('DROP TABLE IF EXISTS _alembic_tmp_users')
+    except:
+        pass
 
     with op.batch_alter_table('users', schema=None) as batch_op:
         # Drop index idx_oauth_provider (not idx_users_oauth_provider!)
@@ -66,6 +79,13 @@ def upgrade() -> None:
 
     # Remove role field from user_accounts table if it exists
     user_accounts_columns = [col['name'] for col in inspector.get_columns('user_accounts')]
+
+    # Clean up any leftover temp tables from previous failed runs
+    try:
+        op.execute('DROP TABLE IF EXISTS _alembic_tmp_user_accounts')
+    except:
+        pass
+
     with op.batch_alter_table('user_accounts', schema=None) as batch_op:
         if 'role' in user_accounts_columns:
             batch_op.drop_column('role')
