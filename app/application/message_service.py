@@ -41,7 +41,7 @@ def validate_attachment_path(url: str) -> Optional[str]:
     Validate and normalize attachment URL path to prevent path traversal attacks.
 
     Args:
-        url: Attachment URL path to validate
+        url: Attachment URL or path to validate (e.g., "/media/outbound/..." or "http://host/media/outbound/...")
 
     Returns:
         Normalized path if valid, None if invalid or potentially malicious
@@ -50,28 +50,42 @@ def validate_attachment_path(url: str) -> Optional[str]:
         - Prevents path traversal attacks (../../etc/passwd)
         - Ensures path stays within /media/outbound/ directory
         - Normalizes path separators (handles both / and \\)
+        - Handles both full URLs and paths
     """
-    if not url or not url.startswith('/media/outbound/'):
+    if not url:
         return None
 
+    # Extract path from full URL if needed (e.g., "http://host/media/outbound/..." -> "/media/outbound/...")
+    path = url
+    if url.startswith('http://') or url.startswith('https://'):
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        path = parsed.path
+
+    if not path.startswith('/media/outbound/') and not path.startswith('media/outbound/'):
+        return None
+
+    # Remove leading slash for database storage (paths stored as "media/outbound/...")
+    if path.startswith('/'):
+        path = path[1:]
+
     try:
-        # Convert to Path object and resolve to absolute path
-        # This normalizes '..' and '.' segments
-        url_path = Path(url)
+        # Security validation: check for path traversal attempts
+        # Don't use Path() as it can cause issues with forward slashes on Windows
+        # Just do string validation
 
-        # Get the normalized string (handles both / and \\)
-        normalized_str = str(url_path).replace('\\', '/')
-
-        # Ensure the normalized path still starts with /media/outbound/
-        # If someone tried ../../etc/passwd, normalization would break this check
-        if not normalized_str.startswith('/media/outbound/'):
-            logger.warning(f"⚠️ Path traversal attempt detected: {url} -> {normalized_str}")
+        # Ensure the path still starts with media/outbound/
+        if not path.startswith('media/outbound/'):
+            logger.warning(f"⚠️ Path traversal attempt detected: {url} -> {path}")
             return None
 
-        # Additional check: ensure no '..' segments remain after normalization
-        if '..' in normalized_str:
+        # Additional check: ensure no '..' segments
+        if '..' in path:
             logger.warning(f"⚠️ Suspicious path detected: {url}")
             return None
+
+        # Normalize path separators (convert backslashes to forward slashes)
+        normalized_str = path.replace('\\', '/')
 
         return normalized_str
 
