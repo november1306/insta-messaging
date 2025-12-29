@@ -50,6 +50,10 @@ export function useAuthenticatedMedia() {
         // Path format: "media/outbound/acc_xxx/filename.png"
         // Note: Outbound endpoint is public (no auth required), but we send token anyway
         fetchUrl = `${baseUrl}/${mediaPath}`
+      } else if (mediaPath.startsWith('media/') && mediaPath.split('/').length >= 4) {
+        // OLD nested inbound format (legacy): media/{channel_id}/{sender_id}/{filename}
+        // Serve via generic path endpoint with authentication
+        fetchUrl = `${baseUrl}/${mediaPath}`
       } else {
         console.error(`Unknown media path format: ${mediaPath}`)
         return null
@@ -110,6 +114,9 @@ export function useAuthenticatedMedia() {
         fetchUrl = `${baseUrl}/media/attachments/${attachmentId}?download=true`
       } else if (mediaPath.startsWith('media/outbound/')) {
         // Outbound media (old format): Use full path
+        fetchUrl = `${baseUrl}/${mediaPath}?download=true`
+      } else if (mediaPath.startsWith('media/') && mediaPath.split('/').length >= 4) {
+        // OLD nested inbound format (legacy): media/{channel_id}/{sender_id}/{filename}
         fetchUrl = `${baseUrl}/${mediaPath}?download=true`
       } else {
         console.error(`Unknown media path format: ${mediaPath}`)
