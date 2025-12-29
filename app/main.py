@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.media_cleanup import periodic_cleanup_task
 import logging
 from pathlib import Path
-import aiomysql
 import asyncio
 
 # Custom logging filter to redact sensitive data
@@ -144,31 +143,9 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Failed to create media directory: {e}")
         # Non-fatal - will retry when first media is downloaded
 
-    # Initialize CRM MySQL connection pool (if enabled)
-    crm_pool = None
-    if settings.crm_mysql_enabled:
-        if not settings.crm_mysql_user or not settings.crm_mysql_password:
-            logger.warning("CRM_MYSQL_ENABLED=true but credentials missing. CRM sync disabled.")
-        else:
-            try:
-                crm_pool = await aiomysql.create_pool(
-                    host=settings.crm_mysql_host,
-                    user=settings.crm_mysql_user,
-                    password=settings.crm_mysql_password,
-                    db=settings.crm_mysql_database,
-                    minsize=1,
-                    maxsize=5,
-                    pool_recycle=3600,  # Recycle connections after 1 hour
-                    connect_timeout=30,  # 30 second connection timeout
-                    ssl=None,  # Explicitly disable SSL (as per test command)
-                    charset='utf8mb4'  # UTF-8 with full Unicode support (Cyrillic, emojis, etc.)
-                )
-                logger.info(f"✅ CRM MySQL connected: {settings.crm_mysql_host}/{settings.crm_mysql_database}")
-            except Exception as e:
-                logger.error(f"❌ CRM MySQL connection failed: {e}. CRM sync disabled.")
-                crm_pool = None
-
-    app.state.crm_pool = crm_pool
+    # CRM MySQL dual storage removed in Phase 2 refactoring
+    # MessageRepository no longer uses CRM pool - all messages stored in SQLite only
+    # For CRM integration, use WebhookForwarder to forward messages to CRM webhook
 
     # Start media cleanup background task
     cleanup_task = asyncio.create_task(periodic_cleanup_task(media_dir))
@@ -198,12 +175,6 @@ async def lifespan(app: FastAPI):
         await oauth_cleanup_task
     except asyncio.CancelledError:
         logger.info("✅ OAuth state cleanup task cancelled")
-
-    # Close CRM pool
-    if crm_pool:
-        crm_pool.close()
-        await crm_pool.wait_closed()
-        logger.info("✅ CRM MySQL pool closed")
 
     await close_db()
 

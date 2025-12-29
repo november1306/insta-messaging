@@ -6,6 +6,7 @@ TODO: Add MySQL/PostgreSQL support in Priority 2 when needed.
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlalchemy import event
 from app.db.models import Base
 from app.config import settings
 import logging
@@ -31,6 +32,14 @@ async def init_db():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+
+    # Enable foreign key enforcement in SQLite
+    # Foreign keys are disabled by default in SQLite - this enables CASCADE DELETE
+    @event.listens_for(engine.sync_engine, "connect")
+    def set_sqlite_pragma(dbapi_conn, connection_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
     
     # Create session factory
     async_session_maker = async_sessionmaker(

@@ -2,6 +2,7 @@
 CRM Integration API - Message Sending Endpoints
 
 Implements outbound message sending for CRM integration.
+Refactored to use Domain-Driven Design with MessageService.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Form, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,12 +18,14 @@ import httpx
 from app.api.auth import verify_api_key, verify_jwt_or_api_key
 from app.db.connection import get_db_session
 from app.db.models import CRMOutboundMessage, Account, APIKey, MessageAttachment
+from app.domain.unit_of_work import SQLAlchemyUnitOfWork
+from app.application.message_service import MessageService
+from app.domain.value_objects import AccountId, InstagramUserId, IdempotencyKey
+from app.domain.entities import AccountNotFoundError
 from app.clients.instagram_client import InstagramClient, InstagramAPIError
 from app.config import settings
 from app.api.events import broadcast_new_message, broadcast_message_status
 from app.services.api_key_service import APIKeyService
-from app.core.interfaces import Message
-from app.repositories.message_repository import MessageRepository
 
 logger = logging.getLogger(__name__)
 
@@ -170,26 +173,9 @@ async def send_message(
             detail="Invalid authentication context"
         )
     
-    # 1. Check idempotency - return existing if duplicate
-    result = await db.execute(
-        select(CRMOutboundMessage).where(CRMOutboundMessage.idempotency_key == idempotency_key)
-    )
-    existing = result.scalar_one_or_none()
+    # Note: Idempotency check is handled by MessageService to eliminate redundant queries
 
-    if existing:
-        logger.info(f"Duplicate request detected - returning existing message: {existing.id}")
-        # For duplicate requests, we don't track attachment info in CRMOutboundMessage
-        # so return None for attachment fields
-        return SendMessageResponse(
-            message_id=existing.id,
-            status=existing.status,
-            created_at=existing.created_at,
-            attachment_url=None,
-            attachment_type=None,
-            attachment_local_path=None
-        )
-
-    # 2. Handle file upload if present
+    # 1. Handle file upload if present
     attachment_url = None
     attachment_type = None
 
@@ -278,173 +264,115 @@ async def send_message(
     
     logger.info(f"✅ Message created: {message_id} (status: pending)")
 
-    # 4. Get account from database to use account-specific access token
-    result = await db.execute(
-        select(Account).where(Account.id == account_id)
-    )
-    account = result.scalar_one_or_none()
+    # 5. Send message using MessageService + Unit of Work
+    try:
+        # Create Unit of Work for transactional messaging
+        async with SQLAlchemyUnitOfWork(db) as uow:
+            # Create MessageService (Instagram client created internally per-account)
+            message_service = MessageService()
 
-    if not account:
-        outbound_message.status = "failed"
-        outbound_message.error_code = "account_not_found"
-        outbound_message.error_message = f"Account {account_id} not found"
-        logger.error(f"❌ Cannot send message {message_id}: Account {account_id} not found")
-    elif not account.access_token_encrypted:
-        outbound_message.status = "failed"
-        outbound_message.error_code = "missing_token"
-        outbound_message.error_message = "Instagram access token not configured for this account"
-        logger.error(f"❌ Cannot send message {message_id}: No access token for account {account_id}")
-    else:
-        # 5. Decrypt account access token
-        from app.services.encryption_service import decrypt_credential
-        try:
-            access_token = decrypt_credential(account.access_token_encrypted, settings.session_secret)
-        except Exception as e:
-            outbound_message.status = "failed"
-            outbound_message.error_code = "token_decrypt_error"
-            outbound_message.error_message = f"Failed to decrypt access token: {str(e)}"
-            logger.error(f"❌ Cannot send message {message_id}: Failed to decrypt access token - {e}")
-            access_token = None
-
-        if access_token:
-            # 6. Attempt Instagram delivery (synchronous for MVP)
-            # TODO: Move to async queue with retries in Priority 2
-            async with httpx.AsyncClient() as http_client:
-                instagram_client = InstagramClient(
-                    http_client=http_client,
-                    access_token=access_token,  # Use account-specific token
-                    logger_instance=logger
+            try:
+                # Send message via MessageService
+                sent_message = await message_service.send_message(
+                    uow=uow,
+                    account_id=AccountId(account_id),
+                    recipient_id=InstagramUserId(recipient_id),
+                    message_text=message,
+                    attachment_url=attachment_url,
+                    attachment_mime_type=file.content_type if file else None,
+                    idempotency_key=IdempotencyKey(idempotency_key)
                 )
 
-                try:
-                    # Send message via Instagram API (with or without attachment)
-                    if attachment_url:
-                        # Send message with attachment
-                        ig_response = await instagram_client.send_message_with_attachment(
-                            recipient_id=recipient_id,
-                            attachment_url=attachment_url,
-                            attachment_type=attachment_type,
-                            caption_text=message  # Optional caption
-                        )
-                    else:
-                        # Send text-only message
-                        ig_response = await instagram_client.send_message(
-                            recipient_id=recipient_id,
-                            message_text=message
-                        )
+                # Update CRM tracking record
+                outbound_message.status = "sent"
+                outbound_message.instagram_message_id = sent_message.id.value
 
-                    # Update CRM tracking status to "sent"
-                    outbound_message.status = "sent"
-                    outbound_message.instagram_message_id = ig_response.message_id
+                logger.info(f"✅ Message sent via MessageService: {message_id} (ig_msg_id: {sent_message.id.value})")
 
-                    logger.info(f"✅ Message sent to Instagram: {message_id} (ig_msg_id: {ig_response.message_id})")
-
-                    # Save to messages table for UI display (messenger pattern)
-                    # This ensures the message appears when fetching conversation history
-                    try:
-                        # Get CRM pool from app state for MySQL sync
-                        crm_pool = getattr(http_request.app.state, 'crm_pool', None)
-
-                        message_repo = MessageRepository(db, crm_pool=crm_pool)
-                        ui_message = Message(
-                            id=ig_response.message_id,  # Use Instagram's message ID
-                            sender_id=account_id,  # Business account
-                            recipient_id=recipient_id,  # Customer
-                            message_text=message or '',  # Empty string if media-only
-                            direction="outbound",
-                            timestamp=datetime.now(timezone.utc)
-                        )
-                        await message_repo.save(ui_message)
-                        logger.info(f"✅ Message saved to messages table for UI: {ig_response.message_id}")
-
-                        # Save attachment to message_attachments table if present
-                        if attachment_url and attachment_type:
-                            attachment_id = f"{ig_response.message_id}_0"
-                            # Extract local path from public URL
-                            # attachment_url format: "http://example.com/media/outbound/{account_id}/{filename}"
-                            local_path = f"media/outbound/{account_id}/{unique_filename}"
-
-                            attachment = MessageAttachment(
-                                id=attachment_id,
-                                message_id=ig_response.message_id,
-                                attachment_index=0,
-                                media_type=attachment_type,
-                                media_url=attachment_url,  # Public URL for Instagram
-                                media_url_local=local_path,  # Local path for frontend
-                                media_mime_type=file.content_type
-                            )
-                            db.add(attachment)
-                            await db.flush()  # Flush to persist attachment
-                            logger.info(f"✅ Attachment saved: {attachment_id} ({attachment_type}, {file.content_type})")
-
-                    except Exception as save_error:
-                        # Log error but don't fail the request - message was sent successfully
-                        logger.error(f"⚠️ Failed to save message to messages table: {save_error}", exc_info=True)
-
-                    # Broadcast to SSE clients for real-time UI update
+                # Schedule SSE broadcast as post-commit hook
+                async def broadcast_sse():
                     try:
                         message_data = {
-                            "id": ig_response.message_id,  # Use Instagram's message ID (not internal tracking ID)
-                            "tracking_message_id": outbound_message.id,  # Include tracking ID for matching optimistic updates
-                            "sender_id": account_id,
-                            "recipient_id": recipient_id,
-                            "text": message or '',
+                            "id": sent_message.id.value,
+                            "tracking_message_id": outbound_message.id,
+                            "sender_id": sent_message.sender_id.value,
+                            "recipient_id": sent_message.recipient_id.value,
+                            "text": sent_message.message_text or '',
                             "direction": "outbound",
-                            "timestamp": outbound_message.created_at.isoformat(),
+                            "timestamp": sent_message.timestamp.isoformat(),
                             "status": "sent",
                             "instagram_account_id": account_id
                         }
 
                         # Include attachment if present
-                        if attachment_url and attachment_type:
-                            message_data["attachments"] = [{
-                                "id": f"{ig_response.message_id}_0",
-                                "media_type": attachment_type,
-                                "media_url": attachment_url,
-                                "media_url_local": f"media/outbound/{account_id}/{unique_filename}",
-                                "media_mime_type": file.content_type,
-                                "attachment_index": 0
-                            }]
+                        if sent_message.attachments:
+                            attachments_data = []
+                            for att in sent_message.attachments:
+                                attachments_data.append({
+                                    "id": att.id.value,
+                                    "media_type": att.media_type,
+                                    "media_url": att.media_url,
+                                    "media_url_local": att.media_url_local,
+                                    "media_mime_type": att.media_mime_type,
+                                    "attachment_index": att.attachment_index
+                                })
+                            message_data["attachments"] = attachments_data
 
                         await broadcast_new_message(message_data)
                     except Exception as sse_error:
                         logger.error(f"Failed to broadcast SSE message: {sse_error}")
 
-                except (InstagramAPIError, Exception) as e:
-                    # Update message status to "failed"
-                    outbound_message.status = "failed"
+                uow.add_post_commit_hook(broadcast_sse)
 
-                    if isinstance(e, InstagramAPIError):
-                        outbound_message.error_code = "instagram_api_error"
-                        error_msg = e.message
+                # Commit transaction (triggers post-commit hooks)
+                await uow.commit()
 
-                        # Provide helpful error messages for common issues
-                        if "не знайдено користувача" in error_msg.lower() or "user not found" in error_msg.lower():
-                            error_msg = (
-                                f"{error_msg}. This recipient may not exist or hasn't messaged your account yet. "
-                                "Instagram requires users to message you first before you can send them messages."
-                            )
-                        elif "24 hour" in error_msg.lower() or "messaging window" in error_msg.lower():
-                            error_msg = (
-                                f"{error_msg}. The 24-hour messaging window has expired. "
-                                "You can only send messages within 24 hours of the user's last message."
-                            )
+            except (InstagramAPIError, ValueError, AccountNotFoundError, Exception) as e:
+                # Update message status to "failed"
+                outbound_message.status = "failed"
 
-                        outbound_message.error_message = f"HTTP {e.status_code}: {error_msg}" if e.status_code else error_msg
-                    else:
-                        outbound_message.error_code = "unexpected_error"
-                        outbound_message.error_message = str(e)
+                if isinstance(e, InstagramAPIError):
+                    outbound_message.error_code = "instagram_api_error"
+                    error_msg = e.message
 
-                    logger.error(f"❌ Failed to send message {message_id}: {outbound_message.error_message}")
+                    # Provide helpful error messages for common issues
+                    if "не знайдено користувача" in error_msg.lower() or "user not found" in error_msg.lower():
+                        error_msg = (
+                            f"{error_msg}. This recipient may not exist or hasn't messaged your account yet. "
+                            "Instagram requires users to message you first before you can send them messages."
+                        )
+                    elif "24 hour" in error_msg.lower() or "messaging window" in error_msg.lower():
+                        error_msg = (
+                            f"{error_msg}. The 24-hour messaging window has expired. "
+                            "You can only send messages within 24 hours of the user's last message."
+                        )
 
-                    # Broadcast failure to SSE clients
-                    try:
-                        await broadcast_message_status(message_id, "failed")
-                    except Exception as sse_error:
-                        logger.error(f"Failed to broadcast SSE status: {sse_error}")
-    
-    # 6. Single commit at the end - all state changes persisted together
-    await db.commit()
+                    outbound_message.error_message = f"HTTP {e.status_code}: {error_msg}" if e.status_code else error_msg
+                elif isinstance(e, AccountNotFoundError):
+                    outbound_message.error_code = "account_not_found"
+                    outbound_message.error_message = str(e)
+                elif isinstance(e, ValueError):
+                    # Covers missing_token and token_decrypt_error from MessageService
+                    outbound_message.error_code = "configuration_error"
+                    outbound_message.error_message = str(e)
+                else:
+                    outbound_message.error_code = "unexpected_error"
+                    outbound_message.error_message = str(e)
+
+                logger.error(f"❌ Failed to send message {message_id}: {outbound_message.error_message}")
+
+                # Broadcast failure to SSE clients
+                try:
+                    await broadcast_message_status(message_id, "failed")
+                except Exception as sse_error:
+                    logger.error(f"Failed to broadcast SSE status: {sse_error}")
+
+        # Commit CRM tracking record (after UoW context exits)
+        await db.commit()
+
+    except Exception as outer_error:
+        logger.error(f"❌ Unexpected error in send_message: {outer_error}", exc_info=True)
+        await db.rollback()
     
     # 7. Return response with current status (including attachment info)
     return SendMessageResponse(

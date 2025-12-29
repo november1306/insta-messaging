@@ -1,72 +1,132 @@
 """
 Core interfaces for Instagram Messenger Automation.
 
-YAGNI: Start with minimal abstractions. Add complexity when needed.
+Updated to use new domain models from app/domain/entities.py
+
+Note: The Message class here is a legacy interface for backward compatibility
+with WebhookForwarder. New code should use app.domain.entities.Message instead.
 """
 from abc import ABC, abstractmethod
-from typing import Optional, List
-from datetime import datetime, timezone
+from typing import Optional, List, TYPE_CHECKING
 from dataclasses import dataclass
+from datetime import datetime
+
+# Import domain models
+if TYPE_CHECKING:
+    from app.domain.entities import Message as DomainMessage, Conversation
+    from app.domain.value_objects import MessageId, AccountId, IdempotencyKey
+    from app.db.models import Account
 
 
 @dataclass
-class Attachment:
-    """
-    Single media attachment (image, video, audio, file).
-
-    Represents one attachment in a message. Messages can have multiple attachments
-    (Instagram supports sending multiple images/videos in one message).
-    """
-    id: str                          # Format: "mid_abc123_0", "mid_abc123_1"
-    message_id: str                  # Parent message ID
-    attachment_index: int            # Order: 0, 1, 2... (preserves display order)
-    media_type: str                  # "image", "video", "audio", "file", "like_heart"
-    media_url: str                   # Instagram CDN URL (expires in 7 days)
-    media_url_local: Optional[str]   # Our local copy: "media/page456/user123/mid_abc123_0.jpg" (permanent)
-    media_mime_type: Optional[str]   # "image/jpeg", "video/mp4" (detected when downloaded)
-
-
-# Simple domain model for messages
 class Message:
     """
-    Domain model for a message with optional media attachments.
+    Legacy Message interface for backward compatibility.
 
-    A message can be:
-    - Text-only (attachments=None or [])
-    - Media-only (message_text=None, attachments=[...])
-    - Both (message_text="Caption", attachments=[...])
+    Used by: WebhookForwarder, CRM integration
+
+    TODO: Replace with domain.entities.Message in future refactoring.
+    This is a simple DTO (Data Transfer Object) without business logic.
     """
-    def __init__(
-        self,
-        id: str,
-        sender_id: str,
-        recipient_id: str,
-        message_text: Optional[str],  # Made optional - can be None for media-only messages
-        direction: str,  # 'inbound' or 'outbound'
-        timestamp: datetime,
-        created_at: Optional[datetime] = None,
-        attachments: Optional[List[Attachment]] = None  # NEW: List of attachments
-    ):
-        self.id = id
-        self.sender_id = sender_id
-        self.recipient_id = recipient_id
-        self.message_text = message_text
-        self.direction = direction
-        self.timestamp = timestamp
-        self.created_at = created_at or datetime.now(timezone.utc)
-        self.attachments = attachments if attachments is not None else []  # Default to empty list
+    id: str
+    sender_id: str
+    recipient_id: str
+    message_text: Optional[str]
+    direction: str
+    timestamp: datetime
 
 
-# Repository interface (add when we actually implement it)
 class IMessageRepository(ABC):
-    """Interface for message storage."""
-    
+    """
+    Interface for message storage and retrieval.
+
+    Implementations must handle:
+    - Message persistence with attachments
+    - Idempotency checking
+    - Conversation grouping
+    """
+
     @abstractmethod
-    async def save(self, message: Message) -> Message:
-        """Save a message to storage."""
+    async def save(self, message: 'Message') -> 'Message':
+        """
+        Save a message with attachments.
+
+        Args:
+            message: Domain Message entity
+
+        Returns:
+            Saved message
+
+        Raises:
+            DuplicateMessageError: If message ID already exists
+        """
         pass
-    
+
     @abstractmethod
-    async def get_by_id(self, message_id: str) -> Optional[Message]:
-        """Get a message by ID."""
+    async def get_by_id(self, message_id: 'MessageId') -> Optional['Message']:
+        """
+        Get message by ID with attachments.
+
+        Args:
+            message_id: Message identifier
+
+        Returns:
+            Message if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def get_by_idempotency_key(
+        self,
+        idempotency_key: 'IdempotencyKey'
+    ) -> Optional['Message']:
+        """
+        Get message by idempotency key (for duplicate detection).
+
+        Args:
+            idempotency_key: Idempotency key
+
+        Returns:
+            Message if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def get_conversations_for_account(
+        self,
+        account_id: 'AccountId',
+        limit: int = 50
+    ) -> List['Conversation']:
+        """
+        Get conversations for an account.
+
+        Args:
+            account_id: Account identifier
+            limit: Maximum number of conversations to return
+
+        Returns:
+            List of conversations (latest message per contact)
+        """
+        pass
+
+
+class IAccountRepository(ABC):
+    """Interface for account storage and retrieval"""
+
+    @abstractmethod
+    async def get_by_id(self, account_id: str) -> Optional['Account']:
+        """Get account by database ID"""
+        pass
+
+    @abstractmethod
+    async def get_by_instagram_id(self, instagram_id: str) -> Optional['Account']:
+        """Get account by Instagram account ID"""
+        pass
+
+    @abstractmethod
+    async def get_by_messaging_channel_id(
+        self,
+        channel_id: str
+    ) -> Optional['Account']:
+        """Get account by messaging channel ID"""
         pass

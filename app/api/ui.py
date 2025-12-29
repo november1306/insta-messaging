@@ -5,6 +5,8 @@ Provides conversation lists and message retrieval for the Vue chat interface
 Authentication:
 - POST /ui/session: Validates Basic Auth credentials, returns JWT token
 - All other /ui/* endpoints: Protected by JWT token validation
+
+Refactored to use centralized cache service.
 """
 import logging
 import httpx
@@ -21,16 +23,13 @@ from app.clients.instagram_client import InstagramClient
 from app.config import settings
 from app.api.auth import verify_api_key, verify_ui_session
 from app.services.user_service import UserService
+from app.infrastructure.cache_service import get_cached_username
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# Cache for Instagram usernames (in-memory for MVP)
-# In production, use Redis or database
-username_cache: Dict[str, str] = {}
 
 # Business account can only respond within 24 hours
 RESPONSE_WINDOW_HOURS = 24
@@ -245,43 +244,41 @@ async def get_current_account(
 async def _get_instagram_username(sender_id: str, access_token: str = None, is_business_account: bool = False) -> str:
     """
     Get Instagram username for a sender ID.
-    Uses cache to avoid repeated API calls.
+    Uses centralized TTL cache to avoid repeated API calls.
 
     Args:
         sender_id: Instagram user ID
         access_token: Instagram access token for API calls. If not provided, returns sender_id.
-        is_business_account: If True, fetch business account username properly
+        is_business_account: If True, always fetch (business accounts change less frequently but need fresh data)
 
     Returns:
         Username in @username format, or user_id if fetch fails
     """
-    # Check cache first (unless it's the business account)
-    if not is_business_account and sender_id in username_cache:
-        return username_cache[sender_id]
-
     # If no access token provided, return sender_id (can't fetch from API)
     if not access_token:
         return sender_id
 
-    # Fetch from Instagram API
-    try:
-        async with httpx.AsyncClient() as http_client:
-            instagram_client = InstagramClient(
-                http_client=http_client,
-                access_token=access_token,
-                logger_instance=logger
-            )
-            profile = await instagram_client.get_user_profile(sender_id)
+    # Define async fetch function for cache
+    async def fetch_from_api(user_id: str) -> str:
+        """Fetch username from Instagram API"""
+        try:
+            async with httpx.AsyncClient() as http_client:
+                instagram_client = InstagramClient(
+                    http_client=http_client,
+                    access_token=access_token,
+                    logger_instance=logger
+                )
+                profile = await instagram_client.get_user_profile(user_id)
 
-            if profile and "username" in profile:
-                username = f"@{profile['username']}"
-                username_cache[sender_id] = username
-                return username
-    except Exception as e:
-        logger.warning(f"Failed to fetch username for {sender_id}: {e}")
+                if profile and "username" in profile:
+                    return f"@{profile['username']}"
+        except Exception as e:
+            logger.warning(f"Failed to fetch username for {user_id}: {e}")
+        return None
 
-    # Fallback to sender_id
-    return sender_id
+    # Use centralized cache service
+    username = await get_cached_username(sender_id, fetch_func=fetch_from_api)
+    return username or sender_id  # Fallback to sender_id if fetch fails
 
 
 async def _get_instagram_profile(sender_id: str, access_token: str = None) -> dict:

@@ -1,5 +1,5 @@
-"""Core module containing interfaces and domain models."""
+"""Core module containing interfaces."""
 
-from app.core.interfaces import Message, IMessageRepository
+from app.core.interfaces import IMessageRepository, IAccountRepository
 
-__all__ = ["Message", "IMessageRepository"]
+__all__ = ["IMessageRepository", "IAccountRepository"]
