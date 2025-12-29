@@ -451,6 +451,13 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
             return None
 
         message = messaging_event["message"]
+
+        # Skip echo messages (messages we sent that Instagram echoes back)
+        # Instagram sends these with is_echo: true to confirm delivery
+        if message.get("is_echo"):
+            logger.debug(f"Skipping echo message: {message.get('mid')}")
+            return None
+
         text = message.get("text")
         attachments = message.get("attachments", [])
 
