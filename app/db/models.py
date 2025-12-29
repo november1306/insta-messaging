@@ -32,6 +32,7 @@ class MessageModel(Base):
 
     # Core fields
     id = Column(String(100), primary_key=True)  # Instagram message ID
+    account_id = Column(String(50), nullable=True)  # Database account ID (FK added later)
     sender_id = Column(String(50), nullable=False)  # Instagram user ID
     recipient_id = Column(String(50), nullable=False)  # Instagram user ID
     message_text = Column(Text)  # Message content (text message OR caption for media)
@@ -39,9 +40,16 @@ class MessageModel(Base):
     timestamp = Column(DateTime, nullable=False)  # When message was sent
     created_at = Column(DateTime, default=func.now())  # When we stored it
 
+    # CRM tracking fields (added in merge_tracking_tables migration)
+    idempotency_key = Column(String(100), nullable=True)  # For duplicate detection
+    delivery_status = Column(String(20), nullable=True)  # 'pending', 'sent', 'failed', 'delivered', 'read'
+    error_code = Column(String(50), nullable=True)  # Error code if delivery failed
+    error_message = Column(Text, nullable=True)  # Error message if delivery failed
+
     __table_args__ = (
         Index('idx_timestamp', 'timestamp'),
         Index('idx_sender', 'sender_id'),
+        Index('idx_messages_account_id', 'account_id'),  # Added in migration
     )
 
     # Relationships
