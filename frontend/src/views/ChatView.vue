@@ -144,35 +144,10 @@ function handleSSEMessage(data) {
         }
 
         // Match by tracking_message_id (optimistic update) or id (Instagram message ID)
-        console.log('[SSE Matching] Trying to match outbound message:', {
-          sse_id: data.data.id,
-          sse_tracking_id: data.data.tracking_message_id,
-          sse_text: data.data.text,
-          existing_messages: store.messages[recipientId]?.map(m => ({
-            id: m.id,
-            text: m.text,
-            direction: m.direction
-          }))
-        })
-
         let existingIndex = store.messages[recipientId].findIndex(m =>
           m.id === data.data.id ||
           (data.data.tracking_message_id && m.id === data.data.tracking_message_id)
         )
-
-        console.log('[SSE Matching] ID match result:', existingIndex >= 0 ? 'FOUND' : 'NOT FOUND', 'at index:', existingIndex)
-
-        // Fallback: If not found by ID, check for recent outbound message with same text
-        // This handles race condition where SSE arrives before temp ID is updated to tracking ID
-        if (existingIndex === -1) {
-          const fiveSecondsAgo = Date.now() - 5000
-          existingIndex = store.messages[recipientId].findIndex(m =>
-            m.direction === 'outbound' &&
-            m.text === data.data.text &&
-            new Date(m.timestamp).getTime() > fiveSecondsAgo
-          )
-          console.log('[SSE Matching] Text fallback match result:', existingIndex >= 0 ? 'FOUND' : 'NOT FOUND', 'at index:', existingIndex)
-        }
 
         if (existingIndex >= 0) {
           // Update existing message with SSE data (includes attachments)
