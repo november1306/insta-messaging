@@ -494,58 +494,6 @@ async def serve_media(
 logger.info(f"✅ Authenticated media endpoint enabled at /media/attachments/{{attachment_id}}")
 
 
-@app.get("/media/{channel_id}/{sender_id}/{filename:path}")
-async def serve_legacy_media(
-    channel_id: str,
-    sender_id: str,
-    filename: str,
-    download: bool = False,
-    auth_context: dict = Depends(verify_jwt_or_api_key)
-):
-    """
-    Serve legacy nested media files (OLD format) with authentication.
-
-    Path format: /media/{channel_id}/{sender_id}/{filename}
-    Example: /media/17841478096518771/25964748486442669/file.jpg
-
-    This endpoint provides backward compatibility for old inbound media
-    that was stored in the nested directory structure before migration
-    to the flat attachments/ format.
-
-    Requires valid JWT token or API key.
-    """
-    # Construct file path
-    file_path = media_dir / channel_id / sender_id / filename
-
-    if not file_path.exists():
-        logger.warning(f"Legacy media file not found: {file_path}")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Media file not found"
-        )
-
-    # Security: Verify the resolved path is within media directory
-    try:
-        file_path.resolve().relative_to(media_dir.resolve())
-    except ValueError:
-        logger.error(f"Path traversal attempt detected: {file_path}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid file path"
-        )
-
-    logger.debug(f"Serving legacy media file: {file_path}")
-
-    if download:
-        return FileResponse(
-            file_path,
-            filename=file_path.name,
-            media_type='application/octet-stream'
-        )
-    else:
-        return FileResponse(file_path)
-
-
 # ============================================
 # Frontend Web UI (Vue.js SPA)
 # ============================================

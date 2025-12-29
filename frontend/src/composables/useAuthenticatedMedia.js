@@ -36,7 +36,7 @@ export function useAuthenticatedMedia() {
       let fetchUrl
 
       if (mediaPath.startsWith('media/attachments/')) {
-        // Inbound media (new format): Extract attachment ID
+        // Inbound media: Extract attachment ID
         // Path format: "media/attachments/mid_abc123_0.jpg"
         // Extract: "mid_abc123_0"
         const attachmentId = extractAttachmentId(mediaPath)
@@ -46,13 +46,9 @@ export function useAuthenticatedMedia() {
         }
         fetchUrl = `${baseUrl}/media/attachments/${attachmentId}`
       } else if (mediaPath.startsWith('media/outbound/')) {
-        // Outbound media (old format): Use full path
+        // Outbound media: Use full path
         // Path format: "media/outbound/acc_xxx/filename.png"
         // Note: Outbound endpoint is public (no auth required), but we send token anyway
-        fetchUrl = `${baseUrl}/${mediaPath}`
-      } else if (mediaPath.startsWith('media/') && mediaPath.split('/').length >= 4) {
-        // OLD nested inbound format (legacy): media/{channel_id}/{sender_id}/{filename}
-        // Serve via generic path endpoint with authentication
         fetchUrl = `${baseUrl}/${mediaPath}`
       } else {
         console.error(`Unknown media path format: ${mediaPath}`)
@@ -105,7 +101,7 @@ export function useAuthenticatedMedia() {
       let fetchUrl
 
       if (mediaPath.startsWith('media/attachments/')) {
-        // Inbound media (new format): Extract attachment ID
+        // Inbound media: Extract attachment ID
         const attachmentId = extractAttachmentId(mediaPath)
         if (!attachmentId) {
           console.error(`Invalid attachment path format: ${mediaPath}`)
@@ -113,10 +109,7 @@ export function useAuthenticatedMedia() {
         }
         fetchUrl = `${baseUrl}/media/attachments/${attachmentId}?download=true`
       } else if (mediaPath.startsWith('media/outbound/')) {
-        // Outbound media (old format): Use full path
-        fetchUrl = `${baseUrl}/${mediaPath}?download=true`
-      } else if (mediaPath.startsWith('media/') && mediaPath.split('/').length >= 4) {
-        // OLD nested inbound format (legacy): media/{channel_id}/{sender_id}/{filename}
+        // Outbound media: Use full path
         fetchUrl = `${baseUrl}/${mediaPath}?download=true`
       } else {
         console.error(`Unknown media path format: ${mediaPath}`)
