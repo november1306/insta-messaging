@@ -149,8 +149,8 @@ async def handle_webhook(
         except Exception as e:
             logger.warning(f"Failed to pretty-print webhook body: {e}")
 
-        # Initialize MessageService with Instagram client (will be created per-message with account token)
-        message_service = MessageService(instagram_client=None)  # Client created per-account
+        # Initialize MessageService (Instagram clients created per-account inside methods)
+        message_service = MessageService()
 
         # Parse and store messages from webhook payload
         for entry in body.get("entry", []):
