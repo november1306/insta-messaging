@@ -15,7 +15,7 @@ import base64
 from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, or_
+from sqlalchemy import select, func, desc, or_, and_, case
 from sqlalchemy.orm import selectinload
 from app.db.connection import get_db_session
 from app.db.models import MessageModel, APIKey, UserAccount, Account
@@ -30,9 +30,6 @@ from datetime import datetime, timezone, timedelta
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# Business account can only respond within 24 hours
-RESPONSE_WINDOW_HOURS = 24
 
 
 # ============================================
@@ -393,33 +390,53 @@ async def get_conversations(
             # Return empty conversations if channel not bound yet
             return {"conversations": []}
 
-        # Get current time for calculating response window status
-        now = datetime.now(timezone.utc)
-
-        # Subquery to get the latest message ID for each sender
-        # Filter by recipient_id (messaging_channel_id) to ensure only messages TO this channel are included
+        # Subquery to get the latest message for each contact (customer)
+        # A conversation is identified by the contact's Instagram ID
+        # Latest message can be either inbound (from contact) or outbound (to contact)
+        # Contact ID is:
+        #   - sender_id if direction='inbound'
+        #   - recipient_id if direction='outbound'
         subq = (
             select(
-                MessageModel.sender_id,
-                func.max(MessageModel.id).label('latest_message_id')
+                case(
+                    (MessageModel.direction == 'inbound', MessageModel.sender_id),
+                    else_=MessageModel.recipient_id
+                ).label('contact_id'),
+                func.max(MessageModel.timestamp).label('latest_timestamp')
             )
-            .where(MessageModel.direction == 'inbound')
-            .where(MessageModel.recipient_id == messaging_channel_id)  # Only messages to this messaging channel
-            .group_by(MessageModel.sender_id)
+            .where(
+                or_(
+                    # Inbound to this channel
+                    and_(
+                        MessageModel.direction == 'inbound',
+                        MessageModel.recipient_id == messaging_channel_id
+                    ),
+                    # Outbound from this channel
+                    and_(
+                        MessageModel.direction == 'outbound',
+                        MessageModel.sender_id == messaging_channel_id
+                    )
+                )
+            )
+            .group_by('contact_id')
             .subquery()
         )
 
         # Join to get full message details
-        # IMPORTANT: Filter by messaging_channel_id to show only this account's contacts
+        # Match on contact_id AND timestamp to get the actual latest message
         stmt = (
             select(MessageModel)
             .join(
                 subq,
-                (MessageModel.sender_id == subq.c.sender_id) &
-                (MessageModel.id == subq.c.latest_message_id)
+                and_(
+                    or_(
+                        and_(MessageModel.direction == 'inbound', MessageModel.sender_id == subq.c.contact_id),
+                        and_(MessageModel.direction == 'outbound', MessageModel.recipient_id == subq.c.contact_id)
+                    ),
+                    MessageModel.timestamp == subq.c.latest_timestamp
+                )
             )
-            .where(MessageModel.recipient_id == messaging_channel_id)  # Only messages to this messaging channel
-            .where(MessageModel.sender_id != messaging_channel_id)  # Exclude messaging channel from contacts
+            .where(subq.c.contact_id != messaging_channel_id)  # Exclude self-messages
             .order_by(desc(MessageModel.timestamp))
         )
 
@@ -427,8 +444,11 @@ async def get_conversations(
         messages = result.scalars().all()
 
         # Debug logging to understand what conversations are found
-        sender_ids_found = [msg.sender_id for msg in messages]
-        logger.info(f"🔍 Conversations query for account {account_id} (channel:{messaging_channel_id}): Found {len(messages)} conversations with sender_ids: {sender_ids_found}")
+        contact_ids_found = [
+            msg.sender_id if msg.direction == 'inbound' else msg.recipient_id
+            for msg in messages
+        ]
+        logger.info(f"🔍 Conversations query for account {account_id} (channel:{messaging_channel_id}): Found {len(messages)} conversations with contact_ids: {contact_ids_found}")
 
         # Decrypt account access token for profile fetching
         from app.services.encryption_service import decrypt_credential
@@ -439,42 +459,45 @@ async def get_conversations(
             access_token = None
 
         # Batch fetch profiles in parallel to avoid N+1 query problem
-        # Collect unique sender IDs
-        unique_sender_ids = list(set(msg.sender_id for msg in messages))
+        # Collect unique contact IDs (sender for inbound, recipient for outbound)
+        unique_contact_ids = list(set(
+            msg.sender_id if msg.direction == 'inbound' else msg.recipient_id
+            for msg in messages
+        ))
 
         # Fetch all profiles concurrently using account-specific token
         import asyncio
-        profile_tasks = [_get_instagram_profile(sender_id, access_token) for sender_id in unique_sender_ids]
+        profile_tasks = [_get_instagram_profile(contact_id, access_token) for contact_id in unique_contact_ids]
         profiles = await asyncio.gather(*profile_tasks)
 
-        # Create sender_id -> profile mapping
-        profile_map = dict(zip(unique_sender_ids, profiles))
+        # Create contact_id -> profile mapping
+        profile_map = dict(zip(unique_contact_ids, profiles))
 
         conversations = []
         for msg in messages:
-            # Get profile from pre-fetched map
-            profile = profile_map.get(msg.sender_id, {"username": msg.sender_id, "profile_picture_url": None})
+            # Determine contact ID based on message direction
+            # For inbound: contact is the sender
+            # For outbound: contact is the recipient
+            contact_id = msg.sender_id if msg.direction == 'inbound' else msg.recipient_id
+            channel_id = msg.recipient_id if msg.direction == 'inbound' else msg.sender_id
 
-            # Calculate time remaining in response window
+            # Get profile from pre-fetched map
+            profile = profile_map.get(contact_id, {"username": contact_id, "profile_picture_url": None})
+
             # Ensure msg.timestamp is timezone-aware (assume UTC if naive)
             msg_timestamp = msg.timestamp
             if msg_timestamp.tzinfo is None:
                 msg_timestamp = msg_timestamp.replace(tzinfo=timezone.utc)
 
-            time_remaining = (msg_timestamp + timedelta(hours=RESPONSE_WINDOW_HOURS)) - now
-            hours_remaining = int(time_remaining.total_seconds() / 3600)  # Can be negative if expired
-
             conversations.append({
-                "sender_id": msg.sender_id,
+                "sender_id": contact_id,  # The contact (customer) ID
                 "sender_name": profile["username"],
-                "profile_picture_url": profile["profile_picture_url"],  # Fixed field name for frontend
+                "profile_picture_url": profile["profile_picture_url"],
                 "last_message": msg.message_text or "",
                 "last_message_time": msg_timestamp.isoformat() if msg_timestamp else None,
                 "unread_count": 0,  # TODO: Implement read/unread tracking
-                "messaging_channel_id": msg.recipient_id,  # The messaging channel that received the message
-                "account_id": account_id,  # The database account ID (e.g., acc_xxx)
-                "hours_remaining": hours_remaining,  # Hours left to respond
-                "can_respond": hours_remaining > 0
+                "messaging_channel_id": channel_id,  # The messaging channel
+                "account_id": account_id  # The database account ID (e.g., acc_xxx)
             })
 
         return {"conversations": conversations}
