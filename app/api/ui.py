@@ -585,28 +585,25 @@ async def get_messages(
             access_token = None
 
         # Get all messages for this conversation thread (both inbound and outbound)
-        # Filter by messaging_channel_id to ensure only messages for THIS channel are returned
-        # - Inbound: user sends TO this messaging channel
-        # - Outbound: this messaging channel sends TO user
+        # Simple approach: Filter by account_id and conversation participant (sender_id)
+        # This handles all cases regardless of which Instagram ID was used
         stmt = (
             select(MessageModel)
             .options(selectinload(MessageModel.attachments))  # Eagerly load attachments
             .where(
+                MessageModel.account_id == account_id,
                 or_(
-                    # Inbound: user sends to this messaging channel
-                    (MessageModel.sender_id == sender_id) &
-                    (MessageModel.recipient_id == messaging_channel_id),
-
-                    # Outbound: this messaging channel sends to user
-                    (MessageModel.sender_id == messaging_channel_id) &
-                    (MessageModel.recipient_id == sender_id)
+                    MessageModel.sender_id == sender_id,
+                    MessageModel.recipient_id == sender_id
                 )
             )
-            .order_by(MessageModel.timestamp)
+            .order_by(MessageModel.timestamp.desc())  # Get most recent first
+            .limit(100)  # Limit to 100 most recent messages
         )
 
         result = await db.execute(stmt)
-        messages = result.scalars().all()
+        # Reverse to get chronological order (oldest to newest) for UI display
+        messages = list(reversed(result.scalars().all()))
 
         message_list = []
         sender_info = None
