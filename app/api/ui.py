@@ -597,12 +597,13 @@ async def get_messages(
                     MessageModel.recipient_id == sender_id
                 )
             )
-            .order_by(MessageModel.timestamp)
+            .order_by(MessageModel.timestamp.desc())  # Get most recent first
             .limit(100)  # Limit to 100 most recent messages
         )
 
         result = await db.execute(stmt)
-        messages = result.scalars().all()
+        # Reverse to get chronological order (oldest to newest) for UI display
+        messages = list(reversed(result.scalars().all()))
 
         message_list = []
         sender_info = None
