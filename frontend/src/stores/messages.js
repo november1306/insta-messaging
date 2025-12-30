@@ -50,11 +50,16 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
-  async function fetchMessages(senderId) {
+  async function fetchMessages(senderId, accountId = null) {
     loading.value = true
     error.value = null
     try {
-      const response = await apiClient.get(`/ui/messages/${senderId}`)
+      // Build URL with optional account_id parameter
+      const url = accountId
+        ? `/ui/messages/${senderId}?account_id=${accountId}`
+        : `/ui/messages/${senderId}`
+
+      const response = await apiClient.get(url)
       messages.value[senderId] = response.data.messages
       activeConversationId.value = senderId
     } catch (err) {
@@ -79,11 +84,13 @@ export const useMessagesStore = defineStore('messages', () => {
     // Add optimistic update IMMEDIATELY (before API call)
     const sentMessage = {
       id: tempId,
+      tempId: tempId,  // Keep temp ID for matching even after ID update
       text: messageText,
       direction: 'outbound',
       timestamp: new Date().toISOString(),
       status: 'pending',
-      attachments: []
+      attachments: [],
+      recipientId: recipientId  // Store recipient ID for SSE matching
     }
 
     if (!messages.value[recipientId]) {
@@ -118,9 +125,10 @@ export const useMessagesStore = defineStore('messages', () => {
       })
 
       // Update the optimistic message with tracking ID from response
-      const msgIndex = messages.value[recipientId].findIndex(m => m.id === tempId)
+      const msgIndex = messages.value[recipientId].findIndex(m => m.tempId === tempId || m.id === tempId)
       if (msgIndex >= 0) {
         messages.value[recipientId][msgIndex].id = response.data.message_id  // Replace temp ID with tracking ID
+        messages.value[recipientId][msgIndex].trackingId = response.data.message_id  // Also store as trackingId for SSE matching
         messages.value[recipientId][msgIndex].status = response.data.status || 'sent'
 
         // Add attachment if present in response

@@ -143,21 +143,53 @@ function handleSSEMessage(data) {
           store.messages[recipientId] = []
         }
 
-        // Match by tracking_message_id (optimistic update) or id (Instagram message ID)
-        let existingIndex = store.messages[recipientId].findIndex(m =>
-          m.id === data.data.id ||
-          (data.data.tracking_message_id && m.id === data.data.tracking_message_id)
-        )
+        // Multi-strategy matching to handle race conditions:
+        // 1. Match by Instagram message ID (if already updated)
+        // 2. Match by tracking_message_id (from API response)
+        // 3. Match by tempId (if SSE arrives before API response)
+        // 4. Match by content (timestamp + text + status=pending as fallback)
+
+        let existingIndex = store.messages[recipientId].findIndex(m => {
+          // Strategy 1: Instagram ID match
+          if (m.id === data.data.id) return true
+
+          // Strategy 2: Tracking ID match (optimistic message updated by API)
+          if (data.data.tracking_message_id && (m.id === data.data.tracking_message_id || m.trackingId === data.data.tracking_message_id)) return true
+
+          // Strategy 3: Temp ID match (SSE arrived before API response)
+          if (m.tempId && data.data.tracking_message_id && m.tempId.startsWith('temp_')) return true
+
+          // Strategy 4: Content-based fallback (pending message with same text in last 10 seconds)
+          if (m.status === 'pending' && m.text === data.data.text && m.recipientId === recipientId) {
+            const timeDiff = Math.abs(new Date(m.timestamp) - new Date(data.data.timestamp))
+            if (timeDiff < 10000) return true  // Within 10 seconds
+          }
+
+          return false
+        })
 
         if (existingIndex >= 0) {
-          // Update existing message with SSE data (includes attachments)
+          // IMPORTANT: Update ONLY the status and ID, preserve optimistic data
+          const existingMsg = store.messages[recipientId][existingIndex]
+
+          console.log('[SSE] Updating existing outbound message:', {
+            existingId: existingMsg.id,
+            tempId: existingMsg.tempId,
+            sseId: data.data.id,
+            sseTrackingId: data.data.tracking_message_id
+          })
+
+          // Update with SSE data but keep tempId for future matching
           store.messages[recipientId][existingIndex] = {
-            ...store.messages[recipientId][existingIndex],
-            ...data.data,
-            status: data.data.status || 'sent'
+            ...existingMsg,  // Keep existing data (including tempId)
+            id: data.data.id,  // Update to Instagram message ID
+            status: data.data.status || 'sent',  // Update status marker
+            attachments: data.data.attachments || existingMsg.attachments,  // Use SSE attachments if present
+            timestamp: data.data.timestamp || existingMsg.timestamp  // Use SSE timestamp if present
           }
         } else {
           // Add new outbound message from SSE (e.g., sent from another tab)
+          console.log('[SSE] Adding new outbound message from another session:', data.data.id)
           store.messages[recipientId].push(data.data)
         }
       }
@@ -171,9 +203,13 @@ function handleSSEMessage(data) {
 async function handleSelectConversation(senderId) {
   store.setActiveConversation(senderId)
 
+  // Get account_id from the selected conversation
+  const conversation = store.conversations.find(c => c.sender_id === senderId)
+  const accountId = conversation?.account_id || accountsStore.selectedAccount?.account_id
+
   // Fetch messages if not already loaded
   if (!store.messages[senderId]) {
-    await store.fetchMessages(senderId)
+    await store.fetchMessages(senderId, accountId)
   }
 }
 

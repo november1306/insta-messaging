@@ -34,9 +34,10 @@ export function useAuthenticatedMedia() {
       // Determine endpoint based on path type
       const baseUrl = import.meta.env.DEV ? 'http://localhost:8000' : ''
       let fetchUrl
+      let response
 
       if (mediaPath.startsWith('media/attachments/')) {
-        // Inbound media: Extract attachment ID
+        // Inbound media: Authenticated endpoint
         // Path format: "media/attachments/mid_abc123_0.jpg"
         // Extract: "mid_abc123_0"
         const attachmentId = extractAttachmentId(mediaPath)
@@ -45,25 +46,30 @@ export function useAuthenticatedMedia() {
           return null
         }
         fetchUrl = `${baseUrl}/media/attachments/${attachmentId}`
+
+        // Fetch with authentication (required for inbound)
+        response = await fetch(fetchUrl, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+
       } else if (mediaPath.startsWith('media/outbound/')) {
-        // Outbound media: Use full path
+        // Outbound media: Public endpoint (no auth needed)
         // Path format: "media/outbound/acc_xxx/filename.png"
-        // Note: Outbound endpoint is public (no auth required), but we send token anyway
+        // Note: Outbound endpoint is public for Instagram API access
         fetchUrl = `${baseUrl}/${mediaPath}`
+
+        // Fetch WITHOUT authentication (public endpoint)
+        response = await fetch(fetchUrl)
+
       } else {
         console.error(`Unknown media path format: ${mediaPath}`)
         return null
       }
 
-      // Fetch media with Authorization header
-      const response = await fetch(fetchUrl, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
       if (!response.ok) {
-        console.error(`Failed to fetch media: ${response.status} ${response.statusText}`)
+        console.error(`Failed to fetch media from ${fetchUrl}: ${response.status} ${response.statusText}`)
         return null
       }
 
@@ -99,32 +105,38 @@ export function useAuthenticatedMedia() {
       // Determine endpoint based on path type
       const baseUrl = import.meta.env.DEV ? 'http://localhost:8000' : ''
       let fetchUrl
+      let response
 
       if (mediaPath.startsWith('media/attachments/')) {
-        // Inbound media: Extract attachment ID
+        // Inbound media: Authenticated endpoint
         const attachmentId = extractAttachmentId(mediaPath)
         if (!attachmentId) {
           console.error(`Invalid attachment path format: ${mediaPath}`)
           return
         }
         fetchUrl = `${baseUrl}/media/attachments/${attachmentId}?download=true`
+
+        // Fetch with authentication (required for inbound)
+        response = await fetch(fetchUrl, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+
       } else if (mediaPath.startsWith('media/outbound/')) {
-        // Outbound media: Use full path
+        // Outbound media: Public endpoint (no auth needed)
         fetchUrl = `${baseUrl}/${mediaPath}?download=true`
+
+        // Fetch WITHOUT authentication (public endpoint)
+        response = await fetch(fetchUrl)
+
       } else {
         console.error(`Unknown media path format: ${mediaPath}`)
         return
       }
 
-      // Fetch file with Authorization header
-      const response = await fetch(fetchUrl, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
       if (!response.ok) {
-        console.error(`Failed to download file: ${response.status} ${response.statusText}`)
+        console.error(`Failed to download file from ${fetchUrl}: ${response.status} ${response.statusText}`)
         return
       }
 
