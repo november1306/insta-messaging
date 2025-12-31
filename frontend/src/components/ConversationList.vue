@@ -1,6 +1,24 @@
 <template>
-  <div class="flex-1 overflow-y-auto custom-scrollbar">
-    <!-- Loading State -->
+  <div class="flex flex-col h-full">
+    <!-- Header -->
+    <div class="p-4 border-b border-instagram-border bg-white">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-bold text-gray-900">Messages</h2>
+        <button
+          @click="$emit('refresh')"
+          class="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          title="Refresh conversations"
+        >
+          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Conversation List -->
+    <div class="flex-1 overflow-y-auto custom-scrollbar">
+      <!-- Loading State -->
     <div v-if="loading && !conversations.length" class="p-4 text-center text-gray-500">
       <svg class="animate-spin h-8 w-8 mx-auto" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -89,6 +107,7 @@
       </div>
     </div>
   </div>
+  </div>
 </template>
 
 <script setup>
@@ -110,7 +129,7 @@ defineProps({
   }
 })
 
-defineEmits(['select'])
+defineEmits(['select', 'refresh'])
 
 function formatTime(timestamp) {
   if (!timestamp) return ''
@@ -130,3 +149,23 @@ function formatTime(timestamp) {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 </script>
+
+<style scoped>
+/* Custom scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+</style>

@@ -1,78 +1,54 @@
 <template>
-  <div class="flex h-screen bg-white">
-    <!-- Left Sidebar: Account Selector (Master Account + Instagram Accounts) -->
-    <div class="w-72 border-r border-instagram-border">
-      <AccountSelector :sse-connected="sseConnected" :sse-error="sseError" />
-    </div>
+  <div class="flex flex-col h-screen bg-white">
+    <!-- Top: Account Tabs -->
+    <AccountTabs :sse-connected="sseConnected" :sse-error="sseError" />
 
-    <!-- Center: Conversation List (Contacts for Selected Instagram Account) -->
-    <div class="w-96 border-r border-instagram-border flex flex-col">
-      <!-- Contacts Header -->
-      <div class="border-b border-instagram-border bg-white">
-        <!-- Active Instagram Account Header -->
-        <div v-if="accountsStore.selectedAccount" class="px-6 py-4 border-b border-instagram-border">
-          <div class="flex items-center gap-3">
-            <img
-              v-if="accountsStore.selectedAccount.profile_picture_url"
-              :src="getProxiedImageUrl(accountsStore.selectedAccount.profile_picture_url)"
-              :alt="accountsStore.selectedAccount.username"
-              class="w-10 h-10 rounded-full object-cover shadow-sm"
-            />
-            <div
-              v-else
-              class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-500 flex items-center justify-center text-white font-bold shadow-sm"
-            >
-              {{ getAccountInitial(accountsStore.selectedAccount.username) }}
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="font-semibold text-sm truncate">@{{ accountsStore.selectedAccount.username }}</div>
-              <div class="text-xs text-gray-500 truncate">Active Instagram account</div>
-            </div>
-          </div>
-        </div>
-        <div v-else class="px-6 py-4 border-b border-instagram-border">
-          <div class="text-sm text-gray-500 text-center">No Instagram account selected</div>
-        </div>
+    <!-- Main Content: 3-column layout -->
+    <div class="flex flex-1 overflow-hidden">
+      <!-- Left: Conversation List -->
+      <div class="w-80 border-r border-instagram-border flex flex-col">
+        <ConversationList
+          :conversations="filteredConversations"
+          :active-id="store.activeConversationId"
+          :loading="store.loading"
+          @select="handleSelectConversation"
+          @refresh="refreshConversations"
+        />
+      </div>
 
-        <!-- Messages Header -->
-        <div class="h-14 flex items-center justify-between px-6">
-          <h1 class="text-xl font-bold">Contacts</h1>
-          <button
-            @click="refreshConversations"
-            class="text-instagram-blue hover:text-blue-700 transition-colors p-2 hover:bg-gray-50 rounded-full"
-            title="Refresh conversations"
-          >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+      <!-- Center: Message Thread -->
+      <div class="flex-1 flex flex-col">
+        <MessageThread
+          v-if="store.activeConversationId"
+          :conversation="store.activeConversation"
+          :messages="store.activeMessages"
+          :loading="store.loading"
+          @send="handleSendMessage"
+        />
+        <div v-else class="flex-1 flex items-center justify-center text-gray-400">
+          <div class="text-center">
+            <svg class="w-24 h-24 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
-          </button>
+            <p class="text-xl">Select a conversation to start messaging</p>
+          </div>
         </div>
       </div>
 
-      <!-- Conversation List -->
-      <ConversationList
-        :conversations="filteredConversations"
-        :active-id="store.activeConversationId"
-        :loading="store.loading"
-        @select="handleSelectConversation"
-      />
-    </div>
-
-    <!-- Right: Message Thread -->
-    <div class="flex-1 flex flex-col">
-      <MessageThread
-        v-if="store.activeConversationId"
-        :conversation="store.activeConversation"
-        :messages="store.activeMessages"
-        :loading="store.loading"
-        @send="handleSendMessage"
-      />
-      <div v-else class="flex-1 flex items-center justify-center text-gray-400">
-        <div class="text-center">
-          <svg class="w-24 h-24 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
-          <p class="text-xl">Select a conversation to start messaging</p>
+      <!-- Right: Conversation Details -->
+      <div class="w-80 border-l border-instagram-border">
+        <ConversationDetails
+          v-if="store.activeConversation"
+          :conversation="store.activeConversation"
+        />
+        <div v-else class="flex items-center justify-center h-full text-gray-400">
+          <div class="text-center px-6">
+            <svg class="w-16 h-16 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p class="text-sm font-medium text-gray-600">Conversation Details</p>
+            <p class="text-xs text-gray-500 mt-1">Select a conversation to view details</p>
+          </div>
         </div>
       </div>
     </div>
@@ -86,11 +62,10 @@ import { useMessagesStore } from '../stores/messages'
 import { useSessionStore } from '../stores/session'
 import { useAccountsStore } from '../stores/accounts'
 import { useSSE } from '../composables/useSSE'
-import { getProxiedImageUrl } from '../composables/useImageProxy'
-import apiClient from '../api/client'
 import ConversationList from '../components/ConversationList.vue'
 import MessageThread from '../components/MessageThread.vue'
-import AccountSelector from '../components/AccountSelector.vue'
+import AccountTabs from '../components/AccountTabs.vue'
+import ConversationDetails from '../components/ConversationDetails.vue'
 
 const router = useRouter()
 const store = useMessagesStore()
@@ -229,13 +204,6 @@ async function refreshConversations() {
     store.fetchCurrentAccount(),
     store.fetchConversations(accountId)
   ])
-}
-
-function getAccountInitial(username) {
-  if (!username) return '?'
-  // Remove @ symbol if present
-  const cleanName = username.replace('@', '')
-  return cleanName[0]?.toUpperCase() || '?'
 }
 
 onMounted(async () => {
