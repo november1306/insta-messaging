@@ -100,8 +100,8 @@ async def create_session(
         logger.warning(f"Session creation failed: Invalid credentials for username '{username}'")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password.",
-            headers={"WWW-Authenticate": "Basic"}
+            detail="Invalid username or password."
+            # NOTE: No WWW-Authenticate header to avoid browser/nginx auth popup
         )
 
     # Query user's primary Instagram account (if any)

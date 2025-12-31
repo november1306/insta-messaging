@@ -308,6 +308,10 @@ ngrok
 ngrok.exe
 ngrok.yml
 
+# Playwright MCP Server
+# Browser automation state and cache files
+.playwright-mcp/
+
 # Local development tools
 .devcontainer/
 docker-compose.override.yml
