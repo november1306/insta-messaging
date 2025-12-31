@@ -3,10 +3,19 @@
     <!-- Top: Account Tabs -->
     <AccountTabs :sse-connected="sseConnected" :sse-error="sseError" />
 
-    <!-- Main Content: 3-column layout -->
+    <!-- Main Content: 3-column layout (responsive) -->
     <div class="flex flex-1 overflow-hidden">
       <!-- Left: Conversation List -->
-      <div class="w-80 border-r border-instagram-border flex flex-col">
+      <!-- Mobile: Show full width when no conversation selected, hide when conversation selected -->
+      <!-- Tablet (md): Show as sidebar (20rem width) -->
+      <!-- Desktop (lg+): Show as sidebar (20rem width) -->
+      <div
+        :class="[
+          'border-r border-instagram-border flex flex-col',
+          'w-full md:w-80',
+          store.activeConversationId ? 'hidden md:flex' : 'flex'
+        ]"
+      >
         <ConversationList
           :conversations="filteredConversations"
           :active-id="store.activeConversationId"
@@ -17,7 +26,33 @@
       </div>
 
       <!-- Center: Message Thread -->
-      <div class="flex-1 flex flex-col">
+      <!-- Mobile: Show full width when conversation selected -->
+      <!-- Tablet/Desktop: Show as flex-1 (remaining space) -->
+      <div
+        :class="[
+          'flex flex-col',
+          store.activeConversationId ? 'flex-1' : 'hidden md:flex md:flex-1'
+        ]"
+      >
+        <!-- Back button for mobile -->
+        <div
+          v-if="store.activeConversationId"
+          class="md:hidden border-b border-instagram-border bg-white px-4 py-3 flex items-center gap-3"
+        >
+          <button
+            @click="handleBackToConversations"
+            class="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            title="Back to conversations"
+          >
+            <svg class="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div class="flex-1">
+            <h2 class="font-semibold text-gray-900">{{ store.activeConversation?.sender_name }}</h2>
+          </div>
+        </div>
+
         <MessageThread
           v-if="store.activeConversationId"
           :conversation="store.activeConversation"
@@ -26,7 +61,7 @@
           @send="handleSendMessage"
         />
         <div v-else class="flex-1 flex items-center justify-center text-gray-400">
-          <div class="text-center">
+          <div class="text-center px-4">
             <svg class="w-24 h-24 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
@@ -36,12 +71,13 @@
       </div>
 
       <!-- Right: Conversation Details -->
-      <div class="w-80 border-l border-instagram-border">
+      <!-- Hidden on mobile and tablet, shown on large screens (lg+) -->
+      <div class="hidden lg:flex lg:w-80 border-l border-instagram-border">
         <ConversationDetails
           v-if="store.activeConversation"
           :conversation="store.activeConversation"
         />
-        <div v-else class="flex items-center justify-center h-full text-gray-400">
+        <div v-else class="flex items-center justify-center h-full w-full text-gray-400">
           <div class="text-center px-6">
             <svg class="w-16 h-16 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -186,6 +222,11 @@ async function handleSelectConversation(senderId) {
   if (!store.messages[senderId]) {
     await store.fetchMessages(senderId, accountId)
   }
+}
+
+function handleBackToConversations() {
+  // Clear active conversation to show conversation list on mobile
+  store.setActiveConversation(null)
 }
 
 async function handleSendMessage(formData, onProgress) {

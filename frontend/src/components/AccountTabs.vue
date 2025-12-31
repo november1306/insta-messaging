@@ -41,7 +41,7 @@
       <div v-else-if="!accountsStore.hasAccounts" class="flex items-center justify-center py-4">
         <p class="text-sm text-gray-500 mr-3">No Instagram accounts linked</p>
         <button
-          @click="showOAuthModal = true"
+          @click="openOAuthModal"
           class="px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity flex items-center gap-2"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -95,7 +95,7 @@
 
         <!-- Add Account Button -->
         <button
-          @click="showOAuthModal = true"
+          @click="openOAuthModal"
           class="flex items-center gap-1.5 px-3 py-3 text-instagram-blue hover:bg-blue-50 rounded-t-lg transition-colors border-b-2 border-transparent"
           title="Add Instagram account"
         >
@@ -129,6 +129,27 @@
         <p class="text-gray-600 mb-6">
           Connect your Instagram Business Account to start managing messages.
         </p>
+
+        <!-- Error Message -->
+        <div v-if="oauthError" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <div class="flex items-start gap-2">
+            <svg class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div class="flex-1">
+              <p class="text-sm font-medium text-red-800">{{ oauthError }}</p>
+            </div>
+            <button
+              @click="oauthError = null"
+              class="text-red-400 hover:text-red-600 transition-colors"
+              title="Dismiss"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
 
         <!-- Force Reauth Checkbox -->
         <div class="mb-6">
@@ -173,6 +194,7 @@ import { useRouter } from 'vue-router'
 import { useSessionStore } from '../stores/session'
 import { useAccountsStore } from '../stores/accounts'
 import { getProxiedImageUrl } from '../composables/useImageProxy'
+import { getInitials } from '../composables/useUserUtils'
 
 // Props for SSE connection status
 defineProps({
@@ -192,6 +214,7 @@ const accountsStore = useAccountsStore()
 
 const showOAuthModal = ref(false)
 const forceReauth = ref(false)
+const oauthError = ref(null)
 
 onMounted(async () => {
   // Fetch accounts when component mounts
@@ -199,11 +222,6 @@ onMounted(async () => {
     await accountsStore.fetchAccounts()
   }
 })
-
-function getInitials(username) {
-  if (!username) return '?'
-  return username.substring(0, 2).toUpperCase()
-}
 
 function isSelected(account) {
   return accountsStore.selectedAccount?.account_id === account.account_id
@@ -213,16 +231,33 @@ function selectAccount(account) {
   accountsStore.selectAccount(account.account_id)
 }
 
+function openOAuthModal() {
+  oauthError.value = null
+  forceReauth.value = false
+  showOAuthModal.value = true
+}
+
 async function handleLogout() {
   await sessionStore.logout()
   router.push('/login')
 }
 
 async function handleOAuthLogin() {
+  oauthError.value = null // Clear previous errors
   try {
     await accountsStore.startOAuthFlow(forceReauth.value)
+    // Success - close modal
+    showOAuthModal.value = false
   } catch (err) {
     console.error('OAuth flow error:', err)
+    // Set user-friendly error message
+    if (err.message?.includes('popup')) {
+      oauthError.value = 'Popup was blocked. Please allow popups for this site and try again.'
+    } else if (err.message?.includes('network') || err.message?.includes('fetch')) {
+      oauthError.value = 'Network error. Please check your connection and try again.'
+    } else {
+      oauthError.value = err.message || 'Failed to start OAuth flow. Please try again.'
+    }
   }
 }
 </script>
