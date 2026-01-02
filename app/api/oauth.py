@@ -264,7 +264,15 @@ async def instagram_oauth_callback(
                 content=create_oauth_error_html(
                     title="Invalid State Token",
                     message="The OAuth state token is invalid or has already been used.",
-                    details="Please return to the app and try connecting your Instagram account again."
+                    details="""
+                    <strong>Common causes:</strong>
+                    <ul style="text-align: left; margin: 10px auto; max-width: 500px;">
+                        <li>You clicked the browser back button after linking an account</li>
+                        <li>You started the linking process twice (tokens expire after one use)</li>
+                        <li>The link is more than 10 minutes old</li>
+                    </ul>
+                    <p><strong>Solution:</strong> Return to the app and click "Add Instagram Account" to start fresh.</p>
+                    """
                 ),
                 status_code=400
             )

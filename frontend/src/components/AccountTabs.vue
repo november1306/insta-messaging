@@ -176,9 +176,9 @@
               class="mt-1 w-4 h-4 text-instagram-blue border-gray-300 rounded focus:ring-instagram-blue"
             />
             <div class="flex-1">
-              <div class="font-medium text-sm">Force re-authentication</div>
+              <div class="font-medium text-sm">Force re-authentication (Recommended)</div>
               <div class="text-xs text-gray-500 mt-0.5">
-                Require entering Instagram credentials even if already logged in
+                Prevents OAuth caching issues when linking previously authorized accounts
               </div>
             </div>
           </label>
@@ -278,7 +278,7 @@ const sessionStore = useSessionStore()
 const accountsStore = useAccountsStore()
 
 const showOAuthModal = ref(false)
-const forceReauth = ref(false)
+const forceReauth = ref(true)  // Default to true to prevent Instagram OAuth caching issues
 const oauthError = ref(null)
 
 // Delete account state
