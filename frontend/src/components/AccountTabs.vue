@@ -30,7 +30,7 @@
     </div>
 
     <!-- Tab strip: Instagram accounts -->
-    <div class="px-6 py-0 bg-white">
+    <div class="px-6 py-0 bg-white overflow-visible">
       <!-- Loading State -->
       <div v-if="accountsStore.loading && accountsStore.accounts.length === 0" class="flex items-center justify-center py-4">
         <div class="animate-spin w-5 h-5 border-2 border-gray-300 border-t-instagram-blue rounded-full"></div>
@@ -52,17 +52,20 @@
       </div>
 
       <!-- Account Tabs -->
-      <div v-else class="flex items-center gap-1 overflow-x-auto custom-scrollbar">
-        <button
+      <div v-else class="flex items-center gap-1 overflow-x-auto overflow-y-visible custom-scrollbar">
+        <div
           v-for="account in accountsStore.accounts"
           :key="account.account_id"
-          @click="selectAccount(account)"
-          class="flex items-center gap-2 px-4 py-3 transition-all border-b-2 whitespace-nowrap"
-          :class="{
-            'border-instagram-blue bg-instagram-bg text-instagram-blue': isSelected(account),
-            'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50': !isSelected(account)
-          }"
+          class="relative group"
         >
+          <button
+            @click="selectAccount(account)"
+            class="flex items-center gap-2 px-4 py-3 pr-10 transition-all border-b-2 whitespace-nowrap"
+            :class="{
+              'border-instagram-blue bg-instagram-bg text-instagram-blue': isSelected(account),
+              'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50': !isSelected(account)
+            }"
+          >
           <!-- Profile Picture -->
           <div class="relative flex-shrink-0">
             <img
@@ -91,7 +94,20 @@
 
           <!-- Account Username -->
           <span class="text-sm font-semibold truncate max-w-32">@{{ account.username }}</span>
-        </button>
+          </button>
+
+          <!-- Settings Button (gear icon) -->
+          <button
+            @click.stop="handleSettingsClick(account)"
+            class="absolute top-2 right-2 p-1.5 rounded bg-white border border-gray-300 hover:bg-gray-200 transition-all z-10 shadow-sm"
+            title="Account settings"
+          >
+            <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+        </div>
 
         <!-- Add Account Button -->
         <button
@@ -185,6 +201,51 @@
         </p>
       </div>
     </div>
+
+    <!-- Delete Account Modal -->
+    <DeleteAccountModal
+      v-if="accountToDelete"
+      :account="accountToDelete"
+      @close="accountToDelete = null"
+      @confirm="handleDeleteAccount"
+    />
+
+    <!-- Success/Error Notifications -->
+    <div v-if="deleteSuccess" class="fixed top-4 right-4 z-50 max-w-md">
+      <div class="bg-green-50 border-l-4 border-green-500 p-4 rounded-lg shadow-lg">
+        <div class="flex items-start gap-3">
+          <svg class="w-6 h-6 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div class="flex-1">
+            <p class="text-sm font-medium text-green-800">{{ deleteSuccess }}</p>
+          </div>
+          <button @click="deleteSuccess = null" class="text-green-400 hover:text-green-600">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="deleteError" class="fixed top-4 right-4 z-50 max-w-md">
+      <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg shadow-lg">
+        <div class="flex items-start gap-3">
+          <svg class="w-6 h-6 text-red-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div class="flex-1">
+            <p class="text-sm font-medium text-red-800">{{ deleteError }}</p>
+          </div>
+          <button @click="deleteError = null" class="text-red-400 hover:text-red-600">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -195,6 +256,7 @@ import { useSessionStore } from '../stores/session'
 import { useAccountsStore } from '../stores/accounts'
 import { getProxiedImageUrl } from '../composables/useImageProxy'
 import { getInitials } from '../composables/useUserUtils'
+import DeleteAccountModal from './DeleteAccountModal.vue'
 
 // Props for SSE connection status
 defineProps({
@@ -208,6 +270,9 @@ defineProps({
   }
 })
 
+// Emit events to parent
+const emit = defineEmits(['show-account-details'])
+
 const router = useRouter()
 const sessionStore = useSessionStore()
 const accountsStore = useAccountsStore()
@@ -215,6 +280,11 @@ const accountsStore = useAccountsStore()
 const showOAuthModal = ref(false)
 const forceReauth = ref(false)
 const oauthError = ref(null)
+
+// Delete account state
+const accountToDelete = ref(null)
+const deleteError = ref(null)
+const deleteSuccess = ref(null)
 
 onMounted(async () => {
   // Fetch accounts when component mounts
@@ -260,6 +330,161 @@ async function handleOAuthLogin() {
     }
   }
 }
+
+// ============================================
+// Account Settings Functions
+// ============================================
+
+function handleSettingsClick(account) {
+  console.log('Settings clicked for account:', account.account_id)
+  emit('show-account-details', account)
+}
+
+function showDeleteModal(account) {
+  accountToDelete.value = account
+  deleteError.value = null
+  deleteSuccess.value = null
+}
+
+async function handleDeleteAccount() {
+  if (!accountToDelete.value) return
+
+  deleteError.value = null
+  deleteSuccess.value = null
+
+  try {
+    const response = await fetch(
+      `/api/v1/accounts/${accountToDelete.value.account_id}/delete-permanently`,
+      {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${sessionStore.token}`
+        }
+      }
+    )
+
+    if (response.status === 409) {
+      // Multi-user conflict
+      deleteError.value = 'Cannot delete: Other users have this account linked. They must unlink it first.'
+      accountToDelete.value = null
+      return
+    }
+
+    if (!response.ok) {
+      throw new Error(`Delete failed: ${response.status}`)
+    }
+
+    const result = await response.json()
+
+    // Show success message with statistics
+    deleteSuccess.value = `Account deleted. ${result.statistics.messages_deleted} messages and ${result.statistics.attachments_deleted} attachments removed.`
+
+    // Close modal
+    accountToDelete.value = null
+
+    // Refresh account list
+    await accountsStore.fetchAccounts()
+
+    // If deleted account was selected, switch to first available
+    if (accountsStore.selectedAccount?.account_id === result.deleted_account_id) {
+      if (accountsStore.accounts.length > 0) {
+        accountsStore.selectAccount(accountsStore.accounts[0].account_id)
+      }
+    }
+
+    // Clear success message after 5 seconds
+    setTimeout(() => {
+      deleteSuccess.value = null
+    }, 5000)
+
+  } catch (err) {
+    console.error('Failed to delete account:', err)
+    deleteError.value = 'Failed to delete account. Please try again.'
+    accountToDelete.value = null
+  }
+}
+
+async function unlinkAccount(account) {
+  if (!confirm(`Unlink @${account.username}? This will remove the account from your view but won't delete it.`)) {
+    return
+  }
+
+  try {
+    const response = await fetch(
+      `/api/v1/accounts/${account.account_id}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${sessionStore.token}`
+        }
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(`Unlink failed: ${response.status}`)
+    }
+
+    deleteSuccess.value = `Account @${account.username} unlinked successfully.`
+
+    // Refresh account list
+    await accountsStore.fetchAccounts()
+
+    // If unlinked account was selected, switch to first available
+    if (accountsStore.selectedAccount?.account_id === account.account_id) {
+      if (accountsStore.accounts.length > 0) {
+        accountsStore.selectAccount(accountsStore.accounts[0].account_id)
+      }
+    }
+
+    // Clear success message after 3 seconds
+    setTimeout(() => {
+      deleteSuccess.value = null
+    }, 3000)
+
+  } catch (err) {
+    console.error('Failed to unlink account:', err)
+    deleteError.value = 'Failed to unlink account. Please try again.'
+  }
+}
+
+async function setPrimary(account) {
+  try {
+    const response = await fetch(
+      `/api/v1/accounts/${account.account_id}/set-primary`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${sessionStore.token}`
+        }
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(`Set primary failed: ${response.status}`)
+    }
+
+    deleteSuccess.value = `@${account.username} set as primary account.`
+
+    // Refresh account list to update primary status
+    await accountsStore.fetchAccounts()
+
+    // Clear success message after 3 seconds
+    setTimeout(() => {
+      deleteSuccess.value = null
+    }, 3000)
+
+  } catch (err) {
+    console.error('Failed to set primary account:', err)
+    deleteError.value = 'Failed to set primary account. Please try again.'
+  }
+}
+
+// Expose functions for parent component to call
+defineExpose({
+  setPrimary,
+  unlinkAccount,
+  showDeleteModal
+})
 </script>
 
 <style scoped>

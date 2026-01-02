@@ -126,6 +126,9 @@ class Settings:
         # Frontend URL for OAuth redirects
         self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
+        # Media directory for attachments and outbound files
+        self.MEDIA_DIR = os.getenv("MEDIA_DIR", "media")
+
         # CORS origins (comma-separated list)
         # Defaults to PUBLIC_BASE_URL and FRONTEND_URL in production
         cors_origins_env = os.getenv("CORS_ORIGINS", "")

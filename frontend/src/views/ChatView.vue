@@ -1,7 +1,12 @@
 <template>
   <div class="flex flex-col h-screen bg-white">
     <!-- Top: Account Tabs -->
-    <AccountTabs :sse-connected="sseConnected" :sse-error="sseError" />
+    <AccountTabs
+      ref="accountTabsRef"
+      :sse-connected="sseConnected"
+      :sse-error="sseError"
+      @show-account-details="handleShowAccountDetails"
+    />
 
     <!-- Main Content: 3-column layout (responsive) -->
     <div class="flex flex-1 overflow-hidden">
@@ -70,20 +75,30 @@
         </div>
       </div>
 
-      <!-- Right: Conversation Details -->
+      <!-- Right: Account or Conversation Details -->
       <!-- Hidden on mobile and tablet, shown on large screens (lg+) -->
       <div class="hidden lg:flex lg:w-80 border-l border-instagram-border">
+        <!-- Account Details -->
+        <AccountDetailsPanel
+          v-if="activeAccountDetails"
+          :account="activeAccountDetails"
+          @set-primary="handleSetPrimary"
+          @unlink="handleUnlink"
+          @delete="handleDelete"
+        />
+        <!-- Conversation Details -->
         <ConversationDetails
-          v-if="store.activeConversation"
+          v-else-if="store.activeConversation"
           :conversation="store.activeConversation"
         />
+        <!-- Placeholder -->
         <div v-else class="flex items-center justify-center h-full w-full text-gray-400">
           <div class="text-center px-6">
             <svg class="w-16 h-16 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p class="text-sm font-medium text-gray-600">Conversation Details</p>
-            <p class="text-xs text-gray-500 mt-1">Select a conversation to view details</p>
+            <p class="text-sm font-medium text-gray-600">Details</p>
+            <p class="text-xs text-gray-500 mt-1">Select an account or conversation</p>
           </div>
         </div>
       </div>
@@ -102,11 +117,16 @@ import ConversationList from '../components/ConversationList.vue'
 import MessageThread from '../components/MessageThread.vue'
 import AccountTabs from '../components/AccountTabs.vue'
 import ConversationDetails from '../components/ConversationDetails.vue'
+import AccountDetailsPanel from '../components/AccountDetailsPanel.vue'
 
 const router = useRouter()
 const store = useMessagesStore()
 const sessionStore = useSessionStore()
 const accountsStore = useAccountsStore()
+
+// Refs
+const accountTabsRef = ref(null)
+const activeAccountDetails = ref(null)
 
 // Filter conversations by selected messaging channel
 const filteredConversations = computed(() => {
@@ -245,6 +265,37 @@ async function refreshConversations() {
     store.fetchCurrentAccount(),
     store.fetchConversations(accountId)
   ])
+}
+
+// ============================================
+// Account Details Handlers
+// ============================================
+
+function handleShowAccountDetails(account) {
+  console.log('Showing account details for:', account.username)
+  activeAccountDetails.value = account
+}
+
+function handleSetPrimary() {
+  if (activeAccountDetails.value && accountTabsRef.value) {
+    accountTabsRef.value.setPrimary(activeAccountDetails.value)
+  }
+}
+
+function handleUnlink() {
+  if (activeAccountDetails.value && accountTabsRef.value) {
+    accountTabsRef.value.unlinkAccount(activeAccountDetails.value)
+    // Close account details panel after unlinking
+    activeAccountDetails.value = null
+  }
+}
+
+function handleDelete() {
+  if (activeAccountDetails.value && accountTabsRef.value) {
+    accountTabsRef.value.showDeleteModal(activeAccountDetails.value)
+    // Close account details panel when opening delete modal
+    activeAccountDetails.value = null
+  }
 }
 
 onMounted(async () => {

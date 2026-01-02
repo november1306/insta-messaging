@@ -5,7 +5,7 @@ Implements account configuration for Instagram business accounts.
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from pydantic import BaseModel, Field
 from datetime import datetime  # Used in AccountResponse type hint
 from typing import Optional
@@ -15,8 +15,10 @@ import base64
 
 from app.api.auth import verify_api_key, verify_ui_session
 from app.db.connection import get_db_session
-from app.db.models import Account, APIKey, UserAccount
+from app.db.models import Account, APIKey, UserAccount, MessageModel, MessageAttachment, CRMOutboundMessage
 from app.services.api_key_service import APIKeyService
+from app.services.account_media_cleanup import AccountMediaCleanup
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +45,25 @@ class AccountResponse(BaseModel):
     username: str
     crm_webhook_url: str
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
+
+
+class DeleteAccountStatistics(BaseModel):
+    """Statistics from account deletion"""
+    messages_deleted: int = Field(..., description="Number of messages deleted")
+    attachments_deleted: int = Field(..., description="Number of attachments deleted")
+    inbound_files_deleted: int = Field(..., description="Number of inbound media files deleted")
+    outbound_files_deleted: int = Field(..., description="Number of outbound media files deleted")
+    bytes_freed: int = Field(..., description="Total bytes freed from disk")
+
+
+class DeleteAccountResponse(BaseModel):
+    """Response from permanent account deletion"""
+    message: str = Field(..., description="Success message")
+    deleted_account_id: str = Field(..., description="ID of the deleted account")
+    statistics: DeleteAccountStatistics = Field(..., description="Deletion statistics")
 
 
 # ============================================
@@ -373,3 +391,183 @@ async def unlink_account(
         "message": "Account unlinked successfully",
         "unlinked_account_id": account_id
     }
+
+
+@router.delete("/accounts/{account_id}/delete-permanently", response_model=DeleteAccountResponse)
+async def delete_account_permanently(
+    account_id: str,
+    session: dict = Depends(verify_ui_session),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Permanently delete an Instagram account and ALL associated data.
+
+    **⚠️ WARNING: This action is irreversible!**
+
+    Deletes:
+    - Account record and credentials
+    - All conversation messages (inbound/outbound)
+    - All message attachments (database records + files)
+    - All media files (inbound attachments + outbound uploads)
+    - CRM outbound tracking records
+    - API key permissions
+    - User-account links
+
+    Multi-user safety: Returns 409 Conflict if other users have this account linked.
+    Only accounts with a single user can be permanently deleted.
+
+    Args:
+        account_id: The account ID to delete
+        session: User session (JWT authentication required)
+        db: Database session
+
+    Returns:
+        DeleteAccountResponse with deletion statistics
+
+    Raises:
+        HTTPException:
+            - 401: Not authenticated (no session)
+            - 403: User doesn't have access to this account
+            - 404: Account not found
+            - 409: Conflict - other users have this account linked
+    """
+    user_id = session.get("user_id")
+
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid session: missing user_id"
+        )
+
+    # Step 1: Verify user owns this account
+    result = await db.execute(
+        select(UserAccount).where(
+            UserAccount.user_id == user_id,
+            UserAccount.account_id == account_id
+        )
+    )
+    link = result.scalar_one_or_none()
+
+    if not link:
+        logger.warning(
+            f"User {user_id} attempted to delete account {account_id} they don't own"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this account"
+        )
+
+    # Step 2: Load account to verify it exists
+    result = await db.execute(
+        select(Account).where(Account.id == account_id)
+    )
+    account = result.scalar_one_or_none()
+
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Account {account_id} not found"
+        )
+
+    # Step 3: Multi-user safety check
+    result = await db.execute(
+        select(func.count(UserAccount.user_id))
+        .where(UserAccount.account_id == account_id)
+    )
+    user_count = result.scalar()
+
+    if user_count > 1:
+        logger.warning(
+            f"User {user_id} attempted to delete multi-user account {account_id} "
+            f"({user_count} users linked)"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Cannot delete account linked to {user_count} users. "
+                "Other users must unlink this account before it can be deleted."
+            )
+        )
+
+    # Step 4: Gather statistics BEFORE deletion
+    # Count messages
+    result = await db.execute(
+        select(func.count(MessageModel.id))
+        .where(MessageModel.account_id == account_id)
+    )
+    messages_count = result.scalar() or 0
+
+    # Count attachments
+    result = await db.execute(
+        select(func.count(MessageAttachment.id))
+        .select_from(MessageAttachment)
+        .join(MessageModel, MessageAttachment.message_id == MessageModel.id)
+        .where(MessageModel.account_id == account_id)
+    )
+    attachments_count = result.scalar() or 0
+
+    # Step 5: Begin transaction for deletion
+    try:
+        # Clean up media files BEFORE deleting database records
+        # (we need the DB records to know which files to delete)
+        media_cleanup = AccountMediaCleanup(settings.MEDIA_DIR)
+        media_stats = await media_cleanup.cleanup_account_media(account_id, db)
+
+        # Step 6: Delete account record
+        # Database CASCADE constraints will handle deletion of:
+        # - CRMOutboundMessage records
+        # - MessageModel records (which cascades to MessageAttachment)
+        # - APIKeyPermission records
+        # - UserAccount records
+        await db.delete(account)
+        await db.commit()
+
+        # Step 7: Log successful deletion
+        logger.warning(
+            f"Account {account_id} (@{account.username}) permanently deleted by user {user_id}",
+            extra={
+                "account_id": account_id,
+                "username": account.username,
+                "user_id": user_id,
+                "messages_deleted": messages_count,
+                "attachments_deleted": attachments_count,
+                "inbound_files_deleted": media_stats["inbound_files_deleted"],
+                "outbound_files_deleted": media_stats["outbound_files_deleted"],
+                "bytes_freed": media_stats["total_bytes_freed"],
+                "action": "account_deletion"
+            }
+        )
+
+        # Step 8: Return success with statistics
+        return DeleteAccountResponse(
+            message="Account deleted successfully",
+            deleted_account_id=account_id,
+            statistics=DeleteAccountStatistics(
+                messages_deleted=messages_count,
+                attachments_deleted=attachments_count,
+                inbound_files_deleted=media_stats["inbound_files_deleted"],
+                outbound_files_deleted=media_stats["outbound_files_deleted"],
+                bytes_freed=media_stats["total_bytes_freed"]
+            )
+        )
+
+    except HTTPException:
+        # Re-raise HTTP exceptions (auth errors, etc.)
+        await db.rollback()
+        raise
+    except Exception as e:
+        # Rollback transaction on any error
+        await db.rollback()
+        logger.error(
+            f"Failed to delete account {account_id}: {e}",
+            exc_info=True,
+            extra={
+                "account_id": account_id,
+                "user_id": user_id,
+                "error": str(e)
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete account. Please try again or contact support."
+        )
