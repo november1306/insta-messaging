@@ -14,7 +14,6 @@ from app.services.media_downloader import MediaDownloader
 from app.clients.instagram_client import InstagramAPIError
 from app.rules.reply_rules import get_reply_text
 from app.services.webhook_forwarder import WebhookForwarder
-from app.api.accounts import decrypt_credential as decode_base64_credential
 from app.services.encryption_service import decrypt_credential
 from app.api.events import broadcast_new_message
 from datetime import datetime, timezone
@@ -677,12 +676,12 @@ async def _forward_to_crm_domain(message, messaging_channel_id: str) -> None:
                 )
                 return
 
-            # Decode webhook secret (MVP: base64-encoded)
+            # Decrypt webhook secret (Fernet AES-128 encryption)
             try:
-                webhook_secret = decode_base64_credential(account.webhook_secret)
+                webhook_secret = decrypt_credential(account.webhook_secret, settings.session_secret)
             except Exception as decode_error:
                 logger.error(
-                    f"❌ Failed to decode webhook secret for account {account.id}: {decode_error}. "
+                    f"❌ Failed to decrypt webhook secret for account {account.id}: {decode_error}. "
                     f"Webhook secret may be corrupted in database.",
                     exc_info=True
                 )

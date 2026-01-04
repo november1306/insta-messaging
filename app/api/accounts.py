@@ -11,9 +11,9 @@ from datetime import datetime  # Used in AccountResponse type hint
 from typing import Optional
 import uuid
 import logging
-import base64
 
 from app.api.auth import verify_api_key, verify_ui_session
+from app.services.encryption_service import encrypt_credential, decrypt_credential
 from app.db.connection import get_db_session
 from app.db.models import Account, APIKey, UserAccount, MessageModel, MessageAttachment, CRMOutboundMessage, InstagramProfile
 from app.services.api_key_service import APIKeyService
@@ -67,42 +67,6 @@ class DeleteAccountResponse(BaseModel):
 
 
 # ============================================
-# Simple Encryption (MVP - replace later)
-# ============================================
-# WARNING: This is NOT real encryption - just base64 encoding!
-# Anyone with database access can decode these credentials.
-# TODO: Replace with cryptography.fernet in Priority 2 (Task 10)
-
-def encrypt_credential(credential: str) -> str:
-    """
-    Simple encoding for MVP - just base64 for now.
-
-    WARNING: This is NOT secure encryption. Do not use in production.
-    TODO: Replace with real encryption (Fernet) in Priority 2.
-    """
-    return base64.b64encode(credential.encode()).decode()
-
-
-def decrypt_credential(encoded_credential: str) -> str:
-    """
-    Decode base64-encoded credential.
-
-    Mirrors the encrypt_credential function above.
-    MVP uses base64 encoding (NOT secure encryption).
-
-    Args:
-        encoded_credential: Base64-encoded credential string
-
-    Returns:
-        Decoded credential string
-
-    WARNING: This is NOT secure decryption. Do not use in production.
-    TODO: Replace with real decryption (Fernet) in Priority 2.
-    """
-    return base64.b64decode(encoded_credential.encode()).decode()
-
-
-# ============================================
 # Endpoints
 # ============================================
 
@@ -151,10 +115,10 @@ async def create_account(
     
     # Generate account ID
     account_id = f"acc_{uuid.uuid4().hex[:12]}"
-    
-    # Encode credentials (NOT secure - just base64 for MVP)
-    encoded_token = encrypt_credential(request.access_token)
-    encoded_webhook_secret = encrypt_credential(request.webhook_secret)
+
+    # Encrypt credentials using Fernet (AES-128 + HMAC-SHA256)
+    encoded_token = encrypt_credential(request.access_token, settings.session_secret)
+    encoded_webhook_secret = encrypt_credential(request.webhook_secret, settings.session_secret)
     
     # Create account record
     account = Account(
