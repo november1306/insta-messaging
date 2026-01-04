@@ -63,9 +63,6 @@ export const useSessionStore = defineStore('session', () => {
       // Configure API client to use session token
       apiClient.defaults.headers.Authorization = `Bearer ${token.value}`
 
-      console.log('[Session] Session created successfully for account:', accountId.value)
-      console.log('[Session] Token stored in localStorage')
-      console.log('[Session] isAuthenticated:', isAuthenticated.value)
 
       return response.data
     } catch (err) {
@@ -106,11 +103,9 @@ export const useSessionStore = defineStore('session', () => {
         // Configure API client to use restored token
         apiClient.defaults.headers.Authorization = `Bearer ${storedToken}`
 
-        console.log('Session restored from localStorage for user:', username.value)
         return true
       } else {
         // Token expired, clear localStorage
-        console.log('Stored session expired, clearing...')
         clearSession()
       }
     }
@@ -137,11 +132,9 @@ export const useSessionStore = defineStore('session', () => {
     // Remove Authorization header from API client
     delete apiClient.defaults.headers.Authorization
 
-    console.log('[Session] Session cleared')
   }
 
   function logout() {
-    console.log('[Session] Logging out...')
     clearSession()
     // Router will handle redirect to login via navigation guard
     return true
@@ -159,7 +152,6 @@ export const useSessionStore = defineStore('session', () => {
     }
 
     // No valid session - user needs to login
-    console.log('No valid session found - user needs to login')
     return false
   }
 

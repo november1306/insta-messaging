@@ -336,7 +336,6 @@ async function handleOAuthLogin() {
 // ============================================
 
 function handleSettingsClick(account) {
-  console.log('Settings clicked for account:', account.account_id)
   emit('show-account-details', account)
 }
 
@@ -405,10 +404,6 @@ async function handleDeleteAccount() {
 }
 
 async function unlinkAccount(account) {
-  if (!confirm(`Unlink @${account.username}? This will remove the account from your view but won't delete it.`)) {
-    return
-  }
-
   try {
     const response = await fetch(
       `/api/v1/accounts/${account.account_id}`,

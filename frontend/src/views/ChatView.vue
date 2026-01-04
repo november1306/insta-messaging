@@ -168,7 +168,6 @@ async function handleSSEMessage(data) {
         // refresh accounts from server to get the updated messaging_channel_id.
         // Backend already handles channel binding via _bind_channel_id() in webhook handler.
         if (accountsStore.selectedAccount && !accountsStore.selectedAccount.messaging_channel_id) {
-          console.log('[SSE] First message detected - refreshing accounts from server')
           accountsStore.fetchAccounts().catch(err => {
             console.error('[SSE] Failed to refresh accounts:', err)
           })
@@ -213,13 +212,6 @@ async function handleSSEMessage(data) {
           // IMPORTANT: Update ONLY the status and ID, preserve optimistic data
           const existingMsg = store.messages[recipientId][existingIndex]
 
-          console.log('[SSE] Updating existing outbound message:', {
-            existingId: existingMsg.id,
-            tempId: existingMsg.tempId,
-            sseId: data.data.id,
-            sseTrackingId: data.data.tracking_message_id
-          })
-
           // Update with SSE data but keep tempId for future matching
           store.messages[recipientId][existingIndex] = {
             ...existingMsg,  // Keep existing data (including tempId)
@@ -230,7 +222,6 @@ async function handleSSEMessage(data) {
           }
         } else {
           // Add new outbound message from SSE (e.g., sent from another tab)
-          console.log('[SSE] Adding new outbound message from another session:', data.data.id)
           store.messages[recipientId].push(data.data)
         }
       }
@@ -282,7 +273,6 @@ async function refreshConversations() {
 // ============================================
 
 function handleShowAccountDetails(account) {
-  console.log('Showing account details for:', account.username)
   activeAccountDetails.value = account
 }
 

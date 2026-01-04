@@ -60,7 +60,6 @@ export const useAccountsStore = defineStore('accounts', () => {
         selectedAccountId.value = primaryAccount.value.account_id
       }
 
-      console.log(`Fetched ${accounts.value.length} linked Instagram accounts`)
     } catch (err) {
       console.error('Failed to fetch accounts:', err)
       error.value = err.response?.data?.detail || 'Failed to load accounts'
@@ -99,7 +98,6 @@ export const useAccountsStore = defineStore('accounts', () => {
 
       selectedAccountId.value = accountId
 
-      console.log(`Set primary account: ${accountId}`)
     } catch (err) {
       console.error('Failed to set primary account:', err)
       error.value = err.response?.data?.detail || 'Failed to set primary account'
@@ -134,7 +132,6 @@ export const useAccountsStore = defineStore('accounts', () => {
         selectedAccountId.value = primaryAccount.value?.account_id || null
       }
 
-      console.log(`Unlinked account: ${accountId}`)
     } catch (err) {
       console.error('Failed to unlink account:', err)
       error.value = err.response?.data?.detail || 'Failed to unlink account'
@@ -187,7 +184,6 @@ export const useAccountsStore = defineStore('accounts', () => {
     const account = accounts.value.find(acc => acc.account_id === accountId)
     if (account) {
       selectedAccountId.value = accountId
-      console.log(`Selected account: @${account.username}`)
     }
   }
 

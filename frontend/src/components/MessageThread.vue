@@ -186,13 +186,11 @@ function handleFileSelect(event) {
   const maxSize = maxSizes[fileType]
 
   if (!maxSize) {
-    alert('Unsupported file type')
     event.target.value = ''
     return
   }
 
   if (file.size > maxSize) {
-    alert(`File too large. Max size for ${fileType}: ${formatFileSize(maxSize)}`)
     event.target.value = ''
     return
   }
@@ -260,7 +258,6 @@ async function handleSend() {
     uploadProgress.value = 0
   } catch (err) {
     console.error('Failed to send message:', err)
-    alert('Failed to send message. Please try again.')
   } finally {
     sending.value = false
   }

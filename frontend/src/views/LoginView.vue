@@ -102,7 +102,6 @@ async function handleLogin() {
   try {
     await sessionStore.login(username.value, password.value)
     // Redirect to chat on successful login
-    console.log('Login successful, redirecting to chat...')
     router.push('/')
   } catch (err) {
     error.value = err.message || 'Invalid username or password'

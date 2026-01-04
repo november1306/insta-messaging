@@ -12,7 +12,6 @@ export function useSSE(url, onMessage) {
       eventSource.value.onopen = () => {
         connected.value = true
         error.value = null
-        console.log('SSE connected to', url)
       }
 
       eventSource.value.onmessage = (event) => {

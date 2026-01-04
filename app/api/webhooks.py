@@ -112,44 +112,6 @@ async def handle_webhook(
 
         logger.info(f"📨 Webhook POST request received - object: {object_type}, entries: {entry_count}")
 
-        # DEBUG: Pretty-print FULL webhook body (sanitize sensitive data)
-        # This helps debug what Instagram sends (especially after OAuth or for unknown events)
-        try:
-            # Create sanitized version of body for logging
-            sanitized_body = json.loads(raw_body)  # Fresh copy
-
-            # Recursively sanitize message text and media URLs (keep structure)
-            def sanitize_dict(obj, depth=0):
-                if depth > 10:  # Prevent infinite recursion
-                    return obj
-                if isinstance(obj, dict):
-                    sanitized = {}
-                    for key, value in obj.items():
-                        # Sanitize message text (show only length)
-                        if key == "text" and isinstance(value, str):
-                            sanitized[key] = f"[TEXT:{len(value)} chars]"
-                        # Sanitize media URLs (keep type, hide URL)
-                        elif key == "url" and isinstance(value, str):
-                            sanitized[key] = "[URL_REDACTED]"
-                        # Keep other fields, recursively sanitize nested objects
-                        else:
-                            sanitized[key] = sanitize_dict(value, depth + 1)
-                    return sanitized
-                elif isinstance(obj, list):
-                    return [sanitize_dict(item, depth + 1) for item in obj]
-                else:
-                    return obj
-
-            sanitized_body = sanitize_dict(sanitized_body)
-
-            # Pretty-print the sanitized webhook body
-            logger.info(
-                f"📥 FULL WEBHOOK BODY (sanitized):\n"
-                f"{json.dumps(sanitized_body, indent=2, ensure_ascii=False)}"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to pretty-print webhook body: {e}")
-
         # Initialize MessageService (Instagram clients created per-account inside methods)
         message_service = MessageService()
 

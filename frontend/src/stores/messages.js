@@ -98,13 +98,6 @@ export const useMessagesStore = defineStore('messages', () => {
     }
     messages.value[recipientId].push(sentMessage)
 
-    console.log('[Optimistic] Adding message BEFORE API call:', {
-      id: tempId,
-      text: messageText,
-      recipient_id: recipientId,
-      status: 'pending'
-    })
-
     try {
       // Send FormData directly with progress tracking
       const response = await apiClient.post('/messages/send', formData, {
@@ -117,11 +110,6 @@ export const useMessagesStore = defineStore('messages', () => {
             onProgress(progress)
           }
         }
-      })
-
-      console.log('[Optimistic] API response received, updating temp message:', {
-        tempId,
-        trackingId: response.data.message_id
       })
 
       // Update the optimistic message with tracking ID from response
