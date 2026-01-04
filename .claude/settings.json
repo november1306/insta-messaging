@@ -7,7 +7,5 @@
       ]
     }
   },
-  "enabledPlugins": {
-    "ralph-wiggum@claude-code-plugins": false
-  }
+  "enabledPlugins": {}
 }
