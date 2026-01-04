@@ -8,47 +8,16 @@ from typing import Optional
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-import bcrypt
 import logging
 
 from app.db.models import User
+from app.utils.password_hash import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
 
 
 class UserService:
     """Service for managing users and authentication"""
-
-    @staticmethod
-    def hash_password(password: str) -> str:
-        """
-        Hash a password using bcrypt.
-
-        Args:
-            password: Plain text password
-
-        Returns:
-            bcrypt hash as string
-        """
-        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-    @staticmethod
-    def verify_password(password: str, password_hash: str) -> bool:
-        """
-        Verify a password against a stored hash.
-
-        Args:
-            password: Plain text password to verify
-            password_hash: Stored bcrypt hash
-
-        Returns:
-            True if password matches hash
-        """
-        try:
-            return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
-        except Exception as e:
-            logger.error(f"Error verifying password: {e}")
-            return False
 
     @staticmethod
     async def create_user(
@@ -76,7 +45,7 @@ class UserService:
             raise ValueError(f"Username '{username}' already exists")
 
         # Hash the password
-        password_hash = UserService.hash_password(password)
+        password_hash = hash_password(password)
 
         # Create the user
         user = User(
@@ -144,7 +113,7 @@ class UserService:
             return None
 
         # Verify password
-        if not UserService.verify_password(password, user.password_hash):
+        if not verify_password(password, user.password_hash):
             logger.warning(f"Login attempt failed: Invalid password for user '{username}'")
             return None
 
@@ -178,7 +147,7 @@ class UserService:
             return False
 
         # Hash new password
-        user.password_hash = UserService.hash_password(new_password)
+        user.password_hash = hash_password(new_password)
         user.updated_at = datetime.now(timezone.utc)
 
         await db.commit()

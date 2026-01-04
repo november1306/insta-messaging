@@ -10,11 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import secrets
 import string
-import bcrypt
 import uuid
 import logging
 
 from app.db.models import APIKey, APIKeyPermission, APIKeyType
+from app.utils.password_hash import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -59,37 +59,6 @@ class APIKeyService:
         return api_key[:APIKeyService.KEY_PREFIX_LENGTH]
 
     @staticmethod
-    def hash_api_key(api_key: str) -> str:
-        """
-        Hash an API key using bcrypt.
-
-        Args:
-            api_key: Full API key
-
-        Returns:
-            bcrypt hash as string
-        """
-        return bcrypt.hashpw(api_key.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-    @staticmethod
-    def verify_api_key_hash(api_key: str, key_hash: str) -> bool:
-        """
-        Verify an API key against a stored hash.
-
-        Args:
-            api_key: Full API key to verify
-            key_hash: Stored bcrypt hash
-
-        Returns:
-            True if key matches hash
-        """
-        try:
-            return bcrypt.checkpw(api_key.encode('utf-8'), key_hash.encode('utf-8'))
-        except Exception as e:
-            logger.error(f"Error verifying API key hash: {e}")
-            return False
-
-    @staticmethod
     async def create_api_key(
         db: AsyncSession,
         name: str,
@@ -118,7 +87,7 @@ class APIKeyService:
         # Generate the API key
         api_key = APIKeyService.generate_api_key(environment)
         key_prefix = APIKeyService.get_key_prefix(api_key)
-        key_hash = APIKeyService.hash_api_key(api_key)
+        key_hash = hash_password(api_key)
 
         # Create the database record
         db_key = APIKey(
@@ -183,7 +152,7 @@ class APIKeyService:
             return None
 
         # Verify the full key hash
-        if not APIKeyService.verify_api_key_hash(api_key, db_key.key_hash):
+        if not verify_password(api_key, db_key.key_hash):
             logger.warning(f"API key validation failed: Hash mismatch for key {db_key.id}")
             return None
 

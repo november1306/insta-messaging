@@ -8,6 +8,7 @@ Also provides user registration endpoint for master account creation.
 from fastapi import Header, HTTPException, status, Depends, APIRouter
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 import logging
@@ -15,7 +16,7 @@ import jwt
 import re
 
 from app.db.connection import get_db_session
-from app.db.models import APIKey
+from app.db.models import APIKey, UserAccount
 from app.services.api_key_service import APIKeyService
 from app.services.user_service import UserService
 from app.config import settings
@@ -329,3 +330,66 @@ async def verify_jwt_or_api_key(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid authentication. Provide a valid JWT token or API key."
     )
+
+
+async def verify_user_account_access(
+    account_id: str,
+    session: dict = Depends(verify_ui_session),
+    db: AsyncSession = Depends(get_db_session)
+) -> tuple[int, str]:
+    """
+    Verify user has access to specified account.
+
+    Dependency for UI endpoints requiring account ownership verification.
+    Ensures the authenticated user has permission to access the requested account
+    by checking the UserAccount link table.
+
+    Args:
+        account_id: Account ID to verify access to
+        session: User session from JWT (via verify_ui_session dependency)
+        db: Database session
+
+    Returns:
+        Tuple of (user_id, account_id) if access is granted
+
+    Raises:
+        HTTPException 401: Invalid session (missing user_id)
+        HTTPException 403: User doesn't have access to this account
+
+    Example:
+        @router.get("/accounts/{account_id}/messages")
+        async def get_messages(
+            user_account: tuple[int, str] = Depends(verify_user_account_access)
+        ):
+            user_id, account_id = user_account
+            # Now safe to proceed - user owns this account
+    """
+    user_id = session.get("user_id")
+
+    if not user_id:
+        logger.warning("Account access verification failed: Missing user_id in session")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid session: missing user_id. Please login again."
+        )
+
+    # Verify user-account link exists
+    result = await db.execute(
+        select(UserAccount).where(
+            UserAccount.user_id == user_id,
+            UserAccount.account_id == account_id
+        )
+    )
+    link = result.scalar_one_or_none()
+
+    if not link:
+        logger.warning(
+            f"Account access denied: User {user_id} attempted to access account {account_id} they don't own"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this account"
+        )
+
+    logger.debug(f"Account access verified: User {user_id} can access account {account_id}")
+    return user_id, account_id

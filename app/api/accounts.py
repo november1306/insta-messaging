@@ -12,7 +12,7 @@ from typing import Optional
 import uuid
 import logging
 
-from app.api.auth import verify_api_key, verify_ui_session
+from app.api.auth import verify_api_key, verify_ui_session, verify_user_account_access
 from app.services.encryption_service import encrypt_credential, decrypt_credential
 from app.db.connection import get_db_session
 from app.db.models import Account, APIKey, UserAccount, MessageModel, MessageAttachment, CRMOutboundMessage, InstagramProfile
