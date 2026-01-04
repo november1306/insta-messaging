@@ -6,7 +6,7 @@ Deletes state tokens that have expired (expires_at < now).
 """
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import delete
 from app.db.models import OAuthState
 from app.db.connection import get_db_session
@@ -24,7 +24,7 @@ async def cleanup_expired_oauth_states():
     try:
         async for db in get_db_session():
             result = await db.execute(
-                delete(OAuthState).where(OAuthState.expires_at < datetime.utcnow())
+                delete(OAuthState).where(OAuthState.expires_at < datetime.now(timezone.utc))
             )
             await db.commit()
             deleted_count = result.rowcount

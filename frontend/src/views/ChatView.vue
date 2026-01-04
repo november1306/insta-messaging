@@ -157,12 +157,22 @@ const { connected: sseConnected, error: sseError } = useSSE(
   handleSSEMessage
 )
 
-function handleSSEMessage(data) {
+async function handleSSEMessage(data) {
   switch (data.event) {
     case 'new_message':
       // Handle both inbound and outbound messages
       if (data.data.direction === 'inbound') {
         store.addIncomingMessage(data.data)
+
+        // If this is potentially the first message after OAuth linking (no channel ID yet),
+        // refresh accounts from server to get the updated messaging_channel_id.
+        // Backend already handles channel binding via _bind_channel_id() in webhook handler.
+        if (accountsStore.selectedAccount && !accountsStore.selectedAccount.messaging_channel_id) {
+          console.log('[SSE] First message detected - refreshing accounts from server')
+          accountsStore.fetchAccounts().catch(err => {
+            console.error('[SSE] Failed to refresh accounts:', err)
+          })
+        }
       } else if (data.data.direction === 'outbound') {
         // For outbound messages from SSE, check if message already exists (optimistic update)
         // If it exists, update it with full data including attachments

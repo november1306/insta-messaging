@@ -52,8 +52,8 @@ class AccountService:
 
         # Check if token has expired (60-day expiration for long-lived tokens)
         if account.token_expires_at:
-            from datetime import datetime
-            if account.token_expires_at < datetime.utcnow():
+            from datetime import datetime, timezone
+            if account.token_expires_at < datetime.now(timezone.utc):
                 logger.error(
                     f"Token expired for account {account_id} (@{account.username}) "
                     f"on {account.token_expires_at.isoformat()}"

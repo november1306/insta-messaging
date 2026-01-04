@@ -171,14 +171,28 @@ async def get_current_account(
         if not account_id:
             account_id = session.get("account_id")  # This is primary_account_id
             if not account_id:
-                # User has no linked accounts yet
-                logger.info(f"User {user_id} has no linked accounts")
-                return {
-                    "account_id": None,
-                    "username": "No account linked",
-                    "instagram_handle": None,
-                    "profile_picture_url": None
-                }
+                # Session doesn't have account_id (might be stale after OAuth linking)
+                # Query database for user's current primary account
+                result = await db.execute(
+                    select(UserAccount).where(
+                        UserAccount.user_id == user_id,
+                        UserAccount.is_primary == True
+                    )
+                )
+                primary_link = result.scalar_one_or_none()
+
+                if primary_link:
+                    account_id = primary_link.account_id
+                    logger.info(f"User {user_id} session has no account_id, using primary account from database: {account_id}")
+                else:
+                    # User truly has no linked accounts yet
+                    logger.info(f"User {user_id} has no linked accounts")
+                    return {
+                        "account_id": None,
+                        "username": "No account linked",
+                        "instagram_handle": None,
+                        "profile_picture_url": None
+                    }
 
         # Verify user has access to this account
         result = await db.execute(
@@ -311,7 +325,8 @@ async def _get_instagram_profile(sender_id: str, access_token: str = None) -> di
             if profile and "username" in profile:
                 return {
                     "username": f"@{profile['username']}",
-                    "profile_picture_url": profile.get("profile_pic")
+                    # Note: Field name is 'profile_pic' for ISGIDs, 'profile_picture_url' for business accounts
+                    "profile_picture_url": profile.get("profile_pic") or profile.get("profile_picture_url")
                 }
     except Exception as e:
         logger.warning(f"Failed to fetch profile for {sender_id}: {e}")

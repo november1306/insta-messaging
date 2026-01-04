@@ -296,11 +296,22 @@ async def verify_jwt_or_api_key(
             if payload.get("type") == "ui_session":
                 # Support both new "primary_account_id" and old "account_id" for backward compatibility
                 account_id = payload.get("primary_account_id") or payload.get("account_id")
+                user_id = payload.get("user_id")
+
+                # Note: If account_id is missing (old token before account linking),
+                # get_current_account() will handle fallback by querying the database.
+                # We intentionally don't query here to keep JWT validation stateless and fast.
+
                 if account_id:
                     logger.debug(f"Authenticated via JWT for account: {account_id}")
-                    return {"account_id": account_id, "auth_type": "jwt", "user_id": payload.get("user_id")}
+                    return {"account_id": account_id, "auth_type": "jwt", "user_id": user_id}
+                elif user_id:
+                    # User authenticated but token has no account_id (created before OAuth linking)
+                    # This is acceptable - downstream handlers like get_current_account will fetch from DB
+                    logger.debug(f"JWT valid for user {user_id}, but no account_id in token (will be fetched by endpoint)")
+                    return {"account_id": None, "auth_type": "jwt", "user_id": user_id}
                 else:
-                    logger.warning("JWT validation failed: Missing account_id/primary_account_id in token")
+                    logger.warning("JWT validation failed: Missing user_id in token")
             else:
                 logger.warning(f"JWT validation failed: Invalid token type '{payload.get('type')}'")
         except Exception as e:

@@ -173,10 +173,15 @@ export const useMessagesStore = defineStore('messages', () => {
       conversations.value[convIndex].last_message = message.text
       conversations.value[convIndex].last_message_time = message.timestamp
       conversations.value[convIndex].unread_count = (conversations.value[convIndex].unread_count || 0) + 1
+      // Update profile picture if provided (e.g., from SSE broadcast)
+      if (message.profile_picture_url) {
+        conversations.value[convIndex].profile_picture_url = message.profile_picture_url
+      }
     } else {
       conversations.value.unshift({
         sender_id: senderId,
         sender_name: message.sender_name || senderId,
+        profile_picture_url: message.profile_picture_url || null,  // Include profile picture from SSE
         last_message: message.text,
         last_message_time: message.timestamp,
         unread_count: 1,

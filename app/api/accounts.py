@@ -15,7 +15,7 @@ import base64
 
 from app.api.auth import verify_api_key, verify_ui_session
 from app.db.connection import get_db_session
-from app.db.models import Account, APIKey, UserAccount, MessageModel, MessageAttachment, CRMOutboundMessage
+from app.db.models import Account, APIKey, UserAccount, MessageModel, MessageAttachment, CRMOutboundMessage, InstagramProfile
 from app.services.api_key_service import APIKeyService
 from app.services.account_media_cleanup import AccountMediaCleanup
 from app.config import settings
@@ -412,6 +412,7 @@ async def delete_account_permanently(
     - CRM outbound tracking records
     - API key permissions
     - User-account links
+    - Instagram profile cache (only profiles unique to this account)
 
     Multi-user safety: Returns 409 Conflict if other users have this account linked.
     Only accounts with a single user can be permanently deleted.
@@ -513,6 +514,49 @@ async def delete_account_permanently(
         media_cleanup = AccountMediaCleanup(settings.MEDIA_DIR)
         media_stats = await media_cleanup.cleanup_account_media(account_id, db)
 
+        # Clean up Instagram profile cache for this account
+        # Delete cached profiles that only appear in this account's messages
+        # (keep profiles that are referenced by other accounts)
+        result = await db.execute(
+            select(MessageModel.sender_id, MessageModel.recipient_id)
+            .where(MessageModel.account_id == account_id)
+            .distinct()
+        )
+        account_user_ids = set()
+        for row in result:
+            account_user_ids.add(row.sender_id)
+            account_user_ids.add(row.recipient_id)
+
+        # For each user_id from this account's messages, check if it appears
+        # in OTHER accounts' messages. Only delete if it doesn't.
+        profiles_to_delete = []
+        for user_id in account_user_ids:
+            result = await db.execute(
+                select(func.count(MessageModel.id))
+                .where(
+                    MessageModel.account_id != account_id,
+                    (MessageModel.sender_id == user_id) | (MessageModel.recipient_id == user_id)
+                )
+            )
+            count_in_other_accounts = result.scalar() or 0
+
+            if count_in_other_accounts == 0:
+                # This user_id only appears in this account's messages
+                profiles_to_delete.append(user_id)
+
+        # Delete the orphaned profiles
+        if profiles_to_delete:
+            result = await db.execute(
+                select(InstagramProfile)
+                .where(InstagramProfile.sender_id.in_(profiles_to_delete))
+            )
+            profiles = result.scalars().all()
+            for profile in profiles:
+                await db.delete(profile)
+            logger.info(
+                f"Deleting {len(profiles)} Instagram profile cache entries for account {account_id}"
+            )
+
         # Step 6: Delete account record
         # Database CASCADE constraints will handle deletion of:
         # - CRMOutboundMessage records
@@ -531,6 +575,7 @@ async def delete_account_permanently(
                 "user_id": user_id,
                 "messages_deleted": messages_count,
                 "attachments_deleted": attachments_count,
+                "profiles_deleted": len(profiles_to_delete),
                 "inbound_files_deleted": media_stats["inbound_files_deleted"],
                 "outbound_files_deleted": media_stats["outbound_files_deleted"],
                 "bytes_freed": media_stats["total_bytes_freed"],

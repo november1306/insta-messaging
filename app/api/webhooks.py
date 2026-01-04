@@ -14,7 +14,8 @@ from app.services.media_downloader import MediaDownloader
 from app.clients.instagram_client import InstagramAPIError
 from app.rules.reply_rules import get_reply_text
 from app.services.webhook_forwarder import WebhookForwarder
-from app.api.accounts import decrypt_credential
+from app.api.accounts import decrypt_credential as decode_base64_credential
+from app.services.encryption_service import decrypt_credential
 from app.api.events import broadcast_new_message
 from datetime import datetime, timezone
 import asyncio
@@ -255,10 +256,71 @@ async def handle_webhook(
                                                     "media_mime_type": att.media_mime_type
                                                 })
 
+                                        # Get sender profile (username and profile picture) from cache or Instagram API
+                                        from app.db.models import InstagramProfile
+                                        from datetime import timedelta
+
+                                        sender_username = saved_message.sender_id.value
+                                        profile_picture_url = None
+
+                                        # Check cache first (within same database session)
+                                        cached_profile = await db.execute(
+                                            select(InstagramProfile).where(
+                                                InstagramProfile.sender_id == saved_message.sender_id.value
+                                            )
+                                        )
+                                        cached_profile = cached_profile.scalar_one_or_none()
+
+                                        # Use cached profile if fresh (< 24 hours old)
+                                        if cached_profile and (datetime.now(timezone.utc) - cached_profile.last_updated.replace(tzinfo=timezone.utc)) < timedelta(hours=24):
+                                            sender_username = f"@{cached_profile.username}" if cached_profile.username else saved_message.sender_id.value
+                                            profile_picture_url = cached_profile.profile_picture_url
+                                            logger.debug(f"Using cached profile for sender {saved_message.sender_id.value}")
+                                        else:
+                                            # Fetch from Instagram API and update cache
+                                            if account and account.access_token_encrypted:
+                                                try:
+                                                    access_token = decrypt_credential(account.access_token_encrypted, settings.session_secret)
+
+                                                    async with httpx.AsyncClient() as http_client:
+                                                        instagram_client = InstagramClient(
+                                                            http_client=http_client,
+                                                            access_token=access_token,
+                                                            logger_instance=logger
+                                                        )
+                                                        profile = await instagram_client.get_user_profile(saved_message.sender_id.value)
+
+                                                        if profile:
+                                                            username = profile.get('username', '')
+                                                            sender_username = f"@{username}" if username else saved_message.sender_id.value
+                                                            # Extract profile_pic from API response and store as profile_picture_url
+                                                            # Note: Field name is 'profile_pic' for ISGIDs, 'profile_picture_url' for business accounts
+                                                            profile_picture_url = profile.get('profile_pic') or profile.get('profile_picture_url')
+
+                                                            # Update or create cache entry
+                                                            if cached_profile:
+                                                                cached_profile.username = username
+                                                                cached_profile.profile_picture_url = profile_picture_url
+                                                                cached_profile.last_updated = datetime.now(timezone.utc)
+                                                            else:
+                                                                new_profile = InstagramProfile(
+                                                                    sender_id=saved_message.sender_id.value,
+                                                                    username=username,
+                                                                    profile_picture_url=profile_picture_url,
+                                                                    last_updated=datetime.now(timezone.utc)
+                                                                )
+                                                                db.add(new_profile)
+
+                                                            await db.commit()
+                                                            logger.debug(f"Cached profile for sender {saved_message.sender_id.value}")
+                                                except Exception as profile_error:
+                                                    logger.warning(f"Failed to fetch sender profile for SSE: {profile_error}")
+
                                         await broadcast_new_message({
                                             "id": saved_message.id.value,
                                             "sender_id": saved_message.sender_id.value,
-                                            "sender_name": saved_message.sender_id.value,  # TODO: Fetch actual name
+                                            "sender_name": sender_username,
+                                            "profile_picture_url": profile_picture_url,
                                             "text": saved_message.message_text,
                                             "direction": "inbound",
                                             "timestamp": saved_message.timestamp.isoformat() if saved_message.timestamp else None,
@@ -288,7 +350,6 @@ async def handle_webhook(
 
                                         if reply_text:
                                             # Prepare Instagram client with account token
-                                            from app.services.encryption_service import decrypt_credential
                                             access_token = decrypt_credential(account.access_token_encrypted, settings.session_secret) if account.access_token_encrypted else None
 
                                             if access_token:
@@ -656,7 +717,7 @@ async def _forward_to_crm_domain(message, messaging_channel_id: str) -> None:
 
             # Decode webhook secret (MVP: base64-encoded)
             try:
-                webhook_secret = decrypt_credential(account.webhook_secret)
+                webhook_secret = decode_base64_credential(account.webhook_secret)
             except Exception as decode_error:
                 logger.error(
                     f"❌ Failed to decode webhook secret for account {account.id}: {decode_error}. "

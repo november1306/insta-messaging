@@ -70,11 +70,15 @@ class InstagramClient:
         """
         Get user profile information from Instagram.
 
+        NOTE: Instagram-Scoped IDs (sender IDs) support 'name', 'username', and 'profile_pic' fields.
+        Requires User Profile API permission (pages_messaging) to retrieve profile_pic.
+
         Args:
-            user_id: Instagram user's PSID (Page-Scoped ID)
+            user_id: Instagram user's PSID (Page-Scoped ID / Instagram-Scoped ID)
 
         Returns:
             Dictionary with user profile data (name, username, profile_pic) or None if failed
+            Note: Field is 'profile_pic' for ISGIDs, not 'profile_picture_url'
 
         Example:
             profile = await client.get_user_profile("1558635688632972")
@@ -86,7 +90,10 @@ class InstagramClient:
             response = await self._http_client.get(
                 url,
                 params={
-                    "fields": "name,username,profile_pic",
+                    # IMPORTANT: Use 'profile_pic' for Instagram-Scoped IDs (customers)
+                    # Use 'profile_picture_url' only for business accounts via get_business_account_profile()
+                    # Requires User Profile API permission (pages_messaging)
+                    "fields": "name,username,profile_pic",  # Note: profile_pic for IGSID, not profile_picture_url
                     "access_token": self._token
                 },
                 timeout=5.0
@@ -436,3 +443,115 @@ class InstagramClient:
                 status_code=None,
                 response_body=None
             ) from e
+
+    async def get_conversations(
+        self,
+        limit: int = 50
+    ) -> Optional[list[dict]]:
+        """
+        Fetch conversations from Instagram Messaging API.
+
+        Endpoint: GET /v21.0/me/conversations
+
+        Args:
+            limit: Maximum number of conversations to fetch (default 50)
+
+        Returns:
+            List of conversation objects with:
+            - id: Conversation ID
+            - participants: List of participant objects
+            - messages: Preview of latest messages
+            - updated_time: Last activity timestamp
+
+            Returns None if API call fails or endpoint not available.
+
+        Note: This endpoint may not be available for all Instagram accounts.
+              The method gracefully degrades by returning None on failure.
+        """
+        url = f"{self._api_base_url}/me/conversations"
+
+        try:
+            response = await self._http_client.get(
+                url,
+                params={
+                    "fields": "id,participants,messages{message,from,created_time},updated_time",
+                    "limit": limit,
+                    "access_token": self._token
+                },
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                conversations = data.get("data", [])
+                self._logger.info(f"✅ Retrieved {len(conversations)} conversations")
+                return conversations
+            else:
+                error_data = response.json() if response.text else {}
+                error_message = error_data.get("error", {}).get("message", "Unknown error")
+                self._logger.warning(
+                    f"⚠️ Failed to get conversations - status: {response.status_code}, "
+                    f"message: {error_message}"
+                )
+                return None
+
+        except Exception as e:
+            self._logger.warning(f"⚠️ Error fetching conversations: {e}")
+            return None
+
+    async def get_conversation_messages(
+        self,
+        conversation_id: str,
+        limit: int = 25
+    ) -> Optional[list[dict]]:
+        """
+        Fetch messages for a specific conversation.
+
+        Endpoint: GET /v21.0/{conversation_id}/messages
+
+        Args:
+            conversation_id: Instagram conversation ID
+            limit: Max messages to fetch (default 25)
+
+        Returns:
+            List of message objects with:
+            - id: Message ID
+            - message: Message text
+            - from: Sender info
+            - created_time: Timestamp
+            - attachments: Media attachments (if any)
+
+            Returns None if API call fails.
+
+        Note: This method supports graceful degradation by returning None on failure.
+        """
+        url = f"{self._api_base_url}/{conversation_id}/messages"
+
+        try:
+            response = await self._http_client.get(
+                url,
+                params={
+                    "fields": "id,message,from,created_time,attachments",
+                    "limit": limit,
+                    "access_token": self._token
+                },
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                messages = data.get("data", [])
+                self._logger.info(f"✅ Retrieved {len(messages)} messages for conversation {conversation_id}")
+                return messages
+            else:
+                error_data = response.json() if response.text else {}
+                error_message = error_data.get("error", {}).get("message", "Unknown error")
+                self._logger.warning(
+                    f"⚠️ Failed to get messages - status: {response.status_code}, "
+                    f"message: {error_message}"
+                )
+                return None
+
+        except Exception as e:
+            self._logger.warning(f"⚠️ Error fetching messages for {conversation_id}: {e}")
+            return None

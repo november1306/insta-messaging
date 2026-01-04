@@ -32,7 +32,7 @@ class MessageModel(Base):
 
     # Core fields
     id = Column(String(100), primary_key=True)  # Instagram message ID
-    account_id = Column(String(50), nullable=True)  # Database account ID (FK added later)
+    account_id = Column(String(50), ForeignKey('accounts.id', ondelete='CASCADE'), nullable=True)  # Database account ID
     sender_id = Column(String(50), nullable=False)  # Instagram user ID
     recipient_id = Column(String(50), nullable=False)  # Instagram user ID
     message_text = Column(Text)  # Message content (text message OR caption for media)
@@ -134,6 +134,28 @@ class Account(Base):
     )
 
 
+class InstagramProfile(Base):
+    """
+    Cached Instagram user profiles (senders).
+
+    Caches username and profile picture for customers who message us.
+    NOTE: Requires User Profile API permission (pages_messaging) to retrieve profile_pic.
+    Without this permission, profile_picture_url will be NULL.
+
+    Reduces Instagram API calls by storing profile data locally.
+    """
+    __tablename__ = "instagram_profiles"
+
+    sender_id = Column(String(50), primary_key=True)  # Instagram user ID (PSID)
+    username = Column(String(100), nullable=True)  # Instagram username (without @ prefix)
+    profile_picture_url = Column(String(500), nullable=True)  # Profile picture URL
+    last_updated = Column(DateTime, nullable=False, default=func.now())  # When profile was last fetched
+
+    __table_args__ = (
+        Index('idx_profile_last_updated', 'last_updated'),  # For finding stale profiles
+    )
+
+
 class CRMOutboundMessage(Base):
     """
     CRM outbound messages - tracks messages sent via CRM integration API.
@@ -146,9 +168,9 @@ class CRMOutboundMessage(Base):
     Minimal fields for MVP - add retry logic fields later if needed.
     """
     __tablename__ = "crm_outbound_messages"
-    
+
     id = Column(String(50), primary_key=True)  # Our message ID
-    account_id = Column(String(50), ForeignKey('accounts.id'), nullable=False)  # FK to accounts.id
+    account_id = Column(String(50), ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)  # FK to accounts.id
     recipient_id = Column(String(50), nullable=False)  # Instagram PSID
     message_text = Column(Text, nullable=True)  # Message content (nullable for media-only messages)
     idempotency_key = Column(String(100), unique=True, nullable=False)  # Prevent duplicates
