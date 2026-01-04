@@ -89,8 +89,7 @@ The Instagram Messenger Automation system uses **Domain-Driven Design (DDD)** pr
 │    - MediaDownloader (attachments)                           │
 │                                                              │
 │  • Database (app/db/)                                        │
-│    - SQLite (primary storage)                                │
-│    - MySQL (optional CRM sync)                               │
+│    - SQLite (async via aiosqlite)                            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -224,7 +223,6 @@ async with SQLAlchemyUnitOfWork(db) as uow:
 
 **MessageRepository** (`repositories/message_repository.py`):
 - Converts between domain entities and ORM models
-- Handles dual storage (SQLite + optional MySQL)
 - Query methods: `get_by_id()`, `get_by_idempotency_key()`, `get_conversations_for_account()`
 
 **AccountRepository** (`repositories/account_repository.py`):
@@ -494,26 +492,6 @@ uow.add_post_commit_hook(broadcast_sse)
 await uow.commit()  # SSE fires AFTER commit success
 ```
 
-### Dual Storage Pattern
-
-For CRM integration, the system supports dual persistence:
-
-1. **Primary**: SQLite (local, fast, always available)
-2. **Secondary**: MySQL (CRM database, network-dependent, best-effort)
-
-**Implementation**:
-```python
-# MessageRepository handles dual storage
-await message_repo.save(message)
-# → Writes to SQLite (ACID transaction)
-# → Writes to MySQL (best-effort, errors logged but don't fail)
-```
-
-**Benefits**:
-- CRM gets real-time data in their database
-- System remains functional if CRM MySQL is down
-- No tight coupling between systems
-
 ---
 
 ## Multi-Account Support
@@ -526,7 +504,11 @@ The system supports multiple Instagram Business Accounts owned by different user
 
 **Solution**: Use `messaging_channel_id` for routing.
 
-#### **ID Types** (See `.claude/ACCOUNT_ID_GUIDE.md`)
+#### **ID Types**
+
+The system uses multiple ID types to handle different aspects of account identification and message routing. **For detailed explanation of the account ID system, see [ACCOUNT_ID_GUIDE.md](ACCOUNT_ID_GUIDE.md)** which covers when to use each ID type, common pitfalls, and implementation patterns.
+
+**Quick Reference**:
 
 | ID Type | Format | Source | Purpose |
 |---------|--------|--------|---------|
@@ -734,7 +716,6 @@ send_message(recipient_id=AccountId("acc_123"))   # ❌ Type error
 2. **CRM System**
    - Receives: Forwarded webhooks (HMAC-signed)
    - Sends: POST `/api/v1/messages/send` (API Key auth)
-   - Optional: Direct MySQL access (dual storage)
 
 3. **Web UI**
    - Framework: Vue 3 + Vite + Tailwind CSS
@@ -744,8 +725,7 @@ send_message(recipient_id=AccountId("acc_123"))   # ❌ Type error
 ### Internal Integrations
 
 1. **Database**
-   - Primary: SQLite (async via aiosqlite)
-   - Optional: MySQL (CRM sync)
+   - SQLite (async via aiosqlite)
    - Migrations: Alembic
 
 2. **Caching**
