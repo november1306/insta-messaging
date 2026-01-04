@@ -3,13 +3,51 @@ SQLAlchemy ORM models for database tables.
 
 YAGNI: Start minimal, add tables only when needed.
 """
-from sqlalchemy import Column, String, Text, DateTime, Index, ForeignKey, Boolean, Integer, Enum, UniqueConstraint
+from sqlalchemy import Column, String, Text, DateTime, Index, ForeignKey, Boolean, Integer, Enum, UniqueConstraint, TypeDecorator
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
+from datetime import datetime, timezone
 import enum
 
 Base = declarative_base()
+
+
+# ============================================
+# Custom Types
+# ============================================
+
+class TZDateTime(TypeDecorator):
+    """
+    Timezone-aware DateTime type for SQLite.
+
+    SQLite doesn't preserve timezone information - it stores datetimes as strings.
+    This type ensures all datetimes are:
+    1. Stored as UTC (naive format for SQLite compatibility)
+    2. Always returned as timezone-aware UTC datetimes
+
+    This prevents "can't compare offset-naive and offset-aware datetimes" errors.
+    """
+    impl = DateTime
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        """Convert to UTC before storing (strip timezone for SQLite)"""
+        if value is not None:
+            if value.tzinfo is None:
+                # Naive datetime - assume it's already UTC, store as-is
+                return value
+            else:
+                # Convert to UTC and strip timezone info for SQLite storage
+                return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+
+    def process_result_value(self, value, dialect):
+        """Always return timezone-aware UTC datetime when reading from DB"""
+        if value is not None and value.tzinfo is None:
+            # Add UTC timezone to naive datetime from database
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 # ============================================
@@ -37,8 +75,8 @@ class MessageModel(Base):
     recipient_id = Column(String(50), nullable=False)  # Instagram user ID
     message_text = Column(Text)  # Message content (text message OR caption for media)
     direction = Column(String(10), nullable=False)  # 'inbound' or 'outbound'
-    timestamp = Column(DateTime, nullable=False)  # When message was sent
-    created_at = Column(DateTime, default=func.now())  # When we stored it
+    timestamp = Column(TZDateTime, nullable=False)  # When message was sent
+    created_at = Column(TZDateTime, default=func.now())  # When we stored it
 
     # CRM tracking fields (added in merge_tracking_tables migration)
     idempotency_key = Column(String(100), nullable=True)  # For duplicate detection
@@ -115,7 +153,7 @@ class Account(Base):
     access_token_encrypted = Column(Text, nullable=False)  # Encrypted Instagram access token (Fernet)
 
     # OAuth-specific fields
-    token_expires_at = Column(DateTime, nullable=True)  # When access token expires (60 days for long-lived tokens)
+    token_expires_at = Column(TZDateTime, nullable=True)  # When access token expires (60 days for long-lived tokens)
     profile_picture_url = Column(String(500), nullable=True)  # Profile picture URL from Instagram Graph API
 
     # OAuth tracking fields (for debugging and support)
@@ -125,7 +163,7 @@ class Account(Base):
     crm_webhook_url = Column(String(500), nullable=True)  # Where to send webhooks (optional for OAuth accounts)
     webhook_secret = Column(String(100), nullable=True)  # For webhook signature (optional for OAuth accounts)
 
-    created_at = Column(DateTime, nullable=False, default=func.now())  # Python + DB default for defense-in-depth
+    created_at = Column(TZDateTime, nullable=False, default=func.now())  # Python + DB default for defense-in-depth
 
     __table_args__ = (
         Index('idx_instagram_account_id', 'instagram_account_id'),
@@ -149,7 +187,7 @@ class InstagramProfile(Base):
     sender_id = Column(String(50), primary_key=True)  # Instagram user ID (PSID)
     username = Column(String(100), nullable=True)  # Instagram username (without @ prefix)
     profile_picture_url = Column(String(500), nullable=True)  # Profile picture URL
-    last_updated = Column(DateTime, nullable=False, default=func.now())  # When profile was last fetched
+    last_updated = Column(TZDateTime, nullable=False, default=func.now())  # When profile was last fetched
 
     __table_args__ = (
         Index('idx_profile_last_updated', 'last_updated'),  # For finding stale profiles
@@ -178,7 +216,7 @@ class CRMOutboundMessage(Base):
     instagram_message_id = Column(String(100), nullable=True)  # Instagram's message ID (set after successful send)
     error_code = Column(String(50), nullable=True)  # Error code if delivery failed
     error_message = Column(Text, nullable=True)  # Error message if delivery failed
-    created_at = Column(DateTime, nullable=False, default=func.now())  # Python + DB default (server_default in migration)
+    created_at = Column(TZDateTime, nullable=False, default=func.now())  # Python + DB default (server_default in migration)
     
     __table_args__ = (
         Index('idx_account_status', 'account_id', 'status'),
@@ -205,9 +243,9 @@ class APIKey(Base):
     name = Column(String(200), nullable=False)  # Descriptive name
     type = Column(Enum(APIKeyType), nullable=False)  # admin or account-scoped
     is_active = Column(Boolean, nullable=False, default=True)  # Can be revoked
-    created_at = Column(DateTime, nullable=False, default=func.now())
-    last_used_at = Column(DateTime, nullable=True)  # Updated on each use
-    expires_at = Column(DateTime, nullable=True)  # Optional expiration
+    created_at = Column(TZDateTime, nullable=False, default=func.now())
+    last_used_at = Column(TZDateTime, nullable=True)  # Updated on each use
+    expires_at = Column(TZDateTime, nullable=True)  # Optional expiration
 
     __table_args__ = (
         Index('idx_api_keys_key_prefix', 'key_prefix'),
@@ -248,8 +286,8 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)  # bcrypt hash
     is_active = Column(Boolean, nullable=False, default=True)  # Allow deactivation
 
-    created_at = Column(DateTime, nullable=False, default=func.now())
-    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+    created_at = Column(TZDateTime, nullable=False, default=func.now())
+    updated_at = Column(TZDateTime, nullable=False, default=func.now(), onupdate=func.now())
 
     __table_args__ = (
         Index('idx_users_username', 'username'),
@@ -277,7 +315,7 @@ class UserAccount(Base):
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     account_id = Column(String(50), ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
     is_primary = Column(Boolean, nullable=False, default=False)  # User's default account
-    linked_at = Column(DateTime, nullable=False, default=func.now())
+    linked_at = Column(TZDateTime, nullable=False, default=func.now())
 
     __table_args__ = (
         Index('idx_user_accounts_user_id', 'user_id'),
@@ -308,8 +346,8 @@ class OAuthState(Base):
     state = Column(String(64), primary_key=True)  # Random URL-safe token
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     redirect_uri = Column(String(500), nullable=False)  # Where to redirect after OAuth
-    created_at = Column(DateTime, nullable=False, default=func.now())
-    expires_at = Column(DateTime, nullable=False)  # 10-minute expiration
+    created_at = Column(TZDateTime, nullable=False, default=func.now())
+    expires_at = Column(TZDateTime, nullable=False)  # 10-minute expiration
 
     __table_args__ = (
         Index('idx_oauth_states_expires_at', 'expires_at'),  # For cleanup queries
