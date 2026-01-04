@@ -35,7 +35,7 @@ print_info() {
 # Check Python installation
 echo "[1/7] Checking Python installation..."
 
-# Use PYTHON_BIN if provided by caller (e.g., deploy-production.sh), otherwise default to python3
+# Use PYTHON_BIN if provided by caller (e.g., provision-vps.sh), otherwise default to python3
 if [ -z "$PYTHON_BIN" ]; then
     PYTHON_BIN="python3"
 fi

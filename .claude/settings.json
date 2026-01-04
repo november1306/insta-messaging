@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "bash": {
+      "allowed": [
+        "ralph-wiggum:*",
+        "*/scripts/setup-ralph-loop.sh*"
+      ]
+    }
+  },
+  "enabledPlugins": {
+    "ralph-wiggum@claude-code-plugins": false
+  }
+}
