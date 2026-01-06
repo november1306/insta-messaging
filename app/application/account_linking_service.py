@@ -302,12 +302,16 @@ class AccountLinkingService:
             account.token_expires_at = token_expires_at
             account.profile_picture_url = profile_picture_url
             account.account_type = account_type
+            # Set messaging_channel_id if not already set (backfill for OAuth-only accounts)
+            if not account.messaging_channel_id:
+                account.messaging_channel_id = instagram_account_id
             logger.info(f"Updated existing account: {account.id}")
         else:
             # Create new account
             account = Account(
                 id=f"acc_{uuid.uuid4().hex[:12]}",
                 instagram_account_id=instagram_account_id,
+                messaging_channel_id=instagram_account_id,  # Initialize with OAuth profile ID
                 username=username,
                 access_token_encrypted=self.encryption.encrypt(access_token),
                 token_expires_at=token_expires_at,
@@ -383,17 +387,55 @@ class AccountLinkingService:
                 if not participants:
                     continue
 
-                # Find the other participant (customer)
-                customer = None
-                for participant in participants:
-                    if participant.get("id") != account.instagram_account_id:
-                        customer = participant
-                        break
+                # DEBUG: Log participants to understand Instagram's ID usage
+                participant_ids = [p.get("id") for p in participants]
+                logger.info(f"🔍 Conversation {conv.get('id')[:20]}... participants: {participant_ids}")
+                logger.info(f"   Business IDs: instagram_account_id={account.instagram_account_id}, messaging_channel_id={account.messaging_channel_id}")
 
-                if not customer:
+                # Find which participant is the business account
+                # Instagram conversations have exactly 2 participants: business account + customer
+                # The business participant might use a different ID (messaging_channel_id) than the OAuth profile ID
+
+                if len(participants) != 2:
+                    logger.warning(f"⚠️ Unexpected participant count: {len(participants)}")
                     continue
 
-                customer_id = customer.get("id")
+                participant1_id = participants[0].get("id")
+                participant2_id = participants[1].get("id")
+
+                # Strategy: The business account is the participant that appears in ALL conversations
+                # Since we know one of them MUST be the business account:
+                # - If one matches our known business IDs (instagram_account_id or messaging_channel_id), that's it
+                # - Otherwise, assume the first participant is the business (Instagram convention)
+
+                business_participant_id = None
+                customer_id = None
+
+                # Check if either participant matches known business IDs
+                if participant1_id in {account.instagram_account_id, account.messaging_channel_id}:
+                    business_participant_id = participant1_id
+                    customer_id = participant2_id
+                elif participant2_id in {account.instagram_account_id, account.messaging_channel_id}:
+                    business_participant_id = participant2_id
+                    customer_id = participant1_id
+                else:
+                    # Neither matches - assume first is business (Instagram lists business account first)
+                    logger.info(f"📝 Neither participant matches known business IDs, assuming participant 0 is business")
+                    business_participant_id = participant1_id
+                    customer_id = participant2_id
+
+                # Update messaging_channel_id if we detected a different business ID
+                # This handles the case where Instagram uses different IDs for OAuth vs messaging
+                if business_participant_id != account.messaging_channel_id:
+                    logger.info(f"📝 Updating messaging_channel_id from {account.messaging_channel_id} to {business_participant_id}")
+                    account.messaging_channel_id = business_participant_id
+                    # Note: Will be committed by parent transaction
+
+                if not customer_id:
+                    logger.warning(f"⚠️ Could not identify customer in conversation {conv.get('id')[:20]}")
+                    continue
+
+                customer = {"id": customer_id}
 
                 # Cache customer profile
                 await self._cache_customer_profile(
@@ -474,14 +516,17 @@ class AccountLinkingService:
             from_id = from_data.get("id")
 
             # Determine direction
-            if from_id == account.instagram_account_id:
+            # Use messaging_channel_id for routing consistency with webhooks
+            business_id = account.messaging_channel_id or account.instagram_account_id
+
+            if from_id == account.instagram_account_id or from_id == business_id:
                 direction = "outbound"
-                sender_id = account.instagram_account_id
+                sender_id = business_id
                 recipient_id = customer_id
             else:
                 direction = "inbound"
                 sender_id = customer_id
-                recipient_id = account.instagram_account_id
+                recipient_id = business_id
 
             # Check if message already exists
             result = await self.db.execute(

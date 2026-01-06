@@ -417,7 +417,7 @@ async def get_conversations(
                     (MessageModel.direction == 'inbound', MessageModel.sender_id),
                     else_=MessageModel.recipient_id
                 ).label('contact_id'),
-                func.max(MessageModel.timestamp).label('latest_timestamp')
+                func.max(MessageModel.id).label('latest_message_id')
             )
             .where(
                 or_(
@@ -438,7 +438,7 @@ async def get_conversations(
         )
 
         # Join to get full message details
-        # Match on contact_id AND timestamp to get the actual latest message
+        # Match on contact_id AND message ID to get the actual latest message
         stmt = (
             select(MessageModel)
             .join(
@@ -448,7 +448,7 @@ async def get_conversations(
                         and_(MessageModel.direction == 'inbound', MessageModel.sender_id == subq.c.contact_id),
                         and_(MessageModel.direction == 'outbound', MessageModel.recipient_id == subq.c.contact_id)
                     ),
-                    MessageModel.timestamp == subq.c.latest_timestamp
+                    MessageModel.id == subq.c.latest_message_id
                 )
             )
             .where(subq.c.contact_id != messaging_channel_id)  # Exclude self-messages
