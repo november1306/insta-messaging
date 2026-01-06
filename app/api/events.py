@@ -162,20 +162,148 @@ class SSEManager:
 sse_manager = SSEManager(stale_timeout=300, max_queue_size=100)
 
 
-@router.get("/events")
+@router.get(
+    "/events",
+    summary="Server-Sent Events stream for real-time updates",
+    responses={
+        200: {
+            "description": "SSE stream established",
+            "content": {
+                "text/event-stream": {
+                    "example": "data: {\"event\":\"connected\",\"message\":\"SSE stream connected\"}\\n\\n"
+                }
+            }
+        }
+    }
+)
 async def stream_events():
     """
-    Server-Sent Events endpoint for real-time updates.
+    Server-Sent Events (SSE) endpoint for real-time message updates.
 
-    Clients connect to this endpoint to receive:
-    - new_message: When Instagram messages are received
-    - message_status: When message delivery status changes
-    - keepalive: Every 30 seconds to prevent connection timeout
+    Connect to this endpoint to receive live updates without polling:
+    - `connected` - Initial connection confirmation
+    - `new_message` - When Instagram message received via webhook
+    - `message_status` - When message delivery status changes
+    - `keepalive` - Every 30 seconds to prevent connection timeout
 
-    Connection Management:
-    - Automatically cleaned up after 5 minutes of inactivity
-    - Disconnected immediately on client close or error
-    - Max 100 queued messages per connection
+    ## Event Types
+
+    ### `connected`
+    Sent immediately upon connection:
+    ```json
+    {"event": "connected", "message": "SSE stream connected"}
+    ```
+
+    ### `new_message`
+    Sent when new Instagram message arrives:
+    ```json
+    {
+      "event": "new_message",
+      "data": {
+        "id": "mid_abc123",
+        "sender_id": "25964748486442669",
+        "sender_name": "@johndoe",
+        "text": "Hello!",
+        "direction": "inbound",
+        "timestamp": "2026-01-06T14:32:00.123Z",
+        "messaging_channel_id": "17841478096518771",
+        "account_id": "acc_a3f7e8b2c1d4",
+        "attachments": []
+      },
+      "timestamp": "2026-01-06T14:32:01.456Z"
+    }
+    ```
+
+    ### `message_status`
+    Sent when outbound message status changes:
+    ```json
+    {
+      "event": "message_status",
+      "data": {
+        "message_id": "msg_a1b2c3d4e5f6",
+        "status": "sent"
+      },
+      "timestamp": "2026-01-06T14:32:02.789Z"
+    }
+    ```
+
+    ### `keepalive`
+    Sent every 30 seconds to prevent timeout:
+    ```
+    : keepalive
+    ```
+
+    ## Client Implementation
+
+    ### JavaScript (Browser)
+    ```javascript
+    const eventSource = new EventSource('/api/v1/events');
+
+    eventSource.addEventListener('message', (event) => {
+      const data = JSON.parse(event.data);
+
+      if (data.event === 'new_message') {
+        console.log('New message:', data.data);
+        // Update UI with new message
+      }
+
+      if (data.event === 'message_status') {
+        console.log('Status update:', data.data);
+        // Update message status in UI
+      }
+    });
+
+    eventSource.onerror = (error) => {
+      console.error('SSE error:', error);
+      eventSource.close();
+    };
+    ```
+
+    ### Python
+    ```python
+    import requests
+    import json
+
+    response = requests.get(
+        'https://api.example.com/api/v1/events',
+        stream=True,
+        headers={'Accept': 'text/event-stream'}
+    )
+
+    for line in response.iter_lines():
+        if line.startswith(b'data:'):
+            data = json.loads(line[5:])
+            if data['event'] == 'new_message':
+                print(f"New message: {data['data']['text']}")
+    ```
+
+    ## Connection Management
+
+    - **Automatic Cleanup**: Stale connections removed after 5 minutes of inactivity
+    - **Max Queue Size**: 100 messages per connection (older messages dropped if exceeded)
+    - **Keepalive**: Every 30 seconds to prevent proxy/firewall timeouts
+    - **Disconnection**: Gracefully handled on client close or error
+
+    ## Production Considerations
+
+    **For high-scale deployments**:
+    - Current implementation uses in-memory SSE manager (not suitable for multiple servers)
+    - **Recommended**: Replace with Redis pub/sub for horizontal scaling
+    - **Limitation**: All SSE connections must go to same server instance
+
+    **Alternatives to SSE**:
+    - WebSocket (bidirectional, more complex)
+    - Long polling (fallback for old browsers)
+    - Firebase/Pusher (managed service)
+
+    ## Browser Compatibility
+
+    SSE is supported by:
+    - ✅ Chrome 6+
+    - ✅ Firefox 6+
+    - ✅ Safari 5+
+    - ✅ Edge 79+
+    - ❌ Internet Explorer (use polyfill or long polling)
     """
 
     async def event_generator():

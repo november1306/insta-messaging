@@ -56,7 +56,62 @@ class RegisterResponse(BaseModel):
 # Registration Endpoint
 # ============================================
 
-@router.post("/auth/register", response_model=RegisterResponse)
+@router.post(
+    "/auth/register",
+    response_model=RegisterResponse,
+    summary="Register new user account",
+    responses={
+        200: {
+            "description": "Registration successful",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message": "Registration successful. Please login with your credentials.",
+                        "username": "admin",
+                        "user_id": 1
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Bad request - Username already exists",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Username 'admin' already exists"}
+                }
+            }
+        },
+        422: {
+            "description": "Validation error - Invalid username or password",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "invalid_username": {
+                            "summary": "Invalid username format",
+                            "value": {
+                                "detail": [{
+                                    "loc": ["body", "username"],
+                                    "msg": "Username must contain only letters, numbers, and underscores",
+                                    "type": "value_error"
+                                }]
+                            }
+                        },
+                        "password_too_short": {
+                            "summary": "Password too short",
+                            "value": {
+                                "detail": [{
+                                    "loc": ["body", "password"],
+                                    "msg": "ensure this value has at least 8 characters",
+                                    "type": "value_error.any_str.min_length"
+                                }]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def register_user(
     request: RegisterRequest,
     db: AsyncSession = Depends(get_db_session)
@@ -64,19 +119,73 @@ async def register_user(
     """
     Register a new master user account.
 
-    This creates a master account that can link and manage multiple Instagram OAuth accounts.
-    After registration, the user should login with their credentials to receive a JWT token.
+    Creates a master account that can link and manage multiple Instagram OAuth accounts.
+    After registration, login with your credentials to receive a JWT token.
 
-    Args:
-        request: Registration request with username and password
-        db: Database session
+    ## Master Account System
 
-    Returns:
-        RegisterResponse: Success message with username and user_id
+    - **One Master Account** → **Multiple Instagram Accounts**
+    - Master account stores username/password (hashed with bcrypt)
+    - Instagram accounts linked via OAuth (no password stored)
+    - Switch between Instagram accounts without re-authenticating
 
-    Raises:
-        HTTPException: 400 if username already exists
-        HTTPException: 422 if validation fails
+    ## Username Requirements
+
+    - **Length**: 3-50 characters
+    - **Format**: Letters, numbers, and underscores only (a-z, A-Z, 0-9, _)
+    - **Unique**: Cannot register duplicate username
+
+    ## Password Requirements
+
+    - **Minimum Length**: 8 characters
+    - **Recommendation**: Use strong password with mix of letters, numbers, symbols
+    - **Storage**: Hashed with bcrypt (never stored in plain text)
+
+    ## After Registration
+
+    1. **Login**: `POST /api/v1/ui/session` with Basic Auth
+    2. **Link Instagram**: `POST /oauth/instagram/init` → Complete OAuth flow
+    3. **Start Messaging**: Use web UI or API to send/receive messages
+
+    ## First-Time Setup Guide
+
+    ```bash
+    # 1. Register user
+    curl -X POST "https://api.example.com/api/v1/auth/register" \\
+      -H "Content-Type: application/json" \\
+      -d '{"username": "admin", "password": "securepassword123"}'
+
+    # Response: {"message": "Registration successful", "username": "admin", "user_id": 1}
+
+    # 2. Login to get JWT token
+    curl -X POST "https://api.example.com/api/v1/ui/session" \\
+      -H "Authorization: Basic $(echo -n 'admin:securepassword123' | base64)"
+
+    # Response: {"token": "eyJ...", "account_id": null, "user_id": 1}
+
+    # 3. Link Instagram account (via web UI or API)
+    # Visit: https://your-domain.com/chat
+    # Click "Connect Instagram" → Complete OAuth flow
+    ```
+
+    ## Example Request
+
+    ```json
+    {
+      "username": "myshop_admin",
+      "password": "secureP@ssw0rd123"
+    }
+    ```
+
+    ## Example Response
+
+    ```json
+    {
+      "message": "Registration successful. Please login with your credentials.",
+      "username": "myshop_admin",
+      "user_id": 1
+    }
+    ```
     """
     try:
         # Create user via UserService

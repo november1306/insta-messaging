@@ -34,6 +34,7 @@ from fastapi import APIRouter, Query, HTTPException, Depends, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.db.connection import get_db_session
@@ -43,10 +44,30 @@ from app.api.auth import verify_ui_session
 from app.application.account_linking_service import AccountLinkingService, OAuthResult
 import uuid
 import secrets
-from pydantic import BaseModel
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+# ============================================
+# Response Models
+# ============================================
+
+class OAuthInitResponse(BaseModel):
+    """OAuth initialization response"""
+    auth_url: str = Field(
+        ...,
+        example="https://api.instagram.com/oauth/authorize?client_id=123&redirect_uri=...&scope=instagram_business_basic...",
+        description="Complete Instagram OAuth authorization URL to redirect user to"
+    )
+    expires_at: str = Field(
+        ...,
+        example="2026-01-06T14:42:00.123Z",
+        description="When the state token expires (10 minutes from now)"
+    )
+
+    class Config:
+        from_attributes = True
 
 
 def create_oauth_error_html(title: str, message: str, details: str = None) -> str:
@@ -236,23 +257,83 @@ class OAuthInitRequest(BaseModel):
     force_reauth: bool = False
 
 
-@router.post("/instagram/init")
+@router.post(
+    "/instagram/init",
+    response_model=OAuthInitResponse,
+    summary="Initialize Instagram OAuth flow (Step 1/3)",
+    responses={
+        200: {"description": "OAuth initialization successful, redirect user to auth_url"},
+        401: {"description": "User not authenticated (JWT required)"}
+    }
+)
 async def init_instagram_oauth(
     request: OAuthInitRequest,
     session: dict = Depends(verify_ui_session),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Initialize Instagram OAuth flow by generating a CSRF state token.
+    Initialize Instagram OAuth flow by generating authorization URL.
 
-    Requires JWT authentication - user must be logged in before initiating OAuth flow.
+    ## OAuth Flow Overview (3 Steps)
 
-    Args:
-        request: OAuth initialization parameters (force_reauth: bool)
+    1. **Initialize** (this endpoint): Get authorization URL
+    2. **Redirect User**: Send user to authorization URL (Instagram login page)
+    3. **Callback**: Instagram redirects back with code → we exchange for token
 
-    Returns:
-        - auth_url: Complete Instagram OAuth authorization URL
-        - expires_at: When the state token expires (10 minutes)
+    ## Requirements
+
+    - **JWT Authentication Required**: User must be logged in first
+    - **Instagram Business Account**: Personal accounts not supported (must convert to Business/Creator)
+    - **No Facebook Page Required**: Uses Instagram Business Login (2025 method)
+
+    ## Permissions Requested
+
+    - `instagram_business_basic` - View profile info
+    - `instagram_business_manage_messages` - Send/receive DMs
+    - `instagram_business_content_publish` - Post content
+    - `instagram_business_manage_insights` - View analytics
+    - `instagram_business_manage_comments` - Manage comments
+
+    ## Security (CSRF Protection)
+
+    We generate a random `state` token that:
+    - Prevents CSRF attacks
+    - Links OAuth callback to correct user session
+    - Expires after 10 minutes (check `expires_at`)
+    - One-time use only (deleted after callback)
+
+    ## Example Frontend Flow
+
+    ```javascript
+    // 1. Get authorization URL
+    const response = await fetch('/oauth/instagram/init', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${jwt_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ force_reauth: false })
+    });
+
+    const { auth_url, expires_at } = await response.json();
+
+    // 2. Redirect user to Instagram login
+    window.location.href = auth_url;
+
+    // 3. User authorizes → Instagram redirects to callback
+    // 4. Callback handles token exchange and account linking
+    // 5. User is redirected back to your app with success message
+    ```
+
+    ## When to Use `force_reauth`
+
+    - `false` (default): If user already authorized, Instagram may skip login
+    - `true`: Force user to re-login and re-authorize even if previously connected
+
+    Use `force_reauth: true` when:
+    - User wants to switch to different Instagram account
+    - Previous authorization was revoked
+    - Testing OAuth flow during development
     """
     # Get authenticated user from JWT session
     user_id = session.get("user_id")
@@ -283,13 +364,16 @@ async def init_instagram_oauth(
         force_reauth=request.force_reauth
     )
 
-    return {
-        "auth_url": auth_url,
-        "expires_at": expires_at.isoformat()
-    }
+    return OAuthInitResponse(
+        auth_url=auth_url,
+        expires_at=expires_at.isoformat()
+    )
 
 
-@router.get("/instagram/callback")
+@router.get(
+    "/instagram/callback",
+    summary="Instagram OAuth callback (Step 3/3)"
+)
 async def instagram_oauth_callback(
     code: str = Query(..., description="Authorization code from Instagram"),
     state: str = Query(..., description="CSRF state token (required)"),
@@ -300,15 +384,73 @@ async def instagram_oauth_callback(
     """
     Handle Instagram OAuth callback.
 
-    Uses AccountLinkingService to handle OAuth flow, token exchange,
-    account creation, and conversation history sync.
+    Instagram redirects the user here after they authorize your app. This endpoint:
+    1. Validates CSRF state token (security check)
+    2. Exchanges authorization code for access token
+    3. Fetches Instagram account details
+    4. Creates/updates account in database
+    5. Links account to user
+    6. Syncs conversation history from Instagram API
+    7. Displays success page with auto-redirect
 
-    Security:
-    - Validates CSRF state token (one-time use)
-    - Exchanges code for access token
-    - Creates/updates account in database
-    - Links to authenticated user from state token
-    - Syncs conversation history from Instagram API
+    ## How It Works
+
+    After user clicks "Authorize" on Instagram:
+    ```
+    Instagram redirects to:
+    https://your-domain.com/oauth/instagram/callback?code=ABC123&state=xyz789
+
+    We process:
+    1. Validate state token (prevent CSRF attacks)
+    2. Exchange code for short-lived token (1 hour)
+    3. Exchange for long-lived token (60 days)
+    4. Fetch account details (username, profile pic, account type)
+    5. Store encrypted token in database
+    6. Sync existing conversation history (optional)
+    7. Show success HTML page → auto-redirect to chat UI
+    ```
+
+    ## Response Types
+
+    **Success** (200 OK - HTML):
+    - Beautiful success page with account details
+    - JavaScript auto-refresh after 3 seconds
+    - Clears old session from localStorage
+    - Redirects to chat UI
+
+    **Error** (400/500 - HTML):
+    - User-friendly error page explaining what went wrong
+    - "Return to Chat" button
+    - Error details for debugging
+
+    ## Common Errors
+
+    **"Invalid or expired state token"**:
+    - State token expired (10 minutes max)
+    - User already used this state token
+    - CSRF attack attempted
+
+    **"Authorization code has expired"**:
+    - User took too long on Instagram's auth page
+    - Code already exchanged
+    - Ask user to try again
+
+    **"Personal accounts not supported"**:
+    - User tried to link Instagram Personal account
+    - Need to convert to Business or Creator account first
+
+    **"Token exchange failed"**:
+    - Instagram API error
+    - Invalid app credentials
+    - Check `INSTAGRAM_CLIENT_ID` and `INSTAGRAM_CLIENT_SECRET`
+
+    ## Why HTML Response?
+
+    This endpoint returns HTML (not JSON) because:
+    - User is redirected here from Instagram's web page
+    - Displays user-friendly success/error messages
+    - Auto-refreshes frontend to load new account
+    - Provides "Return to Chat" button for manual navigation
     """
     # Handle OAuth errors from Instagram
     if error:

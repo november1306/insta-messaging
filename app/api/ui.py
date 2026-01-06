@@ -17,6 +17,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_, and_, case
 from sqlalchemy.orm import selectinload
+from pydantic import BaseModel, Field
 from app.db.connection import get_db_session
 from app.db.models import MessageModel, APIKey, UserAccount, Account
 from app.clients.instagram_client import InstagramClient
@@ -33,11 +34,133 @@ router = APIRouter()
 
 
 # ============================================
+# Response Models
+# ============================================
+
+class SessionResponse(BaseModel):
+    """UI session creation response"""
+    token: str = Field(..., example="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", description="JWT token for subsequent requests")
+    account_id: Optional[str] = Field(None, example="acc_a3f7e8b2c1d4", description="Primary Instagram account ID (None if no accounts linked yet)")
+    user_id: int = Field(..., example=1, description="User ID")
+    username: str = Field(..., example="admin", description="Username")
+    expires_in: int = Field(..., example=86400, description="Token expiration time in seconds (24 hours)")
+
+    class Config:
+        from_attributes = True
+
+
+class CurrentAccountResponse(BaseModel):
+    """Current account information"""
+    account_id: Optional[str] = Field(None, example="acc_a3f7e8b2c1d4")
+    instagram_account_id: str = Field(..., example="17841478096518771")
+    username: str = Field(..., example="@myshop_official", description="Instagram username with @ prefix")
+    instagram_handle: Optional[str] = Field(None, example="myshop_official", description="Raw username without @ prefix")
+    profile_picture_url: Optional[str] = Field(None, example="https://scontent.cdninstagram.com/v/...")
+
+    class Config:
+        from_attributes = True
+
+
+class ConversationItem(BaseModel):
+    """Single conversation in list"""
+    sender_id: str = Field(..., example="25964748486442669", description="Customer's Instagram user ID")
+    sender_name: str = Field(..., example="@johndoe", description="Customer's Instagram username")
+    profile_picture_url: Optional[str] = Field(None, example="https://scontent.cdninstagram.com/v/...")
+    last_message: str = Field(..., example="Hello, I have a question about my order", description="Most recent message text")
+    last_message_time: str = Field(..., example="2026-01-06T14:32:00.123Z", description="ISO 8601 timestamp")
+    unread_count: int = Field(..., example=0, description="Number of unread messages (always 0 in MVP)")
+    messaging_channel_id: str = Field(..., example="17841478096518771", description="Messaging channel ID for this conversation")
+    account_id: str = Field(..., example="acc_a3f7e8b2c1d4", description="Account ID this conversation belongs to")
+
+    class Config:
+        from_attributes = True
+
+
+class ConversationsResponse(BaseModel):
+    """List of conversations"""
+    conversations: List[ConversationItem] = Field(..., description="Conversations sorted by most recent first")
+
+    class Config:
+        from_attributes = True
+
+
+class MessageAttachmentInfo(BaseModel):
+    """Message attachment information"""
+    id: str = Field(..., example="mid_abc123_0", description="Unique attachment ID")
+    media_type: str = Field(..., example="image", description="Attachment type: image | video | audio")
+    media_url: Optional[str] = Field(None, example="https://scontent.cdninstagram.com/v/...", description="Instagram CDN URL (expires in 7 days)")
+    media_url_local: Optional[str] = Field(None, example="media/inbound/acc_123/sender_456/mid_abc123_0.jpg", description="Local file path (authenticated)")
+    media_mime_type: Optional[str] = Field(None, example="image/jpeg", description="MIME type of downloaded file")
+
+    class Config:
+        from_attributes = True
+
+
+class MessageInfo(BaseModel):
+    """Single message information"""
+    id: str = Field(..., example="mid_abc123", description="Instagram message ID")
+    text: str = Field(..., example="Hello! I have a question.", description="Message text (empty string for media-only messages)")
+    direction: str = Field(..., example="inbound", description="Message direction: inbound (from customer) | outbound (from you)")
+    timestamp: str = Field(..., example="2026-01-06T14:32:00.123Z", description="ISO 8601 timestamp")
+    status: Optional[str] = Field(None, example="sent", description="Delivery status for outbound messages")
+    attachments: List[MessageAttachmentInfo] = Field(default_factory=list, description="Media attachments")
+
+    class Config:
+        from_attributes = True
+
+
+class SenderInfo(BaseModel):
+    """Conversation sender information"""
+    id: str = Field(..., example="25964748486442669", description="Instagram user ID")
+    name: str = Field(..., example="@johndoe", description="Instagram username")
+
+    class Config:
+        from_attributes = True
+
+
+class MessagesResponse(BaseModel):
+    """Conversation messages with sender info"""
+    messages: List[MessageInfo] = Field(..., description="Messages in chronological order (oldest first)")
+    sender_info: SenderInfo = Field(..., description="Information about the conversation partner")
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
 # Session Authentication Endpoint
 # ============================================
 
 
-@router.post("/ui/session")
+@router.post(
+    "/ui/session",
+    response_model=SessionResponse,
+    summary="Create UI session token (login)",
+    responses={
+        200: {"description": "Login successful, JWT token returned"},
+        401: {
+            "description": "Authentication failed",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "missing_auth": {
+                            "summary": "Missing Authorization header",
+                            "value": {"detail": "Missing Basic Auth credentials"}
+                        },
+                        "invalid_credentials": {
+                            "summary": "Wrong username or password",
+                            "value": {"detail": "Invalid username or password"}
+                        },
+                        "malformed_auth": {
+                            "summary": "Invalid Base64 encoding",
+                            "value": {"detail": "Invalid Basic Auth format"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def create_session(
     authorization: Optional[str] = Header(None),
     db: AsyncSession = Depends(get_db_session)
@@ -45,21 +168,54 @@ async def create_session(
     """
     Create a UI session token (JWT) by validating Basic Auth credentials.
 
-    This endpoint validates username/password credentials from the Authorization header
-    and returns a JWT token for subsequent requests.
+    **How to Login**:
 
-    Args:
-        authorization: Basic Auth header (e.g., "Basic base64(username:password)")
-        db: Database session
+    1. Encode your credentials: `base64(username:password)`
+    2. Send in Authorization header: `Basic <base64-encoded-credentials>`
+    3. Receive JWT token in response
+    4. Use JWT token for subsequent requests: `Bearer <jwt-token>`
 
-    Returns:
-        dict: Session token and account information
-            - token (str): JWT token for UI authentication
-            - account_id (str): Instagram business account ID
-            - expires_in (int): Token expiration time in seconds
+    **Example (curl)**:
+    ```bash
+    curl -X POST "https://api.example.com/api/v1/ui/session" \\
+      -H "Authorization: Basic $(echo -n 'admin:password' | base64)"
+    ```
 
-    Raises:
-        HTTPException: 401 if credentials are missing or invalid
+    **Example (JavaScript)**:
+    ```javascript
+    const credentials = btoa('admin:password');
+    const response = await fetch('/api/v1/ui/session', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${credentials}`
+      }
+    });
+    const { token, account_id } = await response.json();
+    ```
+
+    **Example (Python)**:
+    ```python
+    import base64
+    import requests
+
+    credentials = base64.b64encode(b'admin:password').decode()
+    response = requests.post(
+        'https://api.example.com/api/v1/ui/session',
+        headers={'Authorization': f'Basic {credentials}'}
+    )
+    token = response.json()['token']
+    ```
+
+    **Token Usage**:
+    Store the returned JWT token and use it in subsequent requests:
+    ```
+    Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+    ```
+
+    **Token Expiration**:
+    - Default: 24 hours (86400 seconds)
+    - Check `expires_in` field for exact duration
+    - Login again when token expires (401 error)
     """
     # Check if Authorization header is present and valid format
     if not authorization or not authorization.startswith("Basic "):
@@ -134,13 +290,13 @@ async def create_session(
 
     logger.info(f"Created UI session for user '{user.username}' (id={user.id}, primary_account={primary_account_id})")
 
-    return {
-        "token": token,
-        "account_id": primary_account_id,  # For backward compatibility (may be None)
-        "user_id": user.id,
-        "username": user.username,
-        "expires_in": settings.jwt_expiration_hours * 3600  # Convert hours to seconds
-    }
+    return SessionResponse(
+        token=token,
+        account_id=primary_account_id,  # May be None for new users
+        user_id=user.id,
+        username=user.username,
+        expires_in=settings.jwt_expiration_hours * 3600  # Convert hours to seconds
+    )
 
 
 # ============================================
@@ -148,7 +304,11 @@ async def create_session(
 # ============================================
 
 
-@router.get("/ui/account/me")
+@router.get(
+    "/ui/account/me",
+    response_model=CurrentAccountResponse,
+    summary="Get current user's account info"
+)
 async def get_current_account(
     account_id: Optional[str] = Query(None, description="Instagram account ID. If not provided, uses user's primary account."),
     session: dict = Depends(verify_ui_session),
@@ -157,12 +317,19 @@ async def get_current_account(
     """
     Get current user's Instagram account information.
 
-    Returns the business account ID, username, profile picture, and Instagram handle.
+    Returns account details including username, profile picture, and messaging channel ID.
 
-    Requires JWT session authentication.
+    **Query Parameters**:
+    - `account_id` (optional): Specific account to fetch. If not provided, uses your primary account from JWT token.
 
-    Args:
-        account_id: Optional account ID. If not provided, uses user's primary account from session.
+    **Response Fields**:
+    - `account_id`: Your account ID (e.g., acc_a3f7e8b2c1d4)
+    - `instagram_account_id`: Instagram's business account ID
+    - `username`: Instagram username with @ prefix
+    - `instagram_handle`: Raw username without @ prefix
+    - `profile_picture_url`: Profile picture URL from Instagram CDN
+
+    **Requires JWT session authentication.**
     """
     try:
         user_id = session.get("user_id")
@@ -187,12 +354,13 @@ async def get_current_account(
                 else:
                     # User truly has no linked accounts yet
                     logger.info(f"User {user_id} has no linked accounts")
-                    return {
-                        "account_id": None,
-                        "username": "No account linked",
-                        "instagram_handle": None,
-                        "profile_picture_url": None
-                    }
+                    return CurrentAccountResponse(
+                        account_id=None,
+                        instagram_account_id="",
+                        username="No account linked",
+                        instagram_handle=None,
+                        profile_picture_url=None
+                    )
 
         # Verify user has access to this account
         result = await db.execute(
@@ -233,23 +401,24 @@ async def get_current_account(
 
         logger.info(f"✅ Account info: @{username}, has_pic={bool(profile_pic_url)}")
 
-        return {
-            "account_id": account_id,
-            "instagram_account_id": business_account_id,
-            "username": f"@{username}" if username else f"@{business_account_id}",
-            "instagram_handle": username or business_account_id,
-            "profile_picture_url": profile_pic_url
-        }
+        return CurrentAccountResponse(
+            account_id=account_id,
+            instagram_account_id=business_account_id,
+            username=f"@{username}" if username else f"@{business_account_id}",
+            instagram_handle=username or business_account_id,
+            profile_picture_url=profile_pic_url
+        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to fetch current account info: {e}", exc_info=True)
-        return {
-            "account_id": None,
-            "username": "Error loading account",
-            "instagram_handle": None,
-            "profile_picture_url": None
-        }
+        return CurrentAccountResponse(
+            account_id=None,
+            instagram_account_id="",
+            username="Error loading account",
+            instagram_handle=None,
+            profile_picture_url=None
+        )
 
 
 async def _get_instagram_username(sender_id: str, access_token: str = None, is_business_account: bool = False) -> str:
@@ -338,25 +507,51 @@ async def _get_instagram_profile(sender_id: str, access_token: str = None) -> di
     }
 
 
-@router.get("/ui/conversations")
+@router.get(
+    "/ui/conversations",
+    response_model=ConversationsResponse,
+    summary="Get conversation list",
+    responses={
+        200: {"description": "Conversations retrieved successfully"},
+        400: {"description": "Account has no messaging channel bound yet"},
+        403: {"description": "No permission to access this account"},
+        404: {"description": "Account not found"}
+    }
+)
 async def get_conversations(
     account_id: Optional[str] = Query(None, description="Instagram account ID to filter by"),
     session: dict = Depends(verify_ui_session),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Get list of all conversations grouped by sender.
-    Returns all conversations with time remaining indicator.
+    Get list of all conversations grouped by customer.
 
-    Business accounts can only initiate/respond to messages within 24 hours
-    of the last inbound message from the user. The response includes hours_remaining
-    which can be negative for expired conversations.
+    Returns conversations sorted by most recent message first, with profile information
+    fetched from Instagram API.
 
-    Requires JWT session authentication.
+    **24-Hour Messaging Window**:
+    Business accounts can only respond to messages within 24 hours of the last inbound
+    message from the customer. The frontend should calculate `hours_remaining` based
+    on `last_message_time`.
 
-    Args:
-        account_id: Optional Instagram account ID to filter conversations.
-                   If not provided, uses user's primary account from session.
+    **Query Parameters**:
+    - `account_id` (optional): Filter conversations for specific Instagram account.
+      If not provided, uses user's primary account from JWT token.
+
+    **Response Fields**:
+    - `sender_id`: Customer's Instagram user ID (IGID format, scoped to messaging channel)
+    - `sender_name`: Customer's Instagram username (fetched from API, cached for 24 hours)
+    - `profile_picture_url`: Customer's profile picture URL (from Instagram CDN)
+    - `last_message`: Most recent message text (from either customer or you)
+    - `last_message_time`: ISO 8601 timestamp of most recent message
+    - `messaging_channel_id`: Unique channel ID for routing (from webhook entry.id)
+    - `account_id`: Your account ID (e.g., acc_a3f7e8b2c1d4)
+
+    **Use Cases**:
+    - Display conversation list in chat UI
+    - Calculate remaining messaging window time
+    - Sort by most recent activity
+    - Show unread count (future feature, currently always 0)
     """
     try:
         user_id = session.get("user_id")
@@ -367,7 +562,7 @@ async def get_conversations(
             if not account_id:
                 # User has no linked accounts yet
                 logger.info(f"User {user_id} has no linked accounts, returning empty conversations")
-                return {"conversations": []}
+                return ConversationsResponse(conversations=[])
 
         # Verify user has access to this account
         result = await db.execute(
@@ -403,7 +598,7 @@ async def get_conversations(
         if not messaging_channel_id:
             logger.warning(f"Account {account_id} has no messaging_channel_id bound yet")
             # Return empty conversations if channel not bound yet
-            return {"conversations": []}
+            return ConversationsResponse(conversations=[])
 
         # Subquery to get the latest message for each contact (customer)
         # A conversation is identified by the contact's Instagram ID
@@ -515,14 +710,18 @@ async def get_conversations(
                 "account_id": account_id  # The database account ID (e.g., acc_xxx)
             })
 
-        return {"conversations": conversations}
+        return ConversationsResponse(conversations=conversations)
 
     except Exception as e:
         logger.error(f"Failed to fetch conversations: {e}")
-        return {"conversations": []}
+        return ConversationsResponse(conversations=[])
 
 
-@router.get("/ui/messages/{sender_id}")
+@router.get(
+    "/ui/messages/{sender_id}",
+    response_model=MessagesResponse,
+    summary="Get conversation messages"
+)
 async def get_messages(
     sender_id: str,
     account_id: Optional[str] = Query(None, description="Instagram account ID to filter by"),
@@ -530,14 +729,32 @@ async def get_messages(
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Get all messages for a specific sender (conversation thread).
-    Returns both inbound and outbound messages with Instagram username.
+    Get all messages for a specific conversation thread.
 
-    Requires JWT session authentication.
+    Returns both inbound and outbound messages in chronological order (oldest to newest),
+    with sender information and media attachments.
 
-    Args:
-        sender_id: Instagram user ID of the conversation partner
-        account_id: Optional Instagram account ID. If not provided, uses user's primary account.
+    **Path Parameters**:
+    - `sender_id`: Instagram user ID of the conversation partner (customer)
+
+    **Query Parameters**:
+    - `account_id` (optional): Specific account to fetch messages from. If not provided, uses user's primary account.
+
+    **Response Fields**:
+    - `messages`: Array of messages in chronological order (oldest first, newest last)
+      - `id`: Instagram message ID
+      - `text`: Message text (empty string for media-only messages)
+      - `direction`: "inbound" (from customer) or "outbound" (from you)
+      - `timestamp`: ISO 8601 timestamp
+      - `status`: Delivery status for outbound messages (sent/pending/failed)
+      - `attachments`: Array of media files (images, videos, audio)
+    - `sender_info`: Information about the conversation partner
+      - `id`: Instagram user ID
+      - `name`: Instagram username with @ prefix
+
+    **Limit**: Returns last 100 messages (most recent first, then reversed for chronological display)
+
+    **Requires JWT session authentication.**
     """
     try:
         user_id = session.get("user_id")
@@ -659,39 +876,71 @@ async def get_messages(
                 "name": sender_name
             }
 
-        return {
-            "messages": message_list,
-            "sender_info": sender_info
-        }
+        return MessagesResponse(
+            messages=message_list,
+            sender_info=SenderInfo(**sender_info)
+        )
 
     except Exception as e:
         logger.error(f"Failed to fetch messages for {sender_id}: {e}")
         # In exception handler, we don't have access_token available, so use sender_id as fallback
-        return {
-            "messages": [],
-            "sender_info": {"id": sender_id, "name": sender_id}
-        }
+        return MessagesResponse(
+            messages=[],
+            sender_info=SenderInfo(id=sender_id, name=sender_id)
+        )
 
 
-@router.get("/ui/proxy-image")
+@router.get(
+    "/ui/proxy-image",
+    summary="Proxy Instagram CDN images (bypass CORS)"
+)
 async def proxy_instagram_image(
     url: str = Query(..., description="Instagram CDN image URL to proxy")
 ):
     """
     Proxy Instagram CDN images to bypass CORS and referrer restrictions.
 
+    **Problem**:
     Instagram CDN blocks direct image loading from external sites due to:
-    - Referrer policy restrictions
-    - CORS headers
+    - Referrer policy restrictions (Instagram CDN checks the Referer header)
+    - CORS headers (no Access-Control-Allow-Origin)
     - User-Agent requirements
 
+    **Solution**:
     This endpoint fetches the image server-side and serves it to the frontend,
     bypassing these restrictions.
 
-    Public endpoint (no auth required) since:
+    **Security**:
+    - Only allows Instagram CDN URLs (whitelist: `https://scontent.cdninstagram.com/`)
+    - Returns 400 for non-Instagram URLs
+    - No authentication required (see below)
+
+    **Why No Authentication**:
     - Only proxies public Instagram CDN URLs
-    - Browser <img> tags don't send JWT tokens
+    - Browser `<img>` tags don't send JWT tokens
     - Instagram profile pictures are already public data
+    - Authentication would break image rendering in HTML
+
+    **Usage Example**:
+    ```html
+    <!-- Direct (won't work - CORS blocked) -->
+    <img src="https://scontent.cdninstagram.com/v/..." />
+
+    <!-- Via proxy (works!) -->
+    <img src="/api/v1/ui/proxy-image?url=https://scontent.cdninstagram.com/v/..." />
+    ```
+
+    **JavaScript Example**:
+    ```javascript
+    const instagramUrl = "https://scontent.cdninstagram.com/v/...";
+    const proxyUrl = `/api/v1/ui/proxy-image?url=${encodeURIComponent(instagramUrl)}`;
+    document.querySelector('img').src = proxyUrl;
+    ```
+
+    **Caching**:
+    - Images cached for 24 hours (Cache-Control: public, max-age=86400)
+    - Reduces load on Instagram CDN
+    - Improves frontend performance
     """
     # Security: Only allow Instagram CDN URLs
     if not url.startswith("https://scontent.cdninstagram.com/"):

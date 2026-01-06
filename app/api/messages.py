@@ -38,11 +38,33 @@ router = APIRouter()
 
 class SendMessageRequest(BaseModel):
     """Request to send a message to an Instagram user"""
-    account_id: str = Field(..., description="Instagram account ID to send from")
-    recipient_id: str = Field(..., description="Instagram PSID of the recipient")
-    message: str = Field(..., min_length=1, max_length=1000, description="Message text to send")
-    idempotency_key: str = Field(..., description="Unique key to prevent duplicate sends")
-    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Optional CRM-specific metadata")
+    account_id: str = Field(
+        ...,
+        example="acc_a3f7e8b2c1d4",
+        description="Your Instagram account ID (from /accounts/me)"
+    )
+    recipient_id: str = Field(
+        ...,
+        example="17841478096518771",
+        description="Instagram user ID of the recipient (IGID format)"
+    )
+    message: str = Field(
+        ...,
+        min_length=1,
+        max_length=1000,
+        example="Hello! Your order #12345 has shipped.",
+        description="Message text to send (1-1000 characters)"
+    )
+    idempotency_key: str = Field(
+        ...,
+        example="order_12345_notification",
+        description="Unique key to prevent duplicate sends. Use same key to safely retry failed requests."
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        example={"order_id": "12345", "customer_id": "cust_789"},
+        description="Optional custom data (not sent to Instagram, stored for your reference)"
+    )
 
 
 class SendMessageResponse(BaseModel):
@@ -53,12 +75,35 @@ class SendMessageResponse(BaseModel):
     MVP implementation (Task 6) does synchronous delivery and returns [pending, sent, failed].
     This will be aligned when async queue is implemented in Priority 2.
     """
-    message_id: str = Field(..., description="Message Router's message ID")
-    status: str = Field(..., description="pending | sent | failed (MVP) | accepted (future)")
-    created_at: datetime
-    attachment_url: Optional[str] = Field(None, description="Public URL of attachment if file was uploaded")
-    attachment_type: Optional[str] = Field(None, description="Type of attachment: image | video | audio")
-    attachment_local_path: Optional[str] = Field(None, description="Local path for frontend to fetch authenticated media")
+    message_id: str = Field(
+        ...,
+        example="msg_a1b2c3d4e5f6",
+        description="Unique message ID for tracking"
+    )
+    status: str = Field(
+        ...,
+        example="sent",
+        description="Current status: pending | sent | failed"
+    )
+    created_at: datetime = Field(
+        ...,
+        example="2026-01-06T14:32:00.123Z"
+    )
+    attachment_url: Optional[str] = Field(
+        None,
+        example="https://api.example.com/media/outbound/acc_123/uuid_timestamp.jpg",
+        description="Public URL of attachment if file was uploaded"
+    )
+    attachment_type: Optional[str] = Field(
+        None,
+        example="image",
+        description="Type of attachment: image | video | audio"
+    )
+    attachment_local_path: Optional[str] = Field(
+        None,
+        example="media/outbound/acc_123/uuid_timestamp.jpg",
+        description="Local path for frontend to fetch authenticated media"
+    )
 
     class Config:
         from_attributes = True
@@ -91,7 +136,83 @@ class MessageStatusResponse(BaseModel):
 # Endpoints
 # ============================================
 
-@router.post("/messages/send", response_model=SendMessageResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/messages/send",
+    response_model=SendMessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Send Instagram DM with optional attachment",
+    responses={
+        202: {
+            "description": "Message accepted for delivery",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message_id": "msg_a1b2c3d4e5f6",
+                        "status": "sent",
+                        "created_at": "2026-01-06T14:32:00.123Z",
+                        "attachment_url": None,
+                        "attachment_type": None,
+                        "attachment_local_path": None
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Bad request - Invalid parameters",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "missing_content": {
+                            "summary": "No message or file provided",
+                            "value": {"detail": "Either message text or file attachment is required"}
+                        },
+                        "file_too_large": {
+                            "summary": "File exceeds size limit",
+                            "value": {"detail": "File too large: 10485760 bytes (max: 8388608 bytes = 8MB)"}
+                        },
+                        "unsupported_format": {
+                            "summary": "Unsupported file type",
+                            "value": {"detail": "Unsupported image type: image/gif. Supported: JPEG, PNG"}
+                        }
+                    }
+                }
+            }
+        },
+        401: {
+            "description": "Unauthorized - Missing or invalid authentication",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Missing authentication. Provide either JWT token or API key."}
+                }
+            }
+        },
+        403: {
+            "description": "Forbidden - No permission to access this account",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "API key does not have permission to access account acc_123"}
+                }
+            }
+        },
+        500: {
+            "description": "Server error - Instagram API error or database failure",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "instagram_api_error": {
+                            "summary": "Instagram API rejected message",
+                            "value": {"detail": "HTTP 400: The 24-hour messaging window has expired"}
+                        },
+                        "database_error": {
+                            "summary": "Database failure",
+                            "value": {"detail": "Failed to create message"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def send_message(
     recipient_id: str = Form(...),
     account_id: str = Form(...),
@@ -104,17 +225,70 @@ async def send_message(
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Send a message with optional text and/or file attachment to an Instagram user.
+    Send a text message and/or file attachment to an Instagram user via Direct Messages.
 
-    Accepts multipart/form-data with:
-    - recipient_id, account_id, idempotency_key (required)
-    - message (optional text)
-    - file (optional attachment: image, video, or audio)
+    ## Requirements
 
-    At least one of message or file must be provided.
+    - **At least one of `message` (text) or `file` (attachment) must be provided**
+    - **Recipient must have messaged your account first** (Instagram's messaging policy)
+    - **24-hour messaging window**: You can only reply within 24 hours of the recipient's last message
 
-    Returns:
-        202 Accepted with message_id and status
+    ## Idempotency
+
+    Use the same `idempotency_key` to safely retry failed requests without sending duplicates:
+
+    ```python
+    # First attempt - sends message
+    send_message(idempotency_key="order_12345_notification")
+
+    # Retry (network error, timeout, etc.) - returns existing message
+    send_message(idempotency_key="order_12345_notification")  # Same key = no duplicate
+    ```
+
+    ## Media Attachments
+
+    Supported formats and size limits:
+
+    - **Images**: JPEG, PNG (max 8MB)
+    - **Videos**: MP4, MOV, AVI, WebM, OGG (max 25MB)
+    - **Audio**: AAC, M4A, WAV, MP4 (max 25MB)
+
+    ## Instagram Messaging Policies
+
+    **24-Hour Window**:
+    - Users must message you first before you can send them messages
+    - After their last message, you have 24 hours to respond
+    - After 24 hours, you can't send messages until they message you again
+
+    **Error Examples**:
+    - `"User not found"`: Recipient hasn't messaged your account yet
+    - `"24-hour messaging window has expired"`: Wait for recipient to message you again
+
+    ## Example Requests
+
+    **Text-only message**:
+    ```bash
+    curl -X POST "https://api.example.com/api/v1/messages/send" \\
+      -H "Authorization: Bearer sk_live_..." \\
+      -F "account_id=acc_a3f7e8b2c1d4" \\
+      -F "recipient_id=17841478096518771" \\
+      -F "message=Hello! Your order has shipped." \\
+      -F "idempotency_key=order_12345_notification"
+    ```
+
+    **Image attachment with text**:
+    ```bash
+    curl -X POST "https://api.example.com/api/v1/messages/send" \\
+      -H "Authorization: Bearer sk_live_..." \\
+      -F "account_id=acc_a3f7e8b2c1d4" \\
+      -F "recipient_id=17841478096518771" \\
+      -F "message=Here's your receipt!" \\
+      -F "idempotency_key=order_12345_receipt" \\
+      -F "file=@receipt.jpg"
+    ```
+
+    **Authentication**:
+    Requires either API key (Bearer token) or JWT session authentication.
     """
     logger.info(f"Send message request - account: {account_id}, recipient: {recipient_id}, has_file: {file is not None}")
 
@@ -385,7 +559,48 @@ async def send_message(
     )
 
 
-@router.get("/messages/{message_id}/status", response_model=MessageStatusResponse)
+@router.get(
+    "/messages/{message_id}/status",
+    response_model=MessageStatusResponse,
+    summary="Get message delivery status",
+    responses={
+        200: {
+            "description": "Message status retrieved successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message_id": "msg_a1b2c3d4e5f6",
+                        "status": "sent",
+                        "account_id": "acc_a3f7e8b2c1d4",
+                        "recipient_id": "17841478096518771",
+                        "instagram_message_id": "mid_abc123",
+                        "created_at": "2026-01-06T14:32:00.123Z",
+                        "sent_at": "2026-01-06T14:32:01.456Z",
+                        "delivered_at": None,
+                        "read_at": None,
+                        "error": None
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Message not found",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Message 'msg_invalid' not found"}
+                }
+            }
+        },
+        403: {
+            "description": "No permission to access this message",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "API key does not have permission to access this message"}
+                }
+            }
+        }
+    }
+)
 async def get_message_status(
     message_id: str,
     api_key: APIKey = Depends(verify_api_key),
@@ -394,17 +609,32 @@ async def get_message_status(
     """
     Get the delivery status of a sent message.
 
-    Requires permission to access the account associated with the message.
+    **Message Status Lifecycle**:
+    1. `pending` - Message created, queued for delivery
+    2. `sent` - Delivered to Instagram successfully
+    3. `delivered` - Instagram confirmed delivery to recipient (future)
+    4. `read` - Recipient opened the message (future)
+    5. `failed` - Delivery failed (see error field for details)
 
-    Minimal implementation for MVP (Priority 1):
-    - Query crm_outbound_messages by message_id
-    - Return 404 if not found
-    - Return current status
-    - Check permission for the associated account
+    **Requires permission** to access the account associated with the message.
 
-    Returns:
-        200 OK with message status
-        404 Not Found if message doesn't exist
+    **Example Request**:
+    ```bash
+    curl -X GET "https://api.example.com/api/v1/messages/msg_a1b2c3d4e5f6/status" \\
+      -H "Authorization: Bearer sk_live_..."
+    ```
+
+    **Example Response (Failed)**:
+    ```json
+    {
+      "message_id": "msg_a1b2c3d4e5f6",
+      "status": "failed",
+      "error": {
+        "code": "instagram_api_error",
+        "message": "HTTP 400: The 24-hour messaging window has expired"
+      }
+    }
+    ```
     """
     logger.info(f"Status query for message: {message_id}")
 

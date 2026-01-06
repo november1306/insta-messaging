@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, Field
 from app.api import webhooks, accounts, messages, ui, events, oauth, auth
 from app.config import settings
 from app.db import init_db, close_db
@@ -75,6 +76,26 @@ httpx_logger = logging.getLogger('httpx')
 httpx_logger.addFilter(SensitiveDataFilter())
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================
+# Response Models
+# ============================================
+
+class RootResponse(BaseModel):
+    """Root endpoint response"""
+    app: str = Field(..., example="Instagram Messenger Automation")
+    version: str = Field(..., example="1.2.3")
+    status: str = Field(..., example="running")
+    environment: str = Field(..., example="production")
+    webhook_url: str = Field(..., example="/webhooks/instagram")
+
+
+class HealthResponse(BaseModel):
+    """Health check response"""
+    status: str = Field(..., example="healthy")
+    timestamp: str = Field(..., example="2026-01-06T14:32:00.123Z")
+    environment: str = Field(..., example="production")
 
 
 @asynccontextmanager
@@ -180,13 +201,84 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Instagram Messenger Automation",
-    description="Automated Instagram DM responses and CRM integration for e-commerce",
+    title="Instagram Messenger Automation Platform",
+    description="""
+# Instagram Messenger Automation API
+
+A production-ready API platform for automating Instagram Direct Messages with CRM integration.
+
+## 🚀 Key Features
+
+- **Webhook Integration**: Receive Instagram messages in real-time via webhooks
+- **CRM API**: Send messages programmatically with idempotency and file attachments
+- **Multi-Account Support**: Manage multiple Instagram Business accounts via OAuth
+- **Real-Time Updates**: Server-Sent Events (SSE) for live message streaming
+- **Web UI**: Vue.js chat interface for manual message management
+- **Media Support**: Handle images, videos, audio with automatic CDN downloading
+
+## 🔐 Authentication
+
+Two authentication systems:
+
+1. **API Keys** (for CRM integration):
+   - Format: `Authorization: Bearer sk_live_...`
+   - Scoped to specific Instagram accounts
+   - Admin keys for account management
+
+2. **JWT Sessions** (for web UI):
+   - Format: `Authorization: Bearer eyJ...`
+   - Username/password login
+   - 24-hour token expiration
+
+## 📖 Getting Started
+
+1. **Register User**: `POST /api/v1/auth/register`
+2. **Login**: `POST /api/v1/ui/session` (returns JWT)
+3. **Connect Instagram**: `POST /oauth/instagram/init` → Complete OAuth flow
+4. **Send Messages**: `POST /api/v1/messages/send`
+5. **Receive Messages**: Configure webhook at `/webhooks/instagram`
+
+## 📚 Resources
+
+- **Interactive Docs**: `/docs` (Swagger UI)
+- **Alternative Docs**: `/redoc`
+- **OpenAPI Spec**: `/openapi.json`
+    """,
     version=__version__,
     lifespan=lifespan,
-    docs_url="/docs",  # Enable auto-generated Swagger UI
-    redoc_url="/redoc",  # Enable auto-generated ReDoc
-    openapi_url="/openapi.json"  # Enable auto-generated OpenAPI spec
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    tags_metadata=[
+        {
+            "name": "webhooks",
+            "description": "Instagram webhook endpoints for receiving messages in real-time"
+        },
+        {
+            "name": "messages",
+            "description": "CRM integration API for sending Instagram DMs programmatically"
+        },
+        {
+            "name": "accounts",
+            "description": "Instagram account management (linking, unlinking, deletion)"
+        },
+        {
+            "name": "ui",
+            "description": "Web interface API for chat UI (conversations, messages, session)"
+        },
+        {
+            "name": "events",
+            "description": "Server-Sent Events stream for real-time message updates"
+        },
+        {
+            "name": "oauth",
+            "description": "Instagram OAuth flow (no Facebook Page required)"
+        },
+        {
+            "name": "auth",
+            "description": "User registration and authentication"
+        }
+    ]
 )
 
 
@@ -259,32 +351,47 @@ app.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
 app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
 
 
-@app.get("/")
+@app.get("/", response_model=RootResponse, summary="API status and metadata")
 async def root():
-    """Root endpoint"""
-    return {
-        "app": "Instagram Messenger Automation",
-        "version": __version__,
-        "status": "running",
-        "environment": settings.environment,
-        "webhook_url": "/webhooks/instagram"
+    """
+    Get API status and basic metadata.
+
+    Returns application information including version, environment, and webhook URL.
+    Useful for health monitoring and service discovery.
+    """
+    return RootResponse(
+        app="Instagram Messenger Automation",
+        version=__version__,
+        status="running",
+        environment=settings.environment,
+        webhook_url="/webhooks/instagram"
+    )
+
+
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    summary="Health check for load balancers",
+    responses={
+        200: {"description": "Service is healthy and ready to accept requests"}
     }
-
-
-@app.get("/health")
+)
 async def health_check():
     """
-    Health check endpoint for CRM integration API.
-    
-    Minimal implementation for MVP (Priority 1):
-    - Return status and timestamp
-    - Skip dependency checks (will add in Priority 2)
+    Health check endpoint for monitoring and load balancers.
+
+    Returns service health status with timestamp. Used by:
+    - Load balancers (HAProxy, nginx, AWS ELB)
+    - Container orchestration (Kubernetes, Docker Swarm)
+    - Monitoring systems (Prometheus, Datadog)
+
+    Always returns 200 OK if the service is running.
     """
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "environment": settings.environment
-    }
+    return HealthResponse(
+        status="healthy",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        environment=settings.environment
+    )
 
 
 # ============================================

@@ -29,20 +29,70 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/instagram")
+@router.get(
+    "/instagram",
+    summary="Instagram webhook verification (setup)",
+    responses={
+        200: {
+            "description": "Verification successful - webhook configured correctly",
+            "content": {"text/plain": {"example": "1234567890"}}
+        },
+        403: {
+            "description": "Verification failed - token mismatch",
+            "content": {"application/json": {"example": {"detail": "Verification token mismatch"}}}
+        }
+    }
+)
 async def verify_webhook(
     hub_mode: str = Query(alias="hub.mode"),
     hub_verify_token: str = Query(alias="hub.verify_token"),
     hub_challenge: str = Query(alias="hub.challenge")
 ):
     """
-    Webhook verification endpoint for Facebook/Instagram.
-    
-    Facebook sends a GET request with verification parameters.
-    We validate the verify_token and return the challenge.
-    
-    Note: Facebook does not sign GET requests during webhook verification,
-    only POST requests with actual webhook data are signed.
+    Instagram webhook verification endpoint.
+
+    Instagram sends a GET request to this endpoint during webhook setup to verify
+    that your server is configured correctly and ready to receive webhook events.
+
+    ## Setup Instructions
+
+    1. **Go to Instagram Developer Console**:
+       - Navigate to your app → Products → Webhooks
+       - Click "Add Subscription"
+
+    2. **Configure Webhook**:
+       - Callback URL: `https://your-domain.com/webhooks/instagram`
+       - Verify Token: Set in your `.env` as `FACEBOOK_VERIFY_TOKEN`
+       - Subscription Fields: `messages`, `messaging_postbacks`
+
+    3. **Test Verification**:
+       - Click "Verify and Save"
+       - Instagram will call this endpoint with GET request
+       - Should return 200 OK with challenge value
+
+    ## How It Works
+
+    Instagram sends:
+    ```
+    GET /webhooks/instagram?hub.mode=subscribe&hub.verify_token=YOUR_TOKEN&hub.challenge=1234567890
+    ```
+
+    We validate `hub.verify_token` matches `FACEBOOK_VERIFY_TOKEN` and return `hub.challenge`.
+
+    ## Troubleshooting
+
+    **Error: "Verification token mismatch"**
+    - Check `FACEBOOK_VERIFY_TOKEN` in `.env` matches webhook config
+    - Token is case-sensitive
+
+    **Error: "URL couldn't be validated"**
+    - Ensure URL is publicly accessible (not localhost)
+    - Use ngrok for local testing: `ngrok http 8000`
+    - Check HTTPS certificate is valid
+
+    **Security Note**:
+    This endpoint does NOT validate Instagram's signature (signature validation is only
+    required for POST requests, not GET verification).
     """
     logger.info(f"Webhook verification request received - mode: {hub_mode}")
     
@@ -63,18 +113,159 @@ async def verify_webhook(
         )
 
 
-@router.post("/instagram")
+@router.post(
+    "/instagram",
+    summary="Receive Instagram messages via webhook",
+    responses={
+        200: {
+            "description": "Webhook processed successfully",
+            "content": {
+                "application/json": {
+                    "example": {"status": "ok", "messages_processed": 3}
+                }
+            }
+        },
+        401: {
+            "description": "Invalid webhook signature",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Invalid signature"}
+                }
+            }
+        }
+    }
+)
 async def handle_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Webhook endpoint for receiving Instagram messages.
-    
-    Facebook sends POST requests with message data.
-    We parse the payload, extract messages, and store them in the database.
-    
-    Security: Validates X-Hub-Signature-256 header to ensure requests come from Facebook.
+    Receive Instagram messages via webhook.
+
+    Instagram sends POST requests to this endpoint when:
+    - Customer sends you a message
+    - Customer sends you media (image, video, audio)
+    - Customer reacts to your message
+    - Delivery/read receipts are available (future)
+
+    ## Security (HMAC-SHA256 Validation)
+
+    Every webhook request is signed by Instagram using HMAC-SHA256:
+    ```
+    X-Hub-Signature-256: sha256=<computed-signature>
+    ```
+
+    We verify this signature using `INSTAGRAM_APP_SECRET` to ensure:
+    - Request actually came from Instagram (not a malicious actor)
+    - Payload wasn't tampered with during transmission
+
+    ## Processing Flow
+
+    1. **Validate Signature**: Compute HMAC-SHA256 of request body and compare
+    2. **Parse Payload**: Extract message data from JSON body
+    3. **Route to Account**: Use `messaging_channel_id` (from `entry.id`) to find account
+    4. **Download Attachments**: Fetch media from Instagram CDN (7-day expiration)
+    5. **Store Message**: Save to database with attachments
+    6. **Broadcast to UI**: Send to connected frontend clients via SSE
+    7. **Forward to CRM**: POST to CRM webhook URL (if configured)
+    8. **Return 200 OK**: Always return success to prevent retries
+
+    ## Webhook Payload Structure
+
+    Instagram sends JSON like this:
+    ```json
+    {
+      "object": "instagram",
+      "entry": [
+        {
+          "id": "17841478096518771",  // messaging_channel_id (CRITICAL for routing!)
+          "time": 1673024400,
+          "messaging": [
+            {
+              "sender": {"id": "25964748486442669"},
+              "recipient": {"id": "17841478096518771"},
+              "timestamp": 1673024400000,
+              "message": {
+                "mid": "mid_abc123",
+                "text": "Hello!",
+                "attachments": [
+                  {
+                    "type": "image",
+                    "payload": {"url": "https://scontent..."}
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+    ```
+
+    ## Message Deduplication
+
+    Instagram may retry webhook delivery if we don't respond with 200 OK within 20 seconds.
+    We use `mid` (message ID) as unique constraint to prevent duplicate storage.
+
+    ## Media Attachments (7-Day Expiration)
+
+    Instagram CDN URLs expire after 7 days. We download media immediately and store locally:
+    - **Location**: `media/inbound/{account_id}/{sender_id}/{filename}`
+    - **Authenticated Access**: Media requires JWT token or API key
+    - **Supported Types**: Images (JPEG, PNG), Videos (MP4, MOV), Audio (AAC, M4A)
+
+    ## CRM Forwarding
+
+    If `crm_webhook_url` is configured for the account, we forward messages to your CRM:
+    ```
+    POST {crm_webhook_url}
+    X-Hub-Signature-256: sha256=<hmac-signature>
+    Content-Type: application/json
+
+    {message JSON payload}
+    ```
+
+    Your CRM should:
+    - Validate HMAC signature using `webhook_secret` (from account config)
+    - Return 200 OK within 20 seconds
+    - Handle duplicate messages (we may retry on failure)
+
+    ## Idempotency
+
+    - Always returns 200 OK (even on processing errors) to prevent Instagram retries
+    - Duplicate messages (same `mid`) are silently ignored
+    - Failed attachments don't fail entire webhook (message stored without attachment)
+
+    ## Testing with ngrok
+
+    For local development:
+    ```bash
+    # Terminal 1: Start your app
+    python -m uvicorn app.main:app --reload
+
+    # Terminal 2: Start ngrok
+    ngrok http 8000
+
+    # Use ngrok URL in Instagram webhook config:
+    # https://abc123.ngrok.io/webhooks/instagram
+    ```
+
+    ## Troubleshooting
+
+    **Error: "Invalid signature"**
+    - Check `INSTAGRAM_APP_SECRET` in `.env` matches Instagram app settings
+    - Use Instagram app secret, NOT Facebook app secret
+    - Ensure app secret hasn't been regenerated
+
+    **Messages not appearing**:
+    - Check webhook is subscribed to `messages` field
+    - Verify `messaging_channel_id` is bound to account
+    - Check logs for "No account configuration found"
+
+    **Attachments not downloading**:
+    - Instagram CDN URLs expire after 7 days
+    - Webhook must process within 20 seconds (or Instagram retries)
+    - Check `media/` directory has write permissions
     """
     # Get the raw request body for signature validation
     raw_body = await request.body()

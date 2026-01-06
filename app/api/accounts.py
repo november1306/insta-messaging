@@ -52,11 +52,11 @@ class AccountResponse(BaseModel):
 
 class DeleteAccountStatistics(BaseModel):
     """Statistics from account deletion"""
-    messages_deleted: int = Field(..., description="Number of messages deleted")
-    attachments_deleted: int = Field(..., description="Number of attachments deleted")
-    inbound_files_deleted: int = Field(..., description="Number of inbound media files deleted")
-    outbound_files_deleted: int = Field(..., description="Number of outbound media files deleted")
-    bytes_freed: int = Field(..., description="Total bytes freed from disk")
+    messages_deleted: int = Field(..., example=1543, description="Number of conversation messages deleted (inbound + outbound)")
+    attachments_deleted: int = Field(..., example=87, description="Number of message attachments deleted (database records)")
+    inbound_files_deleted: int = Field(..., example=42, description="Number of inbound media files deleted from disk")
+    outbound_files_deleted: int = Field(..., example=9, description="Number of outbound media files deleted from disk")
+    bytes_freed: int = Field(..., example=157286400, description="Total disk space freed in bytes (~150MB in this example)")
 
 
 class DeleteAccountResponse(BaseModel):
@@ -151,14 +151,14 @@ async def create_account(
 
 class UserAccountInfo(BaseModel):
     """Information about an Instagram account linked to a user"""
-    account_id: str
-    instagram_account_id: str
-    messaging_channel_id: Optional[str]  # Unique channel ID for message routing
-    username: str
-    profile_picture_url: Optional[str]
-    is_primary: bool
-    token_expires_at: Optional[datetime]
-    linked_at: datetime
+    account_id: str = Field(..., example="acc_a3f7e8b2c1d4")
+    instagram_account_id: str = Field(..., example="17841478096518771")
+    messaging_channel_id: Optional[str] = Field(None, example="17841478096518771", description="Unique channel ID for message routing")
+    username: str = Field(..., example="myshop_official")
+    profile_picture_url: Optional[str] = Field(None, example="https://scontent.cdninstagram.com/v/...")
+    is_primary: bool = Field(..., example=True, description="Whether this is the user's primary account")
+    token_expires_at: Optional[datetime] = Field(None, example="2026-03-06T14:32:00.123Z", description="When OAuth token expires (60 days)")
+    linked_at: datetime = Field(..., example="2026-01-06T14:32:00.123Z", description="When account was linked via OAuth")
 
     class Config:
         from_attributes = True
@@ -169,7 +169,11 @@ class UserAccountsListResponse(BaseModel):
     accounts: list[UserAccountInfo]
 
 
-@router.get("/accounts/me", response_model=UserAccountsListResponse)
+@router.get(
+    "/accounts/me",
+    response_model=UserAccountsListResponse,
+    summary="List user's linked Instagram accounts"
+)
 async def list_user_accounts(
     session: dict = Depends(verify_ui_session),
     db: AsyncSession = Depends(get_db_session)
@@ -177,11 +181,15 @@ async def list_user_accounts(
     """
     List all Instagram accounts linked to the authenticated user.
 
-    Returns account details including primary status and token expiration.
-    Requires JWT session authentication.
+    Returns account details including:
+    - Primary account status (used as default for messaging)
+    - OAuth token expiration (60 days from linking)
+    - Instagram username and profile picture
+    - Messaging channel ID for webhook routing
 
-    Returns:
-        UserAccountsListResponse: List of linked Instagram accounts
+    **Requires JWT session authentication.**
+
+    Accounts are sorted with primary account first, then by most recently linked.
     """
     user_id = session.get("user_id")
 
@@ -218,7 +226,10 @@ async def list_user_accounts(
     return UserAccountsListResponse(accounts=accounts_list)
 
 
-@router.post("/accounts/{account_id}/set-primary")
+@router.post(
+    "/accounts/{account_id}/set-primary",
+    summary="Set an account as primary"
+)
 async def set_primary_account(
     account_id: str,
     session: dict = Depends(verify_ui_session),
@@ -227,18 +238,17 @@ async def set_primary_account(
     """
     Set an account as the user's primary account.
 
-    The primary account is used as the default for sending messages and
-    is included in the JWT token.
+    **Primary Account Behavior**:
+    - Used as default when sending messages from UI
+    - Included in JWT token for faster access
+    - Only one account can be primary at a time
+    - Setting a new primary automatically un-marks the previous one
 
-    Args:
-        account_id: Account ID to set as primary
+    **Example Use Case**:
+    If you manage multiple Instagram business accounts, set your main account
+    as primary to avoid selecting it for every message.
 
-    Returns:
-        Success message with updated account list
-
-    Raises:
-        HTTPException: 403 if user doesn't own this account
-        HTTPException: 404 if account not found
+    **Requires JWT session authentication.**
     """
     user_id = session.get("user_id")
 
@@ -283,7 +293,10 @@ async def set_primary_account(
     }
 
 
-@router.delete("/accounts/{account_id}")
+@router.delete(
+    "/accounts/{account_id}",
+    summary="Unlink Instagram account (keeps data)"
+)
 async def unlink_account(
     account_id: str,
     session: dict = Depends(verify_ui_session),
@@ -292,18 +305,25 @@ async def unlink_account(
     """
     Unlink an Instagram account from the authenticated user.
 
-    If this was the primary account, another account will be automatically
-    set as primary (if any remaining accounts exist).
+    **What This Does**:
+    - Removes your access to this account
+    - Account and all its data remain in the system
+    - Other users can still access the account
+    - You can re-link the same account later via OAuth
 
-    Args:
-        account_id: Account ID to unlink
+    **What This Does NOT Do**:
+    - Does NOT delete the account
+    - Does NOT delete messages or media files
+    - Does NOT remove the account from other users
 
-    Returns:
-        Success message
+    **Primary Account Handling**:
+    If this was your primary account, another account will automatically
+    be set as primary (if you have any remaining accounts).
 
-    Raises:
-        HTTPException: 403 if user doesn't own this account
-        HTTPException: 404 if account link not found
+    **To permanently delete the account and all data**, use:
+    `DELETE /accounts/{account_id}/delete-permanently`
+
+    **Requires JWT session authentication.**
     """
     user_id = session.get("user_id")
 
@@ -357,7 +377,28 @@ async def unlink_account(
     }
 
 
-@router.delete("/accounts/{account_id}/delete-permanently", response_model=DeleteAccountResponse)
+@router.delete(
+    "/accounts/{account_id}/delete-permanently",
+    response_model=DeleteAccountResponse,
+    summary="⚠️ Permanently delete account and ALL data",
+    responses={
+        200: {"description": "Account deleted successfully with statistics"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "User doesn't have access to this account"},
+        404: {"description": "Account not found"},
+        409: {
+            "description": "Conflict - Account linked to multiple users",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Cannot delete account linked to 3 users. Other users must unlink this account before it can be deleted."
+                    }
+                }
+            }
+        },
+        500: {"description": "Server error during deletion"}
+    }
+)
 async def delete_account_permanently(
     account_id: str,
     session: dict = Depends(verify_ui_session),
@@ -366,35 +407,65 @@ async def delete_account_permanently(
     """
     Permanently delete an Instagram account and ALL associated data.
 
-    **⚠️ WARNING: This action is irreversible!**
+    ## ⚠️ WARNING: This action is irreversible!
 
-    Deletes:
-    - Account record and credentials
-    - All conversation messages (inbound/outbound)
-    - All message attachments (database records + files)
-    - All media files (inbound attachments + outbound uploads)
-    - CRM outbound tracking records
-    - API key permissions
-    - User-account links
-    - Instagram profile cache (only profiles unique to this account)
+    ## What Gets Deleted
 
-    Multi-user safety: Returns 409 Conflict if other users have this account linked.
-    Only accounts with a single user can be permanently deleted.
+    This operation removes ALL data associated with the account:
+    - ✅ Account record and encrypted OAuth token
+    - ✅ All conversation messages (inbound/outbound)
+    - ✅ All message attachments (database + files)
+    - ✅ All media files (inbound attachments + outbound uploads)
+    - ✅ CRM outbound tracking records
+    - ✅ API key permissions for this account
+    - ✅ User-account links
+    - ✅ Instagram profile cache (only profiles unique to this account)
 
-    Args:
-        account_id: The account ID to delete
-        session: User session (JWT authentication required)
-        db: Database session
+    ## Multi-User Safety
 
-    Returns:
-        DeleteAccountResponse with deletion statistics
+    - **Returns 409 Conflict** if other users have this account linked
+    - **Only single-user accounts** can be permanently deleted
+    - **Other users must unlink first** before permanent deletion
 
-    Raises:
-        HTTPException:
-            - 401: Not authenticated (no session)
-            - 403: User doesn't have access to this account
-            - 404: Account not found
-            - 409: Conflict - other users have this account linked
+    ## Unlink vs Delete Permanently
+
+    | Action | Data Kept? | Account Remains? | Can Re-link? |
+    |--------|-----------|------------------|--------------|
+    | **Unlink** (`DELETE /accounts/{id}`) | ✅ Yes | ✅ Yes | ✅ Yes |
+    | **Delete Permanently** (`DELETE /accounts/{id}/delete-permanently`) | ❌ No | ❌ No | ❌ No |
+
+    **When to use Unlink**:
+    - You want to stop accessing this account temporarily
+    - Other users still need access
+    - You might want to re-link it later
+
+    **When to use Delete Permanently**:
+    - You're switching to a different account permanently
+    - You want to remove all data for privacy/GDPR compliance
+    - No other users need this account
+
+    ## Example Response
+
+    ```json
+    {
+      "message": "Account deleted successfully",
+      "deleted_account_id": "acc_a3f7e8b2c1d4",
+      "statistics": {
+        "messages_deleted": 1543,
+        "attachments_deleted": 87,
+        "inbound_files_deleted": 42,
+        "outbound_files_deleted": 9,
+        "bytes_freed": 157286400
+      }
+    }
+    ```
+
+    ## Example Request
+
+    ```bash
+    curl -X DELETE "https://api.example.com/api/v1/accounts/acc_a3f7e8b2c1d4/delete-permanently" \\
+      -H "Authorization: Bearer eyJ..."
+    ```
     """
     user_id = session.get("user_id")
 
