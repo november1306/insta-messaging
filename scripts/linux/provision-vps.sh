@@ -335,23 +335,9 @@ fi
 
 echo -e "${GREEN}[11/13] Configuring Nginx reverse proxy...${NC}"
 
-# Remove default site
-rm -f /etc/nginx/sites-enabled/default
-
-# Copy nginx config from repository (includes SSE support)
-echo "Installing nginx configuration from repository..."
-cp ${INSTALL_DIR}/deploy/nginx/insta-messaging.conf /etc/nginx/sites-available/${APP_NAME}
-
-# Enable site
-ln -sf /etc/nginx/sites-available/${APP_NAME} /etc/nginx/sites-enabled/
-
-# Test nginx config
-if nginx -t; then
-    echo "✅ Nginx configuration is valid"
-else
-    echo "❌ Nginx configuration test failed!"
-    exit 1
-fi
+# Run nginx configuration script
+chmod +x ${INSTALL_DIR}/scripts/linux/configure-nginx.sh
+bash ${INSTALL_DIR}/scripts/linux/configure-nginx.sh ${APP_NAME} ${INSTALL_DIR}
 
 echo -e "${GREEN}[12/13] Configuring firewall (UFW)...${NC}"
 # Allow SSH, HTTP, HTTPS

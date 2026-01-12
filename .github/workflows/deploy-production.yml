@@ -161,19 +161,10 @@ jobs:
               echo "Building frontend..."
               sudo -u insta-messaging bash -c 'cd /opt/insta-messaging/frontend && npm run build'
 
-              # Update nginx configuration from repository
+              # Update nginx configuration using dedicated script
               echo "🔧 Updating nginx configuration..."
-              sudo cp /opt/insta-messaging/deploy/nginx/insta-messaging.conf /etc/nginx/sites-available/insta-messaging
-              sudo ln -sf /etc/nginx/sites-available/insta-messaging /etc/nginx/sites-enabled/
-
-              # Test and reload nginx
-              if sudo nginx -t; then
-                sudo systemctl reload nginx
-                echo "✅ Nginx configuration updated and reloaded"
-              else
-                echo "❌ Nginx configuration test failed!"
-                exit 1
-              fi
+              sudo chmod +x /opt/insta-messaging/scripts/linux/configure-nginx.sh
+              sudo bash /opt/insta-messaging/scripts/linux/configure-nginx.sh insta-messaging /opt/insta-messaging
 
               # Install/configure ngrok (needed for Instagram webhooks until real domain)
               echo "🌐 Configuring ngrok..."
