@@ -192,12 +192,8 @@ class CRMOutboundMessage(Base):
     """
     CRM outbound messages - tracks messages sent via CRM integration API.
 
-    This table is specifically for CRM integration to track delivery status
-    and enable idempotency for external systems. NOT for general UI message display.
-    UI should use the 'messages' table which stores all inbound/outbound messages.
-
-    Tracks delivery status and enables idempotency.
-    Minimal fields for MVP - add retry logic fields later if needed.
+    Tracks delivery status for messages sent to Instagram.
+    Messages are sent asynchronously via background tasks.
     """
     __tablename__ = "crm_outbound_messages"
 
@@ -205,7 +201,7 @@ class CRMOutboundMessage(Base):
     account_id = Column(String(50), ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)  # FK to accounts.id
     recipient_id = Column(String(50), nullable=False)  # Instagram PSID
     message_text = Column(Text, nullable=True)  # Message content (nullable for media-only messages)
-    idempotency_key = Column(String(100), unique=True, nullable=False)  # Prevent duplicates
+    idempotency_key = Column(String(100), nullable=True)  # Optional tracking field (no longer used for deduplication)
     status = Column(String(20), nullable=False, default='pending', server_default='pending')  # Python + DB default
     instagram_message_id = Column(String(100), nullable=True)  # Instagram's message ID (set after successful send)
     error_code = Column(String(50), nullable=True)  # Error code if delivery failed
@@ -214,7 +210,6 @@ class CRMOutboundMessage(Base):
     
     __table_args__ = (
         Index('idx_account_status', 'account_id', 'status'),
-        # Note: No need for idx_idempotency_key - unique constraint creates its own index
     )
 
 

@@ -242,8 +242,7 @@ class APITestClient:
                 data={
                     "account_id": account,
                     "recipient_id": recipient_id,
-                    "message": message,
-                    "idempotency_key": f"test_{datetime.now().timestamp()}"
+                    "message": message
                 }
             )
             response.raise_for_status()

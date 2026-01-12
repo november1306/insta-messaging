@@ -280,20 +280,13 @@ class MessageService:
             AccountNotFoundError: If account doesn't exist
             InstagramAPIError: If sending fails
         """
-        # 1. Check idempotency
-        if idempotency_key:
-            existing = await uow.messages.get_by_idempotency_key(idempotency_key)
-            if existing:
-                logger.info(f"🔑 Idempotency hit: {idempotency_key}")
-                return existing
-
-        # 2. Get account with OAuth token
+        # 1. Get account with OAuth token
         account = await uow.accounts.get_by_id(account_id.value)
         if not account:
             logger.error(f"Account not found: {account_id}")
             raise AccountNotFoundError(account_id)
 
-        # 3. Decrypt access token
+        # 2. Decrypt access token
         if not account.access_token_encrypted:
             error_msg = "Instagram access token not configured for this account"
             logger.error(f"❌ Cannot send message: {error_msg} (account={account_id})")
@@ -341,7 +334,7 @@ class MessageService:
             await uow.messages.save(failed_message)
             raise
 
-        # 4. Send to Instagram API
+        # 3. Send to Instagram API
         try:
             # Create Instagram client with account-specific token
             async with httpx.AsyncClient() as http_client:
