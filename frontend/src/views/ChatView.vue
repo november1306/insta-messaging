@@ -227,7 +227,20 @@ async function handleSSEMessage(data) {
       }
       break
     case 'message_status':
-      store.updateMessageStatus(data.data.message_id, data.data.status, data.data.error)
+      console.log('📊 Message status update:', data.data)
+
+      // Extract error message if status is failed
+      let errorMessage = null
+      if (data.data.status === 'failed') {
+        errorMessage = data.data.error_message || 'Message send failed'
+      }
+
+      // Update message status in store with error details
+      store.updateMessageStatus(
+        data.data.message_id,
+        data.data.status,
+        errorMessage
+      )
       break
   }
 }

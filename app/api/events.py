@@ -371,12 +371,32 @@ async def broadcast_new_message(message: Dict[str, Any]):
     await sse_manager.broadcast("new_message", message)
 
 
-async def broadcast_message_status(message_id: str, status: str):
+async def broadcast_message_status(
+    message_id: str,
+    status: str,
+    error_code: Optional[str] = None,
+    error_message: Optional[str] = None
+):
     """
     Broadcast a message status update to all connected SSE clients.
     Call this when message delivery status changes.
+
+    Args:
+        message_id: CRM outbound message ID
+        status: Message status (pending, sent, failed)
+        error_code: Error category (only for failed status)
+        error_message: Human-readable error description (only for failed status)
     """
-    await sse_manager.broadcast("message_status", {
+    data = {
         "message_id": message_id,
         "status": status
-    })
+    }
+
+    # Include error details for failed messages
+    if status == "failed":
+        if error_code:
+            data["error_code"] = error_code
+        if error_message:
+            data["error_message"] = error_message
+
+    await sse_manager.broadcast("message_status", data)

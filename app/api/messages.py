@@ -687,8 +687,13 @@ async def send_to_instagram_background(
 
                     await db.commit()
 
-                # Broadcast failure via SSE
-                await broadcast_message_status(message_id, "failed")
+                # Broadcast failure via SSE with error details
+                await broadcast_message_status(
+                    message_id,
+                    "failed",
+                    error_code=outbound_msg.error_code or "unknown",
+                    error_message=outbound_msg.error_message or "Unknown error occurred"
+                )
 
         except Exception as db_error:
             logger.error(f"Failed to update failed message status for {message_id}: {db_error}")
