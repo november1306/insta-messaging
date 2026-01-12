@@ -54,13 +54,24 @@ jobs:
               userdel -r insta-messaging 2>/dev/null || true
             fi
 
-            # Remove nginx config
-            if [ -f /etc/nginx/sites-available/insta-messaging ]; then
-              echo "Removing nginx config..."
-              rm -f /etc/nginx/sites-available/insta-messaging
-              rm -f /etc/nginx/sites-enabled/insta-messaging
-              systemctl restart nginx
-            fi
+            # Remove nginx config and backups
+            echo "Removing nginx configs..."
+            rm -f /etc/nginx/sites-available/insta-messaging
+            rm -f /etc/nginx/sites-available/insta-messaging.backup
+            rm -f /etc/nginx/sites-available/insta-messaging.bak
+            rm -f /etc/nginx/sites-enabled/insta-messaging
+            systemctl restart nginx
+
+            # Remove old test projects (vue-crm-ui, insta-router, etc.)
+            echo "Removing old test projects..."
+            rm -rf /opt/vue-crm-ui
+            rm -rf /opt/insta-router
+            rm -rf /opt/insta-auto
+
+            # Remove any leftover databases
+            echo "Removing leftover databases..."
+            find /opt -name "*.db" -type f -delete 2>/dev/null || true
+            find /opt -name "*.sqlite" -type f -delete 2>/dev/null || true
 
             echo ""
             echo "=========================================="
