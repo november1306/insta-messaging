@@ -137,8 +137,7 @@ class APITestClient:
         # Initialize encryption service (auto-initializes if not already)
         get_encryption_service(settings.session_secret)
 
-        session_context = await get_db_session_context()
-        async with session_context as db:
+        async with get_db_session_context() as db:
             # Check if account exists
             from sqlalchemy import select
             result = await db.execute(

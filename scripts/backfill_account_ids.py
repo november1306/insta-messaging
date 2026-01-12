@@ -245,7 +245,7 @@ async def main():
     await init_db()
 
     # Get database session
-    async with await get_db_session_context() as db:
+    async with get_db_session_context() as db:
         if args.verify_only:
             # Just verify
             success = await verify_backfill(db)

@@ -84,7 +84,7 @@ async def get_db_session() -> AsyncSession:
             await session.close()
 
 
-async def get_db_session_context():
+def get_db_session_context():
     """
     Get database session for standalone scripts (non-FastAPI context).
 
