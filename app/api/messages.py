@@ -225,70 +225,39 @@ async def send_message(
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Send a text message and/or file attachment to an Instagram user via Direct Messages.
+    Send an Instagram DM to a user.
 
-    ## Requirements
+    **Authentication:** API key or JWT token
 
-    - **At least one of `message` (text) or `file` (attachment) must be provided**
-    - **Recipient must have messaged your account first** (Instagram's messaging policy)
-    - **24-hour messaging window**: You can only reply within 24 hours of the recipient's last message
-
-    ## Idempotency
-
-    Use the same `idempotency_key` to safely retry failed requests without sending duplicates:
-
-    ```python
-    # First attempt - sends message
-    send_message(idempotency_key="order_12345_notification")
-
-    # Retry (network error, timeout, etc.) - returns existing message
-    send_message(idempotency_key="order_12345_notification")  # Same key = no duplicate
-    ```
-
-    ## Media Attachments
-
-    Supported formats and size limits:
-
-    - **Images**: JPEG, PNG (max 8MB)
-    - **Videos**: MP4, MOV, AVI, WebM, OGG (max 25MB)
-    - **Audio**: AAC, M4A, WAV, MP4 (max 25MB)
-
-    ## Instagram Messaging Policies
-
-    **24-Hour Window**:
-    - Users must message you first before you can send them messages
-    - After their last message, you have 24 hours to respond
-    - After 24 hours, you can't send messages until they message you again
-
-    **Error Examples**:
-    - `"User not found"`: Recipient hasn't messaged your account yet
-    - `"24-hour messaging window has expired"`: Wait for recipient to message you again
-
-    ## Example Requests
-
-    **Text-only message**:
+    **Request (text only):**
     ```bash
-    curl -X POST "https://api.example.com/api/v1/messages/send" \\
-      -H "Authorization: Bearer sk_live_..." \\
+    curl -X POST "http://localhost:8000/api/v1/messages/send" \\
+      -H "Authorization: Bearer YOUR_API_KEY" \\
       -F "account_id=acc_a3f7e8b2c1d4" \\
       -F "recipient_id=17841478096518771" \\
-      -F "message=Hello! Your order has shipped." \\
-      -F "idempotency_key=order_12345_notification"
+      -F "message=Hello from CRM!" \\
+      -F "idempotency_key=unique_12345"
     ```
 
-    **Image attachment with text**:
+    **Request (with attachment):**
     ```bash
-    curl -X POST "https://api.example.com/api/v1/messages/send" \\
-      -H "Authorization: Bearer sk_live_..." \\
+    curl -X POST "http://localhost:8000/api/v1/messages/send" \\
+      -H "Authorization: Bearer YOUR_API_KEY" \\
       -F "account_id=acc_a3f7e8b2c1d4" \\
       -F "recipient_id=17841478096518771" \\
-      -F "message=Here's your receipt!" \\
-      -F "idempotency_key=order_12345_receipt" \\
-      -F "file=@receipt.jpg"
+      -F "message=Check this out" \\
+      -F "file=@/path/to/image.jpg" \\
+      -F "idempotency_key=unique_12346"
     ```
 
-    **Authentication**:
-    Requires either API key (Bearer token) or JWT session authentication.
+    **Response:**
+    ```json
+    {
+      "message_id": "msg_abc123",
+      "status": "sent",
+      "created_at": "2026-01-12T10:30:00Z"
+    }
+    ```
     """
     logger.info(f"Send message request - account: {account_id}, recipient: {recipient_id}, has_file: {file is not None}")
 
@@ -301,16 +270,21 @@ async def send_message(
 
     # Handle both JWT and API key authentication
     if auth.get("auth_type") == "api_key":
-        # API key authentication - check permissions
+        # API key authentication - check dynamic user permissions
         api_key = auth.get("api_key")
-        has_permission = await APIKeyService.check_account_permission(db, api_key, account_id)
+        has_permission = await APIKeyService.check_user_account_permission(
+            db,
+            api_key.user_id,  # Use user_id from token for dynamic permission check
+            account_id
+        )
         if not has_permission:
             logger.warning(
-                f"Permission denied: API key {api_key.id} attempted to send message for account {account_id}"
+                f"Permission denied: User {api_key.user_id} (via API key {api_key.id}) "
+                f"attempted to send message for account {account_id}"
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"API key does not have permission to access account {account_id}"
+                detail=f"You don't have permission to access account {account_id}"
             )
     elif auth.get("auth_type") == "jwt":
         # JWT authentication - check if user has access to this account via UserAccount table
@@ -652,16 +626,20 @@ async def get_message_status(
             detail=f"Message '{message_id}' not found"
         )
 
-    # Check if API key has permission to access this message's account
-    has_permission = await APIKeyService.check_account_permission(db, api_key, message.account_id)
+    # Check if user has permission to access this message's account (dynamic check)
+    has_permission = await APIKeyService.check_user_account_permission(
+        db,
+        api_key.user_id,  # Use user_id from token for dynamic permission check
+        message.account_id
+    )
     if not has_permission:
         logger.warning(
-            f"Permission denied: API key {api_key.id} attempted to access message {message_id} "
-            f"from account {message.account_id}"
+            f"Permission denied: User {api_key.user_id} (via API key {api_key.id}) "
+            f"attempted to access message {message_id} from account {message.account_id}"
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"API key does not have permission to access this message"
+            detail=f"You don't have permission to access this message"
         )
 
     # Build error detail if message failed

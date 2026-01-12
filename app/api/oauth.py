@@ -40,7 +40,7 @@ from app.config import settings
 from app.db.connection import get_db_session
 from app.db.models import Account, User, UserAccount, OAuthState
 from app.services.encryption_service import get_encryption_service
-from app.api.auth import verify_ui_session
+from app.api.auth import verify_ui_session, verify_jwt_or_api_key
 from app.application.account_linking_service import AccountLinkingService, OAuthResult
 import uuid
 import secrets
@@ -268,7 +268,7 @@ class OAuthInitRequest(BaseModel):
 )
 async def init_instagram_oauth(
     request: OAuthInitRequest,
-    session: dict = Depends(verify_ui_session),
+    auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -334,9 +334,11 @@ async def init_instagram_oauth(
     - User wants to switch to different Instagram account
     - Previous authorization was revoked
     - Testing OAuth flow during development
+
+    **Accepts both JWT session tokens and API keys.**
     """
-    # Get authenticated user from JWT session
-    user_id = session.get("user_id")
+    # Get authenticated user from JWT or API key
+    user_id = auth.get("user_id")
 
     if not user_id:
         logger.error("OAuth init failed: Missing user_id in session")

@@ -11,9 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
+from datetime import datetime, timezone, timedelta
 import logging
 import jwt
 import re
+import base64
 
 from app.db.connection import get_db_session
 from app.db.models import APIKey, UserAccount
@@ -50,6 +52,17 @@ class RegisterResponse(BaseModel):
     message: str
     username: str
     user_id: int
+
+
+class LoginRequest(BaseModel):
+    """Request model for login (JSON body)"""
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=1)
+
+
+class CreateTokenResponse(BaseModel):
+    """Response model for token creation"""
+    api_key: str = Field(..., example="sk_user_AbCdEf1234567890GhIjKlMnOpQr", description="API token (save this - shown only once)")
 
 
 # ============================================
@@ -217,6 +230,112 @@ async def register_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Registration failed. Please try again."
         )
+
+
+# ============================================
+# Token Generation Endpoint
+# ============================================
+
+@router.post(
+    "/auth/token",
+    response_model=CreateTokenResponse,
+    summary="Generate 30-day API token",
+    responses={
+        200: {
+            "description": "Token created successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "api_key": "sk_user_AbCdEf1234567890GhIjKlMnOpQr"
+                    }
+                }
+            }
+        },
+        401: {
+            "description": "Invalid credentials or inactive user",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "invalid_credentials": {
+                            "summary": "Invalid username or password",
+                            "value": {"detail": "Invalid username or password"}
+                        },
+                        "missing_auth": {
+                            "summary": "Missing Basic Auth header",
+                            "value": {"detail": "Missing Basic Auth credentials. Provide 'Authorization: Basic <credentials>'."}
+                        },
+                        "invalid_format": {
+                            "summary": "Malformed Basic Auth",
+                            "value": {"detail": "Invalid Basic Auth format. Use base64(username:password)."}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
+async def create_api_token(
+    request: LoginRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Generate a 30-day API token for CRM integration.
+
+    **Authentication:** None required (provide credentials in body)
+
+    **Request:**
+    ```bash
+    curl -X POST "http://localhost:8000/api/v1/auth/token" \\
+      -H "Content-Type: application/json" \\
+      -d '{"username": "your_username", "password": "your_password"}'
+    ```
+
+    **Response:**
+    ```json
+    {
+      "api_key": "sk_user_AbCdEf1234567890GhIjKl",
+      "expires_at": "2026-02-10T12:00:00Z"
+    }
+    ```
+
+    **Token Usage:**
+    Use the API key in all subsequent requests:
+    ```bash
+    curl -H "Authorization: Bearer sk_user_AbCdEf..." https://api.example.com/...
+    ```
+    """
+
+    # 1. Extract credentials from JSON body
+    username = request.username
+    password = request.password
+
+    # 2. Validate credentials via UserService
+    user = await UserService.validate_credentials(db, username, password)
+
+    if not user:
+        logger.warning(f"Token creation failed: Invalid credentials for username '{username}'")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password."
+        )
+
+    # 4. Generate API token with 30-day expiration
+    expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+
+    api_key, db_key = await APIKeyService.create_api_key(
+        db=db,
+        name=f"User token for {username}",
+        user_id=user.id,
+        environment="user",
+        expires_at=expires_at
+    )
+
+    logger.info(
+        f"Created API token for user '{username}' (id={user.id}, key_id={db_key.id}, "
+        f"expires={expires_at.isoformat()})"
+    )
+
+    return CreateTokenResponse(api_key=api_key)
 
 
 # ============================================
@@ -432,7 +551,7 @@ async def verify_jwt_or_api_key(
     db_key = await APIKeyService.validate_api_key(db, token)
     if db_key:
         logger.debug(f"Authenticated via API key: {db_key.name}")
-        return {"api_key": db_key, "auth_type": "api_key"}
+        return {"api_key": db_key, "auth_type": "api_key", "user_id": db_key.user_id}
 
     # Both authentication methods failed
     raise HTTPException(

@@ -13,7 +13,7 @@ import string
 import uuid
 import logging
 
-from app.db.models import APIKey, APIKeyPermission, APIKeyType
+from app.db.models import APIKey, UserAccount
 from app.utils.password_hash import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
@@ -62,27 +62,28 @@ class APIKeyService:
     async def create_api_key(
         db: AsyncSession,
         name: str,
-        key_type: APIKeyType,
-        environment: str = "test",
-        account_ids: Optional[List[str]] = None,
+        user_id: int,
+        environment: str = "user",
         expires_at: Optional[datetime] = None
     ) -> tuple[str, APIKey]:
         """
-        Create a new API key in the database.
+        Create a new user-scoped API key.
 
         Args:
             db: Database session
             name: Descriptive name for the key
-            key_type: APIKeyType.ADMIN or APIKeyType.ACCOUNT
-            environment: "test" or "live"
-            account_ids: List of account IDs for account-scoped keys (ignored for admin keys)
-            expires_at: Optional expiration datetime
+            user_id: User ID who owns this key
+            environment: "user" for user-generated tokens (default)
+            expires_at: Required expiration datetime (30 days for user tokens)
 
         Returns:
             Tuple of (full_api_key, APIKey_model)
 
         Note: The full API key is only returned once during creation.
               It cannot be retrieved later, so caller must save it.
+
+              Permissions are dynamic - derived from UserAccount table at request time.
+              No static permissions are stored during creation.
         """
         # Generate the API key
         api_key = APIKeyService.generate_api_key(environment)
@@ -95,28 +96,17 @@ class APIKeyService:
             key_prefix=key_prefix,
             key_hash=key_hash,
             name=name,
-            type=key_type,
+            user_id=user_id,
             is_active=True,
             created_at=datetime.now(timezone.utc),
             expires_at=expires_at
         )
 
         db.add(db_key)
-        await db.flush()  # Get the ID without committing
-
-        # Add permissions for account-scoped keys
-        if key_type == APIKeyType.ACCOUNT and account_ids:
-            for account_id in account_ids:
-                permission = APIKeyPermission(
-                    api_key_id=db_key.id,
-                    account_id=account_id
-                )
-                db.add(permission)
-
         await db.commit()
         await db.refresh(db_key)
 
-        logger.info(f"Created API key: {db_key.id} (name: {name}, type: {key_type.value})")
+        logger.info(f"Created API key: {db_key.id} (name: {name}, user_id: {user_id})")
 
         return api_key, db_key
 
@@ -169,67 +159,63 @@ class APIKeyService:
         return db_key
 
     @staticmethod
-    async def check_account_permission(
+    async def check_user_account_permission(
         db: AsyncSession,
-        api_key: APIKey,
+        user_id: int,
         account_id: str
     ) -> bool:
         """
-        Check if an API key has permission to access an account.
+        Check if user has permission to access an account (dynamic check).
+
+        Queries UserAccount table in real-time to ensure permissions reflect
+        current state, even if accounts were linked/unlinked after token creation.
 
         Args:
             db: Database session
-            api_key: APIKey object
+            user_id: User ID from API key
             account_id: Account ID to check
 
         Returns:
-            True if permitted, False otherwise
+            True if user has access, False otherwise
         """
-        # Admin keys have access to all accounts
-        if api_key.type == APIKeyType.ADMIN:
-            return True
-
-        # Account-scoped keys must be in permissions table
         result = await db.execute(
-            select(APIKeyPermission).where(
-                APIKeyPermission.api_key_id == api_key.id,
-                APIKeyPermission.account_id == account_id
+            select(UserAccount).where(
+                UserAccount.user_id == user_id,
+                UserAccount.account_id == account_id
             )
         )
-        permission = result.scalar_one_or_none()
+        link = result.scalar_one_or_none()
 
-        has_permission = permission is not None
+        has_permission = link is not None
 
         if not has_permission:
             logger.warning(
-                f"Permission denied: API key {api_key.id} attempted to access account {account_id}"
+                f"Permission denied: User {user_id} attempted to access account {account_id}"
             )
 
         return has_permission
 
     @staticmethod
-    async def get_permitted_account_ids(
+    async def get_user_account_ids(
         db: AsyncSession,
-        api_key: APIKey
-    ) -> Optional[List[str]]:
+        user_id: int
+    ) -> List[str]:
         """
-        Get list of account IDs the API key has access to.
+        Get list of account IDs the user has access to (dynamic query).
+
+        Used for listing accounts or filtering conversations. Permissions reflect
+        current UserAccount links, not static permissions stored at token creation.
 
         Args:
             db: Database session
-            api_key: APIKey object
+            user_id: User ID
 
         Returns:
-            List of account IDs, or None if admin (has access to all)
+            List of account IDs
         """
-        # Admin keys have access to all accounts
-        if api_key.type == APIKeyType.ADMIN:
-            return None  # None means "all accounts"
-
-        # Get permitted accounts
         result = await db.execute(
-            select(APIKeyPermission.account_id).where(
-                APIKeyPermission.api_key_id == api_key.id
+            select(UserAccount.account_id).where(
+                UserAccount.user_id == user_id
             )
         )
         account_ids = [row[0] for row in result.fetchall()]

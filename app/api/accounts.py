@@ -12,7 +12,7 @@ from typing import Optional
 import uuid
 import logging
 
-from app.api.auth import verify_api_key, verify_ui_session, verify_user_account_access
+from app.api.auth import verify_api_key, verify_ui_session, verify_user_account_access, verify_jwt_or_api_key
 from app.services.encryption_service import encrypt_credential, decrypt_credential
 from app.db.connection import get_db_session
 from app.db.models import Account, APIKey, UserAccount, MessageModel, MessageAttachment, CRMOutboundMessage, InstagramProfile
@@ -175,7 +175,7 @@ class UserAccountsListResponse(BaseModel):
     summary="List user's linked Instagram accounts"
 )
 async def list_user_accounts(
-    session: dict = Depends(verify_ui_session),
+    auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -187,11 +187,11 @@ async def list_user_accounts(
     - Instagram username and profile picture
     - Messaging channel ID for webhook routing
 
-    **Requires JWT session authentication.**
+    **Accepts both JWT session tokens and API keys.**
 
     Accounts are sorted with primary account first, then by most recently linked.
     """
-    user_id = session.get("user_id")
+    user_id = auth.get("user_id")
 
     if not user_id:
         raise HTTPException(
@@ -232,7 +232,7 @@ async def list_user_accounts(
 )
 async def set_primary_account(
     account_id: str,
-    session: dict = Depends(verify_ui_session),
+    auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -248,9 +248,9 @@ async def set_primary_account(
     If you manage multiple Instagram business accounts, set your main account
     as primary to avoid selecting it for every message.
 
-    **Requires JWT session authentication.**
+    **Accepts both JWT session tokens and API keys.**
     """
-    user_id = session.get("user_id")
+    user_id = auth.get("user_id")
 
     if not user_id:
         raise HTTPException(
@@ -299,7 +299,7 @@ async def set_primary_account(
 )
 async def unlink_account(
     account_id: str,
-    session: dict = Depends(verify_ui_session),
+    auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -323,9 +323,9 @@ async def unlink_account(
     **To permanently delete the account and all data**, use:
     `DELETE /accounts/{account_id}/delete-permanently`
 
-    **Requires JWT session authentication.**
+    **Accepts both JWT session tokens and API keys.**
     """
-    user_id = session.get("user_id")
+    user_id = auth.get("user_id")
 
     if not user_id:
         raise HTTPException(
@@ -401,7 +401,7 @@ async def unlink_account(
 )
 async def delete_account_permanently(
     account_id: str,
-    session: dict = Depends(verify_ui_session),
+    auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -466,8 +466,10 @@ async def delete_account_permanently(
     curl -X DELETE "https://api.example.com/api/v1/accounts/acc_a3f7e8b2c1d4/delete-permanently" \\
       -H "Authorization: Bearer eyJ..."
     ```
+
+    **Accepts both JWT session tokens and API keys.**
     """
-    user_id = session.get("user_id")
+    user_id = auth.get("user_id")
 
     if not user_id:
         raise HTTPException(
