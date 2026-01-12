@@ -4,7 +4,7 @@ CRM Integration API - Message Sending Endpoints
 Implements outbound message sending for CRM integration.
 Refactored to use Domain-Driven Design with MessageService.
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Form, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Form, File, UploadFile, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, Field
@@ -16,7 +16,7 @@ import logging
 import httpx
 
 from app.api.auth import verify_api_key, verify_jwt_or_api_key
-from app.db.connection import get_db_session
+from app.db.connection import get_db_session, get_db_session_context
 from app.db.models import CRMOutboundMessage, Account, APIKey, MessageAttachment
 from app.domain.unit_of_work import SQLAlchemyUnitOfWork
 from app.application.message_service import MessageService
@@ -54,11 +54,6 @@ class SendMessageRequest(BaseModel):
         max_length=1000,
         example="Hello! Your order #12345 has shipped.",
         description="Message text to send (1-1000 characters)"
-    )
-    idempotency_key: str = Field(
-        ...,
-        example="order_12345_notification",
-        description="Unique key to prevent duplicate sends. Use same key to safely retry failed requests."
     )
     metadata: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -216,79 +211,49 @@ class MessageStatusResponse(BaseModel):
 async def send_message(
     recipient_id: str = Form(...),
     account_id: str = Form(...),
-    idempotency_key: str = Form(...),
     message: Optional[str] = Form(None),
     metadata: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     http_request: Request = None,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Send a text message and/or file attachment to an Instagram user via Direct Messages.
+    Send an Instagram DM to a user.
 
-    ## Requirements
+    **Authentication:** API key or JWT token
 
-    - **At least one of `message` (text) or `file` (attachment) must be provided**
-    - **Recipient must have messaged your account first** (Instagram's messaging policy)
-    - **24-hour messaging window**: You can only reply within 24 hours of the recipient's last message
+    **Behavior:** Returns immediately with status="pending". Message is sent to Instagram API in background.
+    Use `/messages/{message_id}/status` to check delivery status or subscribe to SSE for real-time updates.
 
-    ## Idempotency
-
-    Use the same `idempotency_key` to safely retry failed requests without sending duplicates:
-
-    ```python
-    # First attempt - sends message
-    send_message(idempotency_key="order_12345_notification")
-
-    # Retry (network error, timeout, etc.) - returns existing message
-    send_message(idempotency_key="order_12345_notification")  # Same key = no duplicate
-    ```
-
-    ## Media Attachments
-
-    Supported formats and size limits:
-
-    - **Images**: JPEG, PNG (max 8MB)
-    - **Videos**: MP4, MOV, AVI, WebM, OGG (max 25MB)
-    - **Audio**: AAC, M4A, WAV, MP4 (max 25MB)
-
-    ## Instagram Messaging Policies
-
-    **24-Hour Window**:
-    - Users must message you first before you can send them messages
-    - After their last message, you have 24 hours to respond
-    - After 24 hours, you can't send messages until they message you again
-
-    **Error Examples**:
-    - `"User not found"`: Recipient hasn't messaged your account yet
-    - `"24-hour messaging window has expired"`: Wait for recipient to message you again
-
-    ## Example Requests
-
-    **Text-only message**:
+    **Request (text only):**
     ```bash
-    curl -X POST "https://api.example.com/api/v1/messages/send" \\
-      -H "Authorization: Bearer sk_live_..." \\
+    curl -X POST "http://localhost:8000/api/v1/messages/send" \\
+      -H "Authorization: Bearer YOUR_API_KEY" \\
       -F "account_id=acc_a3f7e8b2c1d4" \\
       -F "recipient_id=17841478096518771" \\
-      -F "message=Hello! Your order has shipped." \\
-      -F "idempotency_key=order_12345_notification"
+      -F "message=Hello from CRM!"
     ```
 
-    **Image attachment with text**:
+    **Request (with attachment):**
     ```bash
-    curl -X POST "https://api.example.com/api/v1/messages/send" \\
-      -H "Authorization: Bearer sk_live_..." \\
+    curl -X POST "http://localhost:8000/api/v1/messages/send" \\
+      -H "Authorization: Bearer YOUR_API_KEY" \\
       -F "account_id=acc_a3f7e8b2c1d4" \\
       -F "recipient_id=17841478096518771" \\
-      -F "message=Here's your receipt!" \\
-      -F "idempotency_key=order_12345_receipt" \\
-      -F "file=@receipt.jpg"
+      -F "message=Check this out" \\
+      -F "file=@/path/to/image.jpg"
     ```
 
-    **Authentication**:
-    Requires either API key (Bearer token) or JWT session authentication.
+    **Response (immediate):**
+    ```json
+    {
+      "message_id": "msg_abc123",
+      "status": "pending",
+      "created_at": "2026-01-12T10:30:00Z"
+    }
+    ```
     """
     logger.info(f"Send message request - account: {account_id}, recipient: {recipient_id}, has_file: {file is not None}")
 
@@ -301,16 +266,21 @@ async def send_message(
 
     # Handle both JWT and API key authentication
     if auth.get("auth_type") == "api_key":
-        # API key authentication - check permissions
+        # API key authentication - check dynamic user permissions
         api_key = auth.get("api_key")
-        has_permission = await APIKeyService.check_account_permission(db, api_key, account_id)
+        has_permission = await APIKeyService.check_user_account_permission(
+            db,
+            api_key.user_id,  # Use user_id from token for dynamic permission check
+            account_id
+        )
         if not has_permission:
             logger.warning(
-                f"Permission denied: API key {api_key.id} attempted to send message for account {account_id}"
+                f"Permission denied: User {api_key.user_id} (via API key {api_key.id}) "
+                f"attempted to send message for account {account_id}"
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"API key does not have permission to access account {account_id}"
+                detail=f"You don't have permission to access account {account_id}"
             )
     elif auth.get("auth_type") == "jwt":
         # JWT authentication - check if user has access to this account via UserAccount table
@@ -414,144 +384,37 @@ async def send_message(
     # 3. Generate message ID
     message_id = f"msg_{uuid.uuid4().hex[:12]}"
 
-    # 4. Create CRM outbound message record (for tracking/idempotency)
+    # 4. Create CRM outbound message record with status="pending"
     outbound_message = CRMOutboundMessage(
         id=message_id,
         account_id=account_id,
         recipient_id=recipient_id,
         message_text=message,
-        idempotency_key=idempotency_key,
+        idempotency_key=None,  # No longer used for deduplication
         status="pending",
         created_at=datetime.now(timezone.utc)
     )
-    
+
     db.add(outbound_message)
-    
-    try:
-        await db.flush()  # Flush to catch DB errors before commit
-    except Exception as e:
-        logger.error(f"Failed to create message: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create message"
-        )
-    
+    await db.commit()
+
     logger.info(f"✅ Message created: {message_id} (status: pending)")
 
-    # 5. Send message using MessageService + Unit of Work
-    try:
-        # Create Unit of Work for transactional messaging
-        async with SQLAlchemyUnitOfWork(db) as uow:
-            # Create MessageService (Instagram client created internally per-account)
-            message_service = MessageService()
+    # 5. Schedule background task to send to Instagram
+    background_tasks.add_task(
+        send_to_instagram_background,
+        message_id=message_id,
+        account_id=account_id,
+        recipient_id=recipient_id,
+        message_text=message,
+        attachment_url=attachment_url,
+        attachment_mime_type=file.content_type if file else None
+    )
 
-            try:
-                # Send message via MessageService
-                sent_message = await message_service.send_message(
-                    uow=uow,
-                    account_id=AccountId(account_id),
-                    recipient_id=InstagramUserId(recipient_id),
-                    message_text=message,
-                    attachment_url=attachment_url,
-                    attachment_mime_type=file.content_type if file else None,
-                    idempotency_key=IdempotencyKey(idempotency_key)
-                )
-
-                # Update CRM tracking record
-                outbound_message.status = "sent"
-                outbound_message.instagram_message_id = sent_message.id.value
-
-                logger.info(f"✅ Message sent via MessageService: {message_id} (ig_msg_id: {sent_message.id.value})")
-
-                # Schedule SSE broadcast as post-commit hook
-                async def broadcast_sse():
-                    try:
-                        message_data = {
-                            "id": sent_message.id.value,
-                            "tracking_message_id": outbound_message.id,
-                            "sender_id": sent_message.sender_id.value,
-                            "recipient_id": sent_message.recipient_id.value,
-                            "text": sent_message.message_text or '',
-                            "direction": "outbound",
-                            "timestamp": sent_message.timestamp.isoformat(),
-                            "status": "sent",
-                            "instagram_account_id": account_id
-                        }
-
-                        # Include attachment if present
-                        if sent_message.attachments:
-                            attachments_data = []
-                            for att in sent_message.attachments:
-                                attachments_data.append({
-                                    "id": att.id.value,
-                                    "media_type": att.media_type,
-                                    "media_url": att.media_url,
-                                    "media_url_local": att.media_url_local,
-                                    "media_mime_type": att.media_mime_type,
-                                    "attachment_index": att.attachment_index
-                                })
-                            message_data["attachments"] = attachments_data
-
-                        await broadcast_new_message(message_data)
-                    except Exception as sse_error:
-                        logger.error(f"Failed to broadcast SSE message: {sse_error}")
-
-                uow.add_post_commit_hook(broadcast_sse)
-
-                # Commit transaction (triggers post-commit hooks)
-                await uow.commit()
-
-            except (InstagramAPIError, ValueError, AccountNotFoundError, Exception) as e:
-                # Update message status to "failed"
-                outbound_message.status = "failed"
-
-                if isinstance(e, InstagramAPIError):
-                    outbound_message.error_code = "instagram_api_error"
-                    error_msg = e.message
-
-                    # Provide helpful error messages for common issues
-                    if "не знайдено користувача" in error_msg.lower() or "user not found" in error_msg.lower():
-                        error_msg = (
-                            f"{error_msg}. This recipient may not exist or hasn't messaged your account yet. "
-                            "Instagram requires users to message you first before you can send them messages."
-                        )
-                    elif "24 hour" in error_msg.lower() or "messaging window" in error_msg.lower():
-                        error_msg = (
-                            f"{error_msg}. The 24-hour messaging window has expired. "
-                            "You can only send messages within 24 hours of the user's last message."
-                        )
-
-                    outbound_message.error_message = f"HTTP {e.status_code}: {error_msg}" if e.status_code else error_msg
-                elif isinstance(e, AccountNotFoundError):
-                    outbound_message.error_code = "account_not_found"
-                    outbound_message.error_message = str(e)
-                elif isinstance(e, ValueError):
-                    # Covers missing_token and token_decrypt_error from MessageService
-                    outbound_message.error_code = "configuration_error"
-                    outbound_message.error_message = str(e)
-                else:
-                    outbound_message.error_code = "unexpected_error"
-                    outbound_message.error_message = str(e)
-
-                logger.error(f"❌ Failed to send message {message_id}: {outbound_message.error_message}")
-
-                # Broadcast failure to SSE clients
-                try:
-                    await broadcast_message_status(message_id, "failed")
-                except Exception as sse_error:
-                    logger.error(f"Failed to broadcast SSE status: {sse_error}")
-
-        # Commit CRM tracking record (after UoW context exits)
-        await db.commit()
-
-    except Exception as outer_error:
-        logger.error(f"❌ Unexpected error in send_message: {outer_error}", exc_info=True)
-        await db.rollback()
-    
-    # 7. Return response with current status (including attachment info)
+    # 6. Return immediately with "pending" status
     return SendMessageResponse(
         message_id=outbound_message.id,
-        status=outbound_message.status,
+        status="pending",  # Always "pending" initially
         created_at=outbound_message.created_at,
         attachment_url=attachment_url,  # Will be None if no file uploaded
         attachment_type=attachment_type,  # Will be None if no file uploaded
@@ -652,16 +515,20 @@ async def get_message_status(
             detail=f"Message '{message_id}' not found"
         )
 
-    # Check if API key has permission to access this message's account
-    has_permission = await APIKeyService.check_account_permission(db, api_key, message.account_id)
+    # Check if user has permission to access this message's account (dynamic check)
+    has_permission = await APIKeyService.check_user_account_permission(
+        db,
+        api_key.user_id,  # Use user_id from token for dynamic permission check
+        message.account_id
+    )
     if not has_permission:
         logger.warning(
-            f"Permission denied: API key {api_key.id} attempted to access message {message_id} "
-            f"from account {message.account_id}"
+            f"Permission denied: User {api_key.user_id} (via API key {api_key.id}) "
+            f"attempted to access message {message_id} from account {message.account_id}"
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"API key does not have permission to access this message"
+            detail=f"You don't have permission to access this message"
         )
 
     # Build error detail if message failed
@@ -688,3 +555,140 @@ async def get_message_status(
         read_at=None,  # TODO: Add read_at field in Priority 2
         error=error_detail
     )
+
+
+# ============================================
+# Background Tasks
+# ============================================
+
+async def send_to_instagram_background(
+    message_id: str,
+    account_id: str,
+    recipient_id: str,
+    message_text: Optional[str],
+    attachment_url: Optional[str],
+    attachment_mime_type: Optional[str]
+):
+    """
+    Background task to send message to Instagram API.
+
+    This runs asynchronously after the HTTP response is sent to the client.
+    Updates the message status to "sent" or "failed" based on Instagram API response.
+    """
+    logger.info(f"📤 Background task started for message {message_id}")
+
+    try:
+        # Create new DB session for background task
+        async with get_db_session_context() as db:
+            # Send via MessageService
+            async with SQLAlchemyUnitOfWork(db) as uow:
+                message_service = MessageService()
+
+                sent_message = await message_service.send_message(
+                    uow=uow,
+                    account_id=AccountId(account_id),
+                    recipient_id=InstagramUserId(recipient_id),
+                    message_text=message_text,
+                    attachment_url=attachment_url,
+                    attachment_mime_type=attachment_mime_type,
+                    idempotency_key=None  # Not used anymore
+                )
+
+                # Update CRM tracking record to "sent"
+                result = await db.execute(
+                    select(CRMOutboundMessage).where(CRMOutboundMessage.id == message_id)
+                )
+                outbound_msg = result.scalar_one()
+                outbound_msg.status = "sent"
+                outbound_msg.instagram_message_id = sent_message.id.value
+
+                logger.info(f"✅ Background send successful: {message_id} (ig_msg_id: {sent_message.id.value})")
+
+                # Schedule SSE broadcast as post-commit hook
+                async def broadcast_sse():
+                    try:
+                        message_data = {
+                            "id": sent_message.id.value,
+                            "tracking_message_id": outbound_msg.id,
+                            "sender_id": sent_message.sender_id.value,
+                            "recipient_id": sent_message.recipient_id.value,
+                            "text": sent_message.message_text or '',
+                            "direction": "outbound",
+                            "timestamp": sent_message.timestamp.isoformat(),
+                            "status": "sent",
+                            "instagram_account_id": account_id
+                        }
+
+                        # Include attachment if present
+                        if sent_message.attachments:
+                            attachments_data = []
+                            for att in sent_message.attachments:
+                                attachments_data.append({
+                                    "id": att.id.value,
+                                    "media_type": att.media_type,
+                                    "media_url": att.media_url,
+                                    "media_url_local": att.media_url_local,
+                                    "media_mime_type": att.media_mime_type,
+                                    "attachment_index": att.attachment_index
+                                })
+                            message_data["attachments"] = attachments_data
+
+                        await broadcast_new_message(message_data)
+                    except Exception as sse_error:
+                        logger.error(f"Failed to broadcast SSE message: {sse_error}")
+
+                uow.add_post_commit_hook(broadcast_sse)
+
+                # Commit transaction (triggers post-commit hooks)
+                await uow.commit()
+
+    except (InstagramAPIError, ValueError, AccountNotFoundError, Exception) as e:
+        logger.error(f"❌ Background send failed for {message_id}: {e}")
+
+        # Update status to "failed"
+        try:
+            async with get_db_session_context() as db:
+                result = await db.execute(
+                    select(CRMOutboundMessage).where(CRMOutboundMessage.id == message_id)
+                )
+                outbound_msg = result.scalar_one_or_none()
+
+                if outbound_msg:
+                    outbound_msg.status = "failed"
+
+                    # Categorize error type
+                    if isinstance(e, InstagramAPIError):
+                        outbound_msg.error_code = "instagram_api_error"
+                        error_msg = e.message
+
+                        # Provide helpful error messages for common issues
+                        if "не знайдено користувача" in error_msg.lower() or "user not found" in error_msg.lower():
+                            error_msg = (
+                                f"{error_msg}. This recipient may not exist or hasn't messaged your account yet. "
+                                "Instagram requires users to message you first before you can send them messages."
+                            )
+                        elif "24 hour" in error_msg.lower() or "messaging window" in error_msg.lower():
+                            error_msg = (
+                                f"{error_msg}. The 24-hour messaging window has expired. "
+                                "You can only send messages within 24 hours of the user's last message."
+                            )
+
+                        outbound_msg.error_message = f"HTTP {e.status_code}: {error_msg}" if e.status_code else error_msg
+                    elif isinstance(e, AccountNotFoundError):
+                        outbound_msg.error_code = "account_not_found"
+                        outbound_msg.error_message = str(e)
+                    elif isinstance(e, ValueError):
+                        # Covers missing_token and token_decrypt_error from MessageService
+                        outbound_msg.error_code = "configuration_error"
+                        outbound_msg.error_message = str(e)
+                    else:
+                        outbound_msg.error_code = "unexpected_error"
+                        outbound_msg.error_message = str(e)
+
+                    await db.commit()
+
+                # Broadcast failure via SSE
+                await broadcast_message_status(message_id, "failed")
+
+        except Exception as db_error:
+            logger.error(f"Failed to update failed message status for {message_id}: {db_error}")

@@ -20,7 +20,7 @@ Perfect for e-commerce businesses that need to automate Instagram customer conve
 
 ✅ **Webhook Integration** - Real-time Instagram message reception
 ✅ **CRM Forwarding** - Forward messages to your CRM with HMAC signatures
-✅ **REST API** - Send messages programmatically with idempotency protection
+✅ **REST API** - Send messages programmatically with async background processing
 ✅ **Multi-Account** - Support multiple Instagram business accounts
 ✅ **Web Chat UI** - Instagram-like interface with live updates (SSE)
 ✅ **Auto-Replies** - Configure automatic responses based on rules
@@ -148,16 +148,20 @@ Configure Facebook App webhook to point to your server:
 ```bash
 curl -X POST "http://localhost:8000/api/v1/messages/send" \
   -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "account_id": "17841405728832526",
-    "recipient_id": "1558635688632972",
-    "message": "Hello! Your order is ready.",
-    "idempotency_key": "order_123_notification"
-  }'
+  -F "account_id=17841405728832526" \
+  -F "recipient_id=1558635688632972" \
+  -F "message=Hello! Your order is ready."
+
+# Response (immediate): {"message_id": "msg_abc123", "status": "pending", ...}
+
+# Check status
+curl -X GET "http://localhost:8000/api/v1/messages/msg_abc123/status" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+
+# Response: {"message_id": "msg_abc123", "status": "sent", ...}
 ```
 
-**Idempotency:** The `idempotency_key` prevents duplicate sends - same key returns existing message.
+**Async Processing:** Messages are sent in background. API returns immediately with `status="pending"`. Use the status endpoint or SSE to track delivery.
 
 ### 5. Monitor Conversations
 

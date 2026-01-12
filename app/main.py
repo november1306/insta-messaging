@@ -203,46 +203,39 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Instagram Messenger Automation Platform",
     description="""
-# Instagram Messenger Automation API
+# Instagram Messaging API
 
-A production-ready API platform for automating Instagram Direct Messages with CRM integration.
+Automate Instagram Direct Messages for your e-commerce business.
 
-## 🚀 Key Features
+## Quick Start (CRM Integration)
 
-- **Webhook Integration**: Receive Instagram messages in real-time via webhooks
-- **CRM API**: Send messages programmatically with idempotency and file attachments
-- **Multi-Account Support**: Manage multiple Instagram Business accounts via OAuth
-- **Real-Time Updates**: Server-Sent Events (SSE) for live message streaming
-- **Web UI**: Vue.js chat interface for manual message management
-- **Media Support**: Handle images, videos, audio with automatic CDN downloading
+**1. Get API Token:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/token" \\
+  -H "Content-Type: application/json" \\
+  -d '{"username": "your_username", "password": "your_password"}'
+```
 
-## 🔐 Authentication
+**2. Get Conversations:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/ui/conversations?account_id=YOUR_ACCOUNT_ID" \\
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
 
-Two authentication systems:
+**3. Send Message:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/messages/send" \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -F "account_id=YOUR_ACCOUNT_ID" \\
+  -F "recipient_id=RECIPIENT_ID" \\
+  -F "message=Hello from our CRM!" \\
+  -F "idempotency_key=unique_id_123"
+```
 
-1. **API Keys** (for CRM integration):
-   - Format: `Authorization: Bearer sk_live_...`
-   - Scoped to specific Instagram accounts
-   - Admin keys for account management
-
-2. **JWT Sessions** (for web UI):
-   - Format: `Authorization: Bearer eyJ...`
-   - Username/password login
-   - 24-hour token expiration
-
-## 📖 Getting Started
-
-1. **Register User**: `POST /api/v1/auth/register`
-2. **Login**: `POST /api/v1/ui/session` (returns JWT)
-3. **Connect Instagram**: `POST /oauth/instagram/init` → Complete OAuth flow
-4. **Send Messages**: `POST /api/v1/messages/send`
-5. **Receive Messages**: Configure webhook at `/webhooks/instagram`
-
-## 📚 Resources
-
-- **Interactive Docs**: `/docs` (Swagger UI)
-- **Alternative Docs**: `/redoc`
-- **OpenAPI Spec**: `/openapi.json`
+## Documentation
+- **Swagger UI:** [/docs](/docs)
+- **ReDoc:** [/redoc](/redoc)
+- **OpenAPI JSON:** [/openapi.json](/openapi.json)
     """,
     version=__version__,
     lifespan=lifespan,
@@ -251,32 +244,24 @@ Two authentication systems:
     openapi_url="/openapi.json",
     tags_metadata=[
         {
-            "name": "webhooks",
-            "description": "Instagram webhook endpoints for receiving messages in real-time"
+            "name": "Authentication",
+            "description": "Generate API tokens for CRM integration (30-day expiration)"
         },
         {
-            "name": "messages",
-            "description": "CRM integration API for sending Instagram DMs programmatically"
+            "name": "Messaging",
+            "description": "Send Instagram DMs and check delivery status"
         },
         {
-            "name": "accounts",
-            "description": "Instagram account management (linking, unlinking, deletion)"
+            "name": "Data Access",
+            "description": "Retrieve conversations, messages, and account information"
         },
         {
-            "name": "ui",
-            "description": "Web interface API for chat UI (conversations, messages, session)"
+            "name": "Account Management",
+            "description": "Manage linked Instagram business accounts"
         },
         {
-            "name": "events",
-            "description": "Server-Sent Events stream for real-time message updates"
-        },
-        {
-            "name": "oauth",
-            "description": "Instagram OAuth flow (no Facebook Page required)"
-        },
-        {
-            "name": "auth",
-            "description": "User registration and authentication"
+            "name": "Internal",
+            "description": "Internal endpoints (webhooks, OAuth, real-time events) - not for CRM use"
         }
     ]
 )
@@ -333,22 +318,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         }
     )
 
-# Register webhook routes
-app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
+# Public API (for CRM users)
+app.include_router(auth.router, prefix="/api/v1", tags=["Authentication"])
+app.include_router(messages.router, prefix="/api/v1", tags=["Messaging"])
+app.include_router(ui.router, prefix="/api/v1", tags=["Data Access"])
+app.include_router(accounts.router, prefix="/api/v1", tags=["Account Management"])
 
-# Register CRM integration API routes
-app.include_router(accounts.router, prefix="/api/v1", tags=["accounts"])
-app.include_router(messages.router, prefix="/api/v1", tags=["messages"])
-
-# Register UI API routes (for web frontend)
-app.include_router(ui.router, prefix="/api/v1", tags=["ui"])
-app.include_router(events.router, prefix="/api/v1", tags=["events"])
-
-# Register OAuth routes
-app.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
-
-# Register Auth routes (registration)
-app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
+# Internal API (not for CRM users)
+app.include_router(webhooks.router, prefix="/webhooks", tags=["Internal"])
+app.include_router(events.router, prefix="/api/v1", tags=["Internal"])
+app.include_router(oauth.router, prefix="/oauth", tags=["Internal"])
 
 
 @app.get("/", response_model=RootResponse, summary="API status and metadata")

@@ -27,14 +27,10 @@ export const useSessionStore = defineStore('session', () => {
     error.value = null
 
     try {
-      // Encode credentials as Basic Auth
-      const credentials = btoa(`${usernameInput}:${passwordInput}`)
-
-      // Call session endpoint with Basic Auth header
-      const response = await apiClient.post('/ui/session', null, {
-        headers: {
-          'Authorization': `Basic ${credentials}`
-        }
+      // Call session endpoint with JSON body
+      const response = await apiClient.post('/ui/session', {
+        username: usernameInput,
+        password: passwordInput
       })
 
       if (response.data.error || !response.data.token) {

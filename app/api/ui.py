@@ -11,7 +11,6 @@ Refactored to use centralized cache service.
 import logging
 import httpx
 import jwt
-import base64
 from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +21,7 @@ from app.db.connection import get_db_session
 from app.db.models import MessageModel, APIKey, UserAccount, Account
 from app.clients.instagram_client import InstagramClient
 from app.config import settings
-from app.api.auth import verify_api_key, verify_ui_session
+from app.api.auth import verify_api_key, verify_ui_session, verify_jwt_or_api_key, LoginRequest
 from app.services.user_service import UserService
 from app.infrastructure.cache_service import get_cached_username
 from typing import List, Dict, Any, Optional
@@ -162,46 +161,42 @@ class MessagesResponse(BaseModel):
     }
 )
 async def create_session(
-    authorization: Optional[str] = Header(None),
+    request: LoginRequest,
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Create a UI session token (JWT) by validating Basic Auth credentials.
+    Create a UI session token (JWT) by validating username and password.
 
     **How to Login**:
 
-    1. Encode your credentials: `base64(username:password)`
-    2. Send in Authorization header: `Basic <base64-encoded-credentials>`
-    3. Receive JWT token in response
-    4. Use JWT token for subsequent requests: `Bearer <jwt-token>`
+    1. Send username and password in JSON body
+    2. Receive JWT token in response
+    3. Use JWT token for subsequent requests: `Bearer <jwt-token>`
 
     **Example (curl)**:
     ```bash
     curl -X POST "https://api.example.com/api/v1/ui/session" \\
-      -H "Authorization: Basic $(echo -n 'admin:password' | base64)"
+      -H "Content-Type: application/json" \\
+      -d '{"username": "admin", "password": "mypassword"}'
     ```
 
     **Example (JavaScript)**:
     ```javascript
-    const credentials = btoa('admin:password');
     const response = await fetch('/api/v1/ui/session', {
       method: 'POST',
-      headers: {
-        'Authorization': `Basic ${credentials}`
-      }
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username: 'admin', password: 'mypassword'})
     });
     const { token, account_id } = await response.json();
     ```
 
     **Example (Python)**:
     ```python
-    import base64
     import requests
 
-    credentials = base64.b64encode(b'admin:password').decode()
     response = requests.post(
         'https://api.example.com/api/v1/ui/session',
-        headers={'Authorization': f'Basic {credentials}'}
+        json={'username': 'admin', 'password': 'mypassword'}
     )
     token = response.json()['token']
     ```
@@ -217,37 +212,9 @@ async def create_session(
     - Check `expires_in` field for exact duration
     - Login again when token expires (401 error)
     """
-    # Check if Authorization header is present and valid format
-    if not authorization or not authorization.startswith("Basic "):
-        logger.warning("Session creation failed: Missing or invalid Authorization header")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Basic Auth credentials. Provide 'Authorization: Basic <credentials>'.",
-            headers={"WWW-Authenticate": "Basic"}
-        )
-
-    # Decode Basic Auth credentials
-    try:
-        # Extract base64 part after "Basic "
-        encoded_credentials = authorization[6:].strip()
-
-        # Decode base64
-        decoded_bytes = base64.b64decode(encoded_credentials)
-        decoded_str = decoded_bytes.decode('utf-8')
-
-        # Split username:password
-        if ':' not in decoded_str:
-            raise ValueError("Invalid credentials format")
-
-        username, password = decoded_str.split(':', 1)
-
-    except Exception as e:
-        logger.warning(f"Session creation failed: Invalid Basic Auth format - {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Basic Auth format. Use base64(username:password).",
-            headers={"WWW-Authenticate": "Basic"}
-        )
+    # Extract credentials from JSON body
+    username = request.username
+    password = request.password
 
     # Validate credentials against database
     user = await UserService.validate_credentials(db, username, password)
@@ -311,7 +278,7 @@ async def create_session(
 )
 async def get_current_account(
     account_id: Optional[str] = Query(None, description="Instagram account ID. If not provided, uses user's primary account."),
-    session: dict = Depends(verify_ui_session),
+    auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -329,16 +296,16 @@ async def get_current_account(
     - `instagram_handle`: Raw username without @ prefix
     - `profile_picture_url`: Profile picture URL from Instagram CDN
 
-    **Requires JWT session authentication.**
+    **Accepts both JWT session tokens and API keys.**
     """
     try:
-        user_id = session.get("user_id")
+        user_id = auth.get("user_id")
 
-        # If no account_id provided, use primary account from session
+        # If no account_id provided, use primary account from auth
         if not account_id:
-            account_id = session.get("account_id")  # This is primary_account_id
+            account_id = auth.get("account_id")  # This is primary_account_id
             if not account_id:
-                # Session doesn't have account_id (might be stale after OAuth linking)
+                # Auth doesn't have account_id (might be stale after OAuth linking)
                 # Query database for user's current primary account
                 result = await db.execute(
                     select(UserAccount).where(
@@ -520,45 +487,42 @@ async def _get_instagram_profile(sender_id: str, access_token: str = None) -> di
 )
 async def get_conversations(
     account_id: Optional[str] = Query(None, description="Instagram account ID to filter by"),
-    session: dict = Depends(verify_ui_session),
+    auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Get list of all conversations grouped by customer.
+    Get list of all conversations.
 
-    Returns conversations sorted by most recent message first, with profile information
-    fetched from Instagram API.
+    **Authentication:** API key or JWT token
 
-    **24-Hour Messaging Window**:
-    Business accounts can only respond to messages within 24 hours of the last inbound
-    message from the customer. The frontend should calculate `hours_remaining` based
-    on `last_message_time`.
+    **Request:**
+    ```bash
+    curl -X GET "http://localhost:8000/api/v1/ui/conversations?account_id=acc_a3f7e8b2c1d4" \\
+      -H "Authorization: Bearer YOUR_API_KEY"
+    ```
 
-    **Query Parameters**:
-    - `account_id` (optional): Filter conversations for specific Instagram account.
-      If not provided, uses user's primary account from JWT token.
-
-    **Response Fields**:
-    - `sender_id`: Customer's Instagram user ID (IGID format, scoped to messaging channel)
-    - `sender_name`: Customer's Instagram username (fetched from API, cached for 24 hours)
-    - `profile_picture_url`: Customer's profile picture URL (from Instagram CDN)
-    - `last_message`: Most recent message text (from either customer or you)
-    - `last_message_time`: ISO 8601 timestamp of most recent message
-    - `messaging_channel_id`: Unique channel ID for routing (from webhook entry.id)
-    - `account_id`: Your account ID (e.g., acc_a3f7e8b2c1d4)
-
-    **Use Cases**:
-    - Display conversation list in chat UI
-    - Calculate remaining messaging window time
-    - Sort by most recent activity
-    - Show unread count (future feature, currently always 0)
+    **Response:**
+    ```json
+    {
+      "conversations": [
+        {
+          "sender_id": "17841478096518771",
+          "sender_name": "@johndoe",
+          "profile_picture_url": "https://...",
+          "last_message": "Hello!",
+          "last_message_time": "2026-01-12T10:00:00Z",
+          "unread_count": 0
+        }
+      ]
+    }
+    ```
     """
     try:
-        user_id = session.get("user_id")
+        user_id = auth.get("user_id")
 
-        # If no account_id provided, use primary account from session
+        # If no account_id provided, use primary account from auth
         if not account_id:
-            account_id = session.get("account_id")  # This is primary_account_id
+            account_id = auth.get("account_id")  # This is primary_account_id
             if not account_id:
                 # User has no linked accounts yet
                 logger.info(f"User {user_id} has no linked accounts, returning empty conversations")
@@ -725,43 +689,52 @@ async def get_conversations(
 async def get_messages(
     sender_id: str,
     account_id: Optional[str] = Query(None, description="Instagram account ID to filter by"),
-    session: dict = Depends(verify_ui_session),
+    auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Get all messages for a specific conversation thread.
+    Get message history for a conversation.
 
-    Returns both inbound and outbound messages in chronological order (oldest to newest),
-    with sender information and media attachments.
+    **Authentication:** API key or JWT token
 
-    **Path Parameters**:
-    - `sender_id`: Instagram user ID of the conversation partner (customer)
+    **Request:**
+    ```bash
+    curl -X GET "http://localhost:8000/api/v1/ui/messages/17841478096518771?account_id=acc_a3f7e8b2c1d4" \\
+      -H "Authorization: Bearer YOUR_API_KEY"
+    ```
 
-    **Query Parameters**:
-    - `account_id` (optional): Specific account to fetch messages from. If not provided, uses user's primary account.
-
-    **Response Fields**:
-    - `messages`: Array of messages in chronological order (oldest first, newest last)
-      - `id`: Instagram message ID
-      - `text`: Message text (empty string for media-only messages)
-      - `direction`: "inbound" (from customer) or "outbound" (from you)
-      - `timestamp`: ISO 8601 timestamp
-      - `status`: Delivery status for outbound messages (sent/pending/failed)
-      - `attachments`: Array of media files (images, videos, audio)
-    - `sender_info`: Information about the conversation partner
-      - `id`: Instagram user ID
-      - `name`: Instagram username with @ prefix
-
-    **Limit**: Returns last 100 messages (most recent first, then reversed for chronological display)
-
-    **Requires JWT session authentication.**
+    **Response:**
+    ```json
+    {
+      "messages": [
+        {
+          "id": "msg_123",
+          "text": "Hello!",
+          "direction": "inbound",
+          "timestamp": "2026-01-12T09:00:00Z",
+          "attachments": []
+        },
+        {
+          "id": "msg_124",
+          "text": "Hi there!",
+          "direction": "outbound",
+          "timestamp": "2026-01-12T09:05:00Z",
+          "attachments": []
+        }
+      ],
+      "sender_info": {
+        "id": "17841478096518771",
+        "name": "@johndoe"
+      }
+    }
+    ```
     """
     try:
-        user_id = session.get("user_id")
+        user_id = auth.get("user_id")
 
-        # If no account_id provided, use primary account from session
+        # If no account_id provided, use primary account from auth
         if not account_id:
-            account_id = session.get("account_id")  # This is primary_account_id
+            account_id = auth.get("account_id")  # This is primary_account_id
             if not account_id:
                 # User has no linked accounts yet
                 logger.warning(f"User {user_id} has no linked accounts, cannot fetch messages")
