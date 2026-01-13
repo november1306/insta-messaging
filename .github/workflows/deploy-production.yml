@@ -68,7 +68,7 @@ jobs:
             PUBLIC_BASE_URL=${{ secrets.PUBLIC_BASE_URL || 'http://185.156.43.172' }}
 
             # Frontend URL (for OAuth redirects)
-            FRONTEND_URL=${{ secrets.FRONTEND_URL || 'http://185.156.43.172/chat' }}
+            FRONTEND_URL=${{ secrets.FRONTEND_URL || 'http://185.156.43.172/chat/' }}
 
             # CRM MySQL Configuration (optional)
             CRM_MYSQL_ENABLED=${{ secrets.CRM_MYSQL_ENABLED || 'false' }}
@@ -253,7 +253,7 @@ jobs:
             PUBLIC_BASE_URL=${{ secrets.PUBLIC_BASE_URL || 'http://185.156.43.172' }}
 
             # Frontend URL (for OAuth redirects)
-            FRONTEND_URL=${{ secrets.FRONTEND_URL || 'http://185.156.43.172/chat' }}
+            FRONTEND_URL=${{ secrets.FRONTEND_URL || 'http://185.156.43.172/chat/' }}
 
             # CRM MySQL Configuration (optional)
             CRM_MYSQL_ENABLED=${{ secrets.CRM_MYSQL_ENABLED || 'false' }}
