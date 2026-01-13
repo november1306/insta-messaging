@@ -155,8 +155,17 @@ def create_oauth_success_html(account: Account, conversations_synced: int = 0) -
         sync_info = f"""
         <div class="note" style="background: #d4edda; border-color: #c3e6cb; color: #155724;">
             <strong>✅ Conversation History Synced!</strong><br>
-            We imported {conversations_synced} conversation{'s' if conversations_synced != 1 else ''} from your Instagram account.
+            We imported {conversations_synced} recent conversation{'s' if conversations_synced != 1 else ''} from the last 24 hours.
             You can start messaging right away!
+        </div>
+        """
+    else:
+        # Show informative message when no conversations synced
+        sync_info = """
+        <div class="note" style="background: #e7f3ff; border-color: #b3d9ff; color: #004085;">
+            <strong>ℹ️ No Recent Conversations Found</strong><br>
+            No conversations from the last 24 hours were found.
+            New messages will appear here when customers contact you.
         </div>
         """
 

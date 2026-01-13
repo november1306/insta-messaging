@@ -342,3 +342,11 @@ server.pid
 # Downloaded from Instagram CDN and stored locally
 # Do not commit user-uploaded content to version control
 media/
+
+# Claude Code temporary files
+tmpclaude-*-cwd
+
+# Test output files
+test_results.json
+test_results/
+test_output/

@@ -368,20 +368,56 @@ class AccountLinkingService:
         """
         Sync conversation history from Instagram API.
 
+        Uses two-phase approach for performance:
+        - Phase 1: Fast fetch of conversation list without nested messages (~4s)
+        - Phase 2: Only sync conversations from last 24 hours (Instagram's message window)
+
         Returns:
             Number of conversations synced
         """
         try:
-            # Fetch conversations from Instagram
-            conversations = await instagram_client.get_conversations(limit=50)
+            # PHASE 1: Fast fetch - get conversation list without nested messages
+            logger.info("📥 Phase 1: Fetching conversation list (fast)...")
+            conversations = await instagram_client.get_conversations(
+                limit=50,
+                include_messages=False  # Skip nested messages for speed
+            )
 
             if not conversations:
                 logger.info("No conversations returned from Instagram API (may not be supported)")
                 return 0
 
+            # Filter to last 24 hours (Instagram's messaging window)
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
+
+            recent_conversations = []
+            for conv in conversations:
+                updated_time_str = conv.get("updated_time")
+                if updated_time_str:
+                    try:
+                        # Parse ISO format with flexible timezone handling
+                        # Instagram typically: 2026-01-13T21:30:45+0000
+                        # Also support: Z suffix, different offsets, milliseconds
+                        timestamp = updated_time_str.replace('+0000', '+00:00').replace('Z', '+00:00')
+                        updated_time = datetime.fromisoformat(timestamp)
+
+                        if updated_time >= cutoff_time:
+                            recent_conversations.append(conv)
+                    except (ValueError, AttributeError) as e:
+                        # If parsing fails, include the conversation to be safe
+                        logger.warning(f"⚠️ Could not parse updated_time: {updated_time_str} ({type(e).__name__})")
+                        recent_conversations.append(conv)
+                else:
+                    # No timestamp, include it to be safe
+                    recent_conversations.append(conv)
+
+            logger.info(f"✅ Phase 1 complete: {len(conversations)} total, {len(recent_conversations)} from last 24h")
+
+            # PHASE 2: Sync messages only for recent conversations
+            logger.info(f"📥 Phase 2: Syncing messages for {len(recent_conversations)} recent conversations...")
             synced_count = 0
 
-            for conv in conversations:
+            for conv in recent_conversations:
                 # Extract conversation participants
                 participants = conv.get("participants", {}).get("data", [])
                 if not participants:

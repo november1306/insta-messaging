@@ -446,7 +446,8 @@ class InstagramClient:
 
     async def get_conversations(
         self,
-        limit: int = 50
+        limit: int = 50,
+        include_messages: bool = True
     ) -> Optional[list[dict]]:
         """
         Fetch conversations from Instagram Messaging API.
@@ -455,13 +456,16 @@ class InstagramClient:
 
         Args:
             limit: Maximum number of conversations to fetch (default 50)
+            include_messages: Whether to include nested message data (default True)
+                            False = faster, only gets conversation metadata (~4s)
+                            True = slower, includes full message history (~15s for 50 conversations)
 
         Returns:
             List of conversation objects with:
             - id: Conversation ID
-            - participants: List of participant objects
-            - messages: Preview of latest messages
-            - updated_time: Last activity timestamp
+            - participants: List of participant objects (always included)
+            - messages: Preview of latest messages (if include_messages=True)
+            - updated_time: Last activity timestamp (always included)
 
             Returns None if API call fails or endpoint not available.
 
@@ -470,21 +474,29 @@ class InstagramClient:
         """
         url = f"{self._api_base_url}/me/conversations"
 
+        # Build field list based on whether we want messages
+        if include_messages:
+            fields = "id,participants,messages{message,from,created_time},updated_time"
+            timeout = 30.0  # Longer timeout for full data
+        else:
+            fields = "id,participants,updated_time"
+            timeout = 10.0  # Shorter timeout for minimal data
+
         try:
             response = await self._http_client.get(
                 url,
                 params={
-                    "fields": "id,participants,messages{message,from,created_time},updated_time",
+                    "fields": fields,
                     "limit": limit,
                     "access_token": self._token
                 },
-                timeout=10.0
+                timeout=timeout
             )
 
             if response.status_code == 200:
                 data = response.json()
                 conversations = data.get("data", [])
-                self._logger.info(f"✅ Retrieved {len(conversations)} conversations")
+                self._logger.info(f"✅ Retrieved {len(conversations)} conversations (include_messages={include_messages})")
                 return conversations
             else:
                 error_data = response.json() if response.text else {}
