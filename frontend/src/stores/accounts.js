@@ -153,9 +153,13 @@ export const useAccountsStore = defineStore('accounts', () => {
 
     try {
       // Initialize OAuth flow (OAuth endpoints are at /oauth, not /api/v1)
+      // Send frontend_origin so production OAuth callback redirects back here
       const response = await axios.post(
         '/oauth/instagram/init',
-        {},
+        {
+          frontend_origin: window.location.origin,
+          force_reauth: forceReauth
+        },
         {
           headers: {
             Authorization: `Bearer ${sessionStore.token}`
@@ -163,15 +167,8 @@ export const useAccountsStore = defineStore('accounts', () => {
         }
       )
 
-      let authUrl = response.data.auth_url
-
-      // Add force_reauth to the Instagram OAuth URL if requested
-      if (forceReauth) {
-        authUrl += (authUrl.includes('?') ? '&' : '?') + 'force_reauth=true'
-      }
-
-      // Redirect to Instagram OAuth
-      window.location.href = authUrl
+      // Redirect to Instagram OAuth (force_reauth already included in auth_url by backend)
+      window.location.href = response.data.auth_url
     } catch (err) {
       console.error('Failed to start OAuth flow:', err)
       error.value = err.response?.data?.detail || 'Failed to start OAuth flow'

@@ -29,6 +29,7 @@ class OAuthResult:
     account: Optional[Account] = None
     error_message: Optional[str] = None
     conversations_synced: int = 0
+    redirect_url: Optional[str] = None  # Frontend URL to redirect to after OAuth
 
 
 class AccountLinkingService:
@@ -49,7 +50,7 @@ class AccountLinkingService:
     async def initialize_oauth(
         self,
         user_id: int,
-        redirect_uri: str,
+        frontend_redirect_url: Optional[str] = None,
         force_reauth: bool = False
     ) -> tuple[str, datetime]:
         """
@@ -57,7 +58,9 @@ class AccountLinkingService:
 
         Args:
             user_id: Authenticated user ID
-            redirect_uri: Where to redirect after OAuth
+            frontend_redirect_url: Where to redirect frontend after OAuth completes
+                                   (e.g., http://localhost:5173 for local dev)
+                                   Defaults to settings.frontend_url if not provided
             force_reauth: Force user to reauth (for linking multiple accounts)
 
         Returns:
@@ -66,12 +69,15 @@ class AccountLinkingService:
         # Generate CSRF token
         state = secrets.token_urlsafe(32)
 
+        # Use provided frontend URL or default to settings
+        final_redirect_url = frontend_redirect_url or settings.frontend_url
+
         # Store state in database
         now = datetime.now(timezone.utc)
         oauth_state = OAuthState(
             state=state,
             user_id=user_id,
-            redirect_uri=redirect_uri,
+            redirect_uri=final_redirect_url,  # Frontend redirect URL (not OAuth callback)
             created_at=now,
             expires_at=now + timedelta(minutes=10)
         )
@@ -130,6 +136,7 @@ class AccountLinkingService:
                 return OAuthResult(success=False, error_message="Invalid state token")
 
             user_id = oauth_state.user_id
+            frontend_redirect_url = oauth_state.redirect_uri  # Save before deletion
 
             # Delete state token (one-time use) - will be committed with transaction
             await self.db.delete(oauth_state)
@@ -200,7 +207,8 @@ class AccountLinkingService:
                 return OAuthResult(
                     success=True,
                     account=account,
-                    conversations_synced=conversations_synced
+                    conversations_synced=conversations_synced,
+                    redirect_url=frontend_redirect_url
                 )
 
         except Exception as e:

@@ -336,9 +336,16 @@ class DuplicateMessageError(DomainError):
 class AccountNotFoundError(DomainError):
     """Raised when account doesn't exist"""
 
-    def __init__(self, account_id: AccountId):
-        self.account_id = account_id
-        super().__init__(f"Account {account_id} not found")
+    def __init__(self, identifier: AccountId | str):
+        """
+        Args:
+            identifier: Either an AccountId or a string identifier
+                        (e.g., channel ID for webhook lookups)
+        """
+        self.identifier = identifier
+        # Handle both AccountId objects and string identifiers
+        id_str = identifier.value if isinstance(identifier, AccountId) else identifier
+        super().__init__(f"Account not found for identifier: {id_str}")
 
 
 class MessageNotFoundError(DomainError):

@@ -204,7 +204,7 @@ class MessageService:
             logger.error(
                 f"No account found for messaging_channel_id={messaging_channel_id}"
             )
-            raise AccountNotFoundError(AccountId(f"channel:{messaging_channel_id}"))
+            raise AccountNotFoundError(f"messaging_channel_id:{messaging_channel_id.value}")
 
         # 2. Create domain entities
         attachment_entities = []

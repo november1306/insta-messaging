@@ -30,6 +30,7 @@ References:
 import httpx
 import logging
 from datetime import datetime, timedelta
+from typing import Optional
 from fastapi import APIRouter, Query, HTTPException, Depends, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -139,17 +140,24 @@ def create_oauth_error_html(title: str, message: str, details: str = None) -> st
     """
 
 
-def create_oauth_success_html(account: Account, conversations_synced: int = 0) -> str:
+def create_oauth_success_html(
+    account: Account,
+    conversations_synced: int = 0,
+    redirect_url: Optional[str] = None
+) -> str:
     """
     Create a consistent HTML success page for OAuth completion.
 
     Args:
         account: The linked Instagram account
         conversations_synced: Number of conversations synced from Instagram (0 if not synced)
+        redirect_url: Where to redirect after success (defaults to settings.frontend_url)
 
     Returns:
         HTML string for success page
     """
+    # Use provided redirect URL or default to settings
+    final_redirect_url = redirect_url or settings.frontend_url
     sync_info = ""
     if conversations_synced > 0:
         sync_info = f"""
@@ -229,7 +237,7 @@ def create_oauth_success_html(account: Account, conversations_synced: int = 0) -
                     localStorage.removeItem('session_expires_at');
 
                     // Redirect to frontend chat
-                    window.location.href = '{settings.frontend_url}';
+                    window.location.href = '{final_redirect_url}';
                 }}
 
                 // Auto-refresh after 3 seconds
@@ -264,6 +272,11 @@ def create_oauth_success_html(account: Account, conversations_synced: int = 0) -
 class OAuthInitRequest(BaseModel):
     """Request body for OAuth initialization"""
     force_reauth: bool = False
+    frontend_origin: Optional[str] = Field(
+        None,
+        description="Frontend URL to redirect to after OAuth completes (e.g., http://localhost:5173 for local dev)",
+        example="http://localhost:5173"
+    )
 
 
 @router.post(
@@ -371,7 +384,7 @@ async def init_instagram_oauth(
     service = AccountLinkingService(db)
     auth_url, expires_at = await service.initialize_oauth(
         user_id=user.id,
-        redirect_uri=settings.instagram_oauth_redirect_uri,
+        frontend_redirect_url=request.frontend_origin,  # For redirecting back to local dev
         force_reauth=request.force_reauth
     )
 
@@ -494,7 +507,8 @@ async def instagram_oauth_callback(
         return HTMLResponse(
             content=create_oauth_success_html(
                 account=result.account,
-                conversations_synced=result.conversations_synced
+                conversations_synced=result.conversations_synced,
+                redirect_url=result.redirect_url
             ),
             status_code=200
         )
