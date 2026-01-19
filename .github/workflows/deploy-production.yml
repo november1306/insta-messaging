@@ -84,9 +84,9 @@ jobs:
             JWT_ALGORITHM=HS256
             JWT_EXPIRATION_HOURS=24
 
-            # Ngrok Configuration (REQUIRED until you have a real domain with SSL)
-            # Instagram webhooks need HTTPS, ngrok provides this for test VPS
-            # Remove this once you deploy to a real domain with Let's Encrypt SSL
+            # Ngrok Configuration (optional - for manual debugging only)
+            # Production uses domain SSL via Let's Encrypt, ngrok not auto-started
+            # To use ngrok manually: ngrok http 8000
             NGROK_AUTHTOKEN=${{ secrets.NGROK_AUTHTOKEN }}
             ENVEOF"
 
@@ -206,22 +206,23 @@ jobs:
                 fi
               fi
 
-              # Install/configure ngrok (needed for Instagram webhooks until real domain)
-              echo "🌐 Configuring ngrok..."
+              # Install/configure ngrok (kept available for manual use if needed)
+              # NOTE: ngrok is no longer auto-started - using production domain for webhooks
+              echo "🌐 Checking ngrok installation (not starting - using production webhook URL)..."
               if ! command -v ngrok &> /dev/null; then
-                echo "Installing ngrok..."
+                echo "Installing ngrok (for manual use if needed)..."
                 cd /tmp
                 wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
                 tar xzf ngrok-v3-stable-linux-amd64.tgz
                 sudo mv ngrok /usr/local/bin/
                 sudo chmod +x /usr/local/bin/ngrok
-                echo "✅ ngrok installed"
+                echo "✅ ngrok installed (available for manual use)"
               fi
 
-              # Configure ngrok auth token
+              # Configure ngrok auth token (for manual use)
               if [ ! -z "${{ secrets.NGROK_AUTHTOKEN }}" ]; then
                 sudo -u insta-messaging ngrok config add-authtoken ${{ secrets.NGROK_AUTHTOKEN }} --config=/opt/insta-messaging/.ngrok.yml
-                echo "✅ ngrok configured"
+                echo "✅ ngrok configured (not started - use 'ngrok http 8000' manually if needed)"
               fi
 
               # Restart services
@@ -229,18 +230,10 @@ jobs:
               sudo systemctl restart insta-messaging
               sudo systemctl restart nginx
 
-              # Start/restart ngrok if configured
-              if [ ! -z "${{ secrets.NGROK_AUTHTOKEN }}" ]; then
-                # Kill existing ngrok processes
-                sudo pkill ngrok || true
-                sleep 2
-                # Start ngrok in background
-                sudo -u insta-messaging nohup ngrok http --config=/opt/insta-messaging/.ngrok.yml 8000 > /opt/insta-messaging/ngrok.log 2>&1 &
-                sleep 3
-                echo "✅ ngrok started"
-                # Show ngrok URL
-                curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"https://[^"]*' | cut -d'"' -f4 || echo "ngrok URL will be available at http://localhost:4040"
-              fi
+              # ngrok is NOT started automatically - production uses domain webhook URL
+              # To start ngrok manually on VPS if needed:
+              #   sudo -u insta-messaging ngrok http --config=/opt/insta-messaging/.ngrok.yml 8000
+              echo "ℹ️  ngrok not started (production uses https://$DOMAIN_NAME/webhooks/instagram)"
 
               # Wait for service to start
               sleep 3
@@ -309,9 +302,9 @@ jobs:
             JWT_ALGORITHM=HS256
             JWT_EXPIRATION_HOURS=24
 
-            # Ngrok Configuration (REQUIRED until you have a real domain with SSL)
-            # Instagram webhooks need HTTPS, ngrok provides this for test VPS
-            # Remove this once you deploy to a real domain with Let's Encrypt SSL
+            # Ngrok Configuration (optional - for manual debugging only)
+            # Production uses domain SSL via Let's Encrypt, ngrok not auto-started
+            # To use ngrok manually: ngrok http 8000
             NGROK_AUTHTOKEN=${{ secrets.NGROK_AUTHTOKEN }}
             ENVEOF"
 
@@ -329,29 +322,25 @@ jobs:
               fi
               sudo -E bash /opt/insta-messaging/scripts/linux/provision-vps.sh
 
-              # Install/configure ngrok after deployment (needed for Instagram webhooks)
-              echo "🌐 Configuring ngrok..."
+              # Install/configure ngrok (kept available for manual use if needed)
+              # NOTE: ngrok is no longer auto-started - using production domain for webhooks
+              echo "🌐 Checking ngrok installation (not starting - using production webhook URL)..."
               if ! command -v ngrok &> /dev/null; then
-                echo "Installing ngrok..."
+                echo "Installing ngrok (for manual use if needed)..."
                 cd /tmp
                 wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
                 tar xzf ngrok-v3-stable-linux-amd64.tgz
                 sudo mv ngrok /usr/local/bin/
                 sudo chmod +x /usr/local/bin/ngrok
-                echo "✅ ngrok installed"
+                echo "✅ ngrok installed (available for manual use)"
               fi
 
-              # Configure ngrok auth token
+              # Configure ngrok auth token (for manual use)
               if [ ! -z "${{ secrets.NGROK_AUTHTOKEN }}" ]; then
                 sudo -u insta-messaging ngrok config add-authtoken ${{ secrets.NGROK_AUTHTOKEN }} --config=/opt/insta-messaging/.ngrok.yml
-                echo "✅ ngrok configured"
-                # Start ngrok in background
-                sudo -u insta-messaging nohup ngrok http --config=/opt/insta-messaging/.ngrok.yml 8000 > /opt/insta-messaging/ngrok.log 2>&1 &
-                sleep 3
-                echo "✅ ngrok started"
-                # Show ngrok URL
-                curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"https://[^"]*' | cut -d'"' -f4 || echo "ngrok URL will be available at http://localhost:4040"
+                echo "✅ ngrok configured (not started - use 'ngrok http 8000' manually if needed)"
               fi
+              # ngrok is NOT started automatically - production uses domain webhook URL
             fi
 
             echo ""
@@ -370,16 +359,15 @@ jobs:
             echo ""
             echo "📍 Access URLs:"
             echo "  - Direct IP: http://${{ secrets.VPS_HOST }}:8000"
-            if [ ! -z "${{ secrets.NGROK_AUTHTOKEN }}" ]; then
-              echo "  - ngrok HTTPS (for Instagram): Check http://localhost:4040 or logs above"
-              NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"https://[^"]*' | head -1 | cut -d'"' -f4)
-              if [ ! -z "$NGROK_URL" ]; then
-                echo "  - ngrok URL: $NGROK_URL"
-                echo ""
-                echo "⚠️  IMPORTANT: Use this ngrok URL for Instagram webhook configuration:"
-                echo "     $NGROK_URL/webhooks/instagram"
-              fi
+            if [ "$DOMAIN_NAME" != "_" ]; then
+              echo "  - Production: https://$DOMAIN_NAME"
+              echo "  - Frontend: https://$DOMAIN_NAME/chat/"
+              echo "  - API Docs: https://$DOMAIN_NAME/docs"
+              echo ""
+              echo "📌 Instagram Webhook URL:"
+              echo "     https://$DOMAIN_NAME/webhooks/instagram"
             fi
+            # ngrok available for manual use: ngrok http 8000
 
       - name: 🔔 Deployment Success
         if: success()

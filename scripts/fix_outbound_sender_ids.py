@@ -120,9 +120,13 @@ async def fix_outbound_sender_ids(
     logger.info(f"Loaded {len(accounts)} accounts for lookup")
 
     # Process messages in batches
-    offset = 0
+    # NOTE: We always query with offset=0 because after each commit,
+    # fixed messages no longer match the filter (sender_id no longer starts with 'acc_')
+    # This avoids the pagination-while-mutating bug where offset would skip records
+    batch_num = 0
     while True:
-        # Fetch batch of buggy outbound messages
+        batch_num += 1
+        # Fetch batch of buggy outbound messages (always offset=0)
         stmt = (
             select(MessageModel)
             .where(
@@ -130,7 +134,6 @@ async def fix_outbound_sender_ids(
                 MessageModel.sender_id.like('acc_%')
             )
             .limit(batch_size)
-            .offset(offset)
         )
         result = await db.execute(stmt)
         messages = result.scalars().all()
@@ -138,8 +141,9 @@ async def fix_outbound_sender_ids(
         if not messages:
             break  # No more messages to process
 
-        logger.info(f"Processing batch: offset={offset}, size={len(messages)}")
+        logger.info(f"Processing batch {batch_num}: size={len(messages)}")
 
+        batch_fixed = 0
         for msg in messages:
             old_sender_id = msg.sender_id  # Database ID (acc_xxx)
 
@@ -161,9 +165,11 @@ async def fix_outbound_sender_ids(
                     f"[DRY RUN] Would fix message {msg.id}: "
                     f"{old_sender_id} → {instagram_account_id}"
                 )
+                batch_fixed += 1
             else:
                 msg.sender_id = instagram_account_id
                 stats.fixed += 1
+                batch_fixed += 1
 
                 if stats.fixed % 100 == 0:
                     logger.info(f"  Fixed {stats.fixed} messages...")
@@ -171,9 +177,18 @@ async def fix_outbound_sender_ids(
         # Commit batch
         if not dry_run:
             await db.commit()
-            logger.info(f"✅ Committed batch of {len(messages)} messages")
+            logger.info(f"✅ Committed batch {batch_num}: {batch_fixed} messages fixed")
 
-        offset += batch_size
+        # In dry-run mode, we need to break after first batch to avoid infinite loop
+        # (since we're not actually modifying records, the same records would be returned)
+        if dry_run:
+            if len(messages) < batch_size:
+                break  # Last batch
+            logger.info(f"[DRY RUN] Continuing to next batch...")
+            # For dry-run, we need to track which we've seen to avoid infinite loop
+            # Simplest fix: just process all in one go for dry-run
+            logger.info("[DRY RUN] Note: dry-run shows first batch only. Run without --dry-run to fix all.")
+            break
 
     return stats
 
@@ -267,11 +282,10 @@ async def main():
                     sys.exit(1)
             else:
                 logger.info("\n[DRY RUN] No changes were made.")
-                if stats.account_not_found > 0:
-                    logger.warning(
-                        f"\n⚠️  Warning: {stats.account_not_found} messages reference "
-                        f"deleted accounts. These messages won't be fixed."
-                    )
+                logger.info(
+                    f"Run without --dry-run to fix {stats.buggy_sender_ids} messages "
+                    f"({stats.account_not_found} may fail due to missing accounts)."
+                )
                 sys.exit(0)
 
 
