@@ -335,16 +335,18 @@ fi
 
 echo -e "${GREEN}[11/13] Configuring Nginx reverse proxy...${NC}"
 
-# Run nginx configuration script
+# Run nginx configuration script with optional domain name
+# Domain can be passed via DOMAIN_NAME environment variable
 chmod +x ${INSTALL_DIR}/scripts/linux/configure-nginx.sh
-bash ${INSTALL_DIR}/scripts/linux/configure-nginx.sh ${APP_NAME} ${INSTALL_DIR}
+DOMAIN_ARG="${DOMAIN_NAME:-_}"
+bash ${INSTALL_DIR}/scripts/linux/configure-nginx.sh ${APP_NAME} ${INSTALL_DIR} "${DOMAIN_ARG}"
 
-echo -e "${GREEN}[12/13] Configuring firewall (UFW)...${NC}"
+echo -e "${GREEN}[12/14] Configuring firewall (UFW)...${NC}"
 # Allow SSH, HTTP, HTTPS
 ufw --force disable
 ufw allow 22/tcp comment 'SSH'
 ufw allow 80/tcp comment 'HTTP'
-ufw allow 443/tcp comment 'HTTPS (future SSL)'
+ufw allow 443/tcp comment 'HTTPS'
 
 # Set default policies
 ufw default deny incoming
@@ -353,7 +355,49 @@ ufw default allow outgoing
 # Enable firewall
 echo "y" | ufw enable
 
-echo -e "${GREEN}[13/13] Starting services...${NC}"
+echo -e "${GREEN}[13/14] Configuring SSL (Let's Encrypt)...${NC}"
+# Set up SSL if domain is configured
+if [ -n "${DOMAIN_NAME}" ] && [ "${DOMAIN_NAME}" != "_" ]; then
+    echo "Domain configured: ${DOMAIN_NAME}"
+
+    # Validate DNS points to this VPS before attempting SSL
+    VPS_IP=$(curl -s ifconfig.me)
+    DOMAIN_IP=$(dig +short "${DOMAIN_NAME}" A | head -1)
+
+    if [ -z "$DOMAIN_IP" ]; then
+        echo -e "${YELLOW}⚠️ DNS not configured: ${DOMAIN_NAME} has no A record${NC}"
+        echo "   Skipping SSL setup - configure DNS and run certbot manually:"
+        echo "   certbot --nginx -d ${DOMAIN_NAME}"
+    elif [ "$DOMAIN_IP" != "$VPS_IP" ]; then
+        echo -e "${YELLOW}⚠️ DNS mismatch: ${DOMAIN_NAME} → $DOMAIN_IP (expected $VPS_IP)${NC}"
+        echo "   Skipping SSL setup - fix DNS or wait for propagation, then run:"
+        echo "   certbot --nginx -d ${DOMAIN_NAME}"
+    else
+        echo "✅ DNS validated: ${DOMAIN_NAME} → $VPS_IP"
+
+        # Install certbot if not present
+        if ! command -v certbot &> /dev/null; then
+            echo "Installing certbot..."
+            apt-get install -y -qq certbot python3-certbot-nginx
+        fi
+
+        # Obtain SSL certificate
+        if [ -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem" ]; then
+            echo "SSL certificate already exists for ${DOMAIN_NAME}"
+        else
+            echo "Obtaining SSL certificate for ${DOMAIN_NAME}..."
+            certbot --nginx -d "${DOMAIN_NAME}" --non-interactive --agree-tos --register-unsafely-without-email || {
+                echo -e "${YELLOW}⚠️ SSL setup failed - you can run certbot manually later${NC}"
+                echo "  Command: certbot --nginx -d ${DOMAIN_NAME}"
+            }
+        fi
+    fi
+else
+    echo "No domain configured - skipping SSL setup"
+    echo "  To enable SSL later, set DOMAIN_NAME and run: certbot --nginx -d your-domain.com"
+fi
+
+echo -e "${GREEN}[14/14] Starting services...${NC}"
 
 # Start nginx
 systemctl restart nginx

@@ -124,7 +124,12 @@ class Settings:
         self.public_base_url = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
 
         # Frontend URL for OAuth redirects
-        self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+        # Production: derived from PUBLIC_BASE_URL (frontend served at /chat/)
+        # Development: separate Vite dev server on port 5173
+        if self.environment == "production":
+            self.frontend_url = self.public_base_url.rstrip('/') + "/chat/"
+        else:
+            self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
         # Media directory for attachments and outbound files
         self.MEDIA_DIR = os.getenv("MEDIA_DIR", "media")

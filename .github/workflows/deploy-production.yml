@@ -64,11 +64,9 @@ jobs:
             # Database Configuration
             DATABASE_URL=sqlite+aiosqlite:////opt/insta-messaging/data/production.db
 
-            # Public Base URL (required for outbound media attachments)
+            # Public Base URL (required for outbound media attachments and OAuth redirects)
+            # Frontend URL is derived automatically: PUBLIC_BASE_URL + "/chat/"
             PUBLIC_BASE_URL=${{ secrets.PUBLIC_BASE_URL || 'http://185.156.43.172' }}
-
-            # Frontend URL (for OAuth redirects)
-            FRONTEND_URL=${{ secrets.FRONTEND_URL || 'http://185.156.43.172/chat/' }}
 
             # CRM MySQL Configuration (optional)
             CRM_MYSQL_ENABLED=${{ secrets.CRM_MYSQL_ENABLED || 'false' }}
@@ -164,7 +162,45 @@ jobs:
               # Update nginx configuration using dedicated script
               echo "🔧 Updating nginx configuration..."
               sudo chmod +x /opt/insta-messaging/scripts/linux/configure-nginx.sh
-              sudo bash /opt/insta-messaging/scripts/linux/configure-nginx.sh insta-messaging /opt/insta-messaging
+              DOMAIN_NAME="${{ secrets.DOMAIN_NAME }}"
+              if [ -z "$DOMAIN_NAME" ]; then
+                DOMAIN_NAME="_"
+              fi
+              sudo bash /opt/insta-messaging/scripts/linux/configure-nginx.sh insta-messaging /opt/insta-messaging "$DOMAIN_NAME"
+
+              # Configure SSL with Let's Encrypt if domain is set
+              if [ "$DOMAIN_NAME" != "_" ]; then
+                echo "🔒 Configuring SSL for $DOMAIN_NAME..."
+
+                # Validate DNS points to this VPS before attempting SSL
+                VPS_IP=$(curl -s ifconfig.me)
+                DOMAIN_IP=$(dig +short "$DOMAIN_NAME" A | head -1)
+
+                if [ -z "$DOMAIN_IP" ]; then
+                  echo "⚠️ DNS not configured: $DOMAIN_NAME has no A record"
+                  echo "   Skipping SSL setup - configure DNS and run certbot manually"
+                elif [ "$DOMAIN_IP" != "$VPS_IP" ]; then
+                  echo "⚠️ DNS mismatch: $DOMAIN_NAME → $DOMAIN_IP (expected $VPS_IP)"
+                  echo "   Skipping SSL setup - fix DNS or wait for propagation"
+                else
+                  echo "✅ DNS validated: $DOMAIN_NAME → $VPS_IP"
+
+                  # Install certbot if not present
+                  if ! command -v certbot &> /dev/null; then
+                    echo "Installing certbot..."
+                    apt-get update -qq
+                    apt-get install -y -qq certbot python3-certbot-nginx
+                  fi
+
+                  # Check if certificate already exists
+                  if [ -f "/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem" ]; then
+                    echo "✅ SSL certificate already exists for $DOMAIN_NAME"
+                  else
+                    echo "Obtaining SSL certificate..."
+                    certbot --nginx -d "$DOMAIN_NAME" --non-interactive --agree-tos --register-unsafely-without-email || echo "⚠️ SSL setup failed - continuing without SSL"
+                  fi
+                fi
+              fi
 
               # Install/configure ngrok (needed for Instagram webhooks until real domain)
               echo "🌐 Configuring ngrok..."
@@ -249,11 +285,9 @@ jobs:
             # Database Configuration
             DATABASE_URL=sqlite+aiosqlite:////opt/insta-messaging/data/production.db
 
-            # Public Base URL (required for outbound media attachments)
+            # Public Base URL (required for outbound media attachments and OAuth redirects)
+            # Frontend URL is derived automatically: PUBLIC_BASE_URL + "/chat/"
             PUBLIC_BASE_URL=${{ secrets.PUBLIC_BASE_URL || 'http://185.156.43.172' }}
-
-            # Frontend URL (for OAuth redirects)
-            FRONTEND_URL=${{ secrets.FRONTEND_URL || 'http://185.156.43.172/chat/' }}
 
             # CRM MySQL Configuration (optional)
             CRM_MYSQL_ENABLED=${{ secrets.CRM_MYSQL_ENABLED || 'false' }}
@@ -278,9 +312,10 @@ jobs:
 
               sudo chmod 600 /opt/insta-messaging/.env
 
-              # Run full VPS provisioning script with admin password
+              # Run full VPS provisioning script with admin password and domain
               echo "🔧 Running VPS provisioning script (first-time setup)..."
               export ADMIN_PASSWORD="${{ secrets.ADMIN_PASSWORD }}"
+              export DOMAIN_NAME="${{ secrets.DOMAIN_NAME }}"
               sudo -E bash /opt/insta-messaging/scripts/linux/provision-vps.sh
 
               # Install/configure ngrok after deployment (needed for Instagram webhooks)
