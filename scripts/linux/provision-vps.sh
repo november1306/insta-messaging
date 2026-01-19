@@ -384,6 +384,10 @@ if [ -n "${DOMAIN_NAME}" ] && [ "${DOMAIN_NAME}" != "_" ]; then
         # Obtain SSL certificate
         if [ -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem" ]; then
             echo "SSL certificate already exists for ${DOMAIN_NAME}"
+            echo "Re-applying SSL config to nginx..."
+            certbot --nginx -d "${DOMAIN_NAME}" --reinstall --non-interactive || {
+                echo -e "${YELLOW}⚠️ SSL reinstall failed${NC}"
+            }
         else
             echo "Obtaining SSL certificate for ${DOMAIN_NAME}..."
             certbot --nginx -d "${DOMAIN_NAME}" --non-interactive --agree-tos --register-unsafely-without-email || {
