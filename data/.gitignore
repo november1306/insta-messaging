@@ -1,0 +1,9 @@
+# Ignore all database files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Keep this .gitignore and README
+!.gitignore
+!README.md

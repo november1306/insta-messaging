@@ -228,6 +228,8 @@ __marimo__/
 .claude/*.local.json
 .claude/skills/
 .claude/CLAUDE.md
+.claude/BUSINESS_PLAN.md
+.claude/ISSUES_TO_FIX.md
 
 # Security - Sensitive files that should never be committed
 # Private keys and certificates
