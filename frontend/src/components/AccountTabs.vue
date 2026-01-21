@@ -363,21 +363,20 @@ async function handleDeleteAccount() {
       }
     )
 
-    if (response.status === 409) {
-      // Multi-user conflict
-      deleteError.value = 'Cannot delete: Other users have this account linked. They must unlink it first.'
-      accountToDelete.value = null
-      return
-    }
-
     if (!response.ok) {
       throw new Error(`Delete failed: ${response.status}`)
     }
 
     const result = await response.json()
 
-    // Show success message with statistics
-    deleteSuccess.value = `Account deleted. ${result.statistics.messages_deleted} messages and ${result.statistics.attachments_deleted} attachments removed.`
+    // Show success message - differentiate unlink vs full delete based on statistics
+    if (result.statistics.messages_deleted === 0 && result.statistics.attachments_deleted === 0) {
+      // Was unlinked (other users still have access)
+      deleteSuccess.value = 'Account unlinked. Data preserved for other users.'
+    } else {
+      // Was fully deleted
+      deleteSuccess.value = `Account deleted. ${result.statistics.messages_deleted} messages and ${result.statistics.attachments_deleted} attachments removed.`
+    }
 
     // Close modal
     accountToDelete.value = null

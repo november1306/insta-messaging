@@ -386,16 +386,6 @@ async def unlink_account(
         401: {"description": "Not authenticated"},
         403: {"description": "User doesn't have access to this account"},
         404: {"description": "Account not found"},
-        409: {
-            "description": "Conflict - Account linked to multiple users",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "Cannot delete account linked to 3 users. Other users must unlink this account before it can be deleted."
-                    }
-                }
-            }
-        },
         500: {"description": "Server error during deletion"}
     }
 )
@@ -421,11 +411,11 @@ async def delete_account_permanently(
     - ✅ User-account links
     - ✅ Instagram profile cache (only profiles unique to this account)
 
-    ## Multi-User Safety
+    ## Multi-User Behavior
 
-    - **Returns 409 Conflict** if other users have this account linked
-    - **Only single-user accounts** can be permanently deleted
-    - **Other users must unlink first** before permanent deletion
+    - **If other users have this account linked**: Your access is removed (unlink),
+      but data is preserved for other users. Returns success with zero statistics.
+    - **If you're the only user**: Account and all data are permanently deleted.
 
     ## Unlink vs Delete Permanently
 
@@ -515,15 +505,41 @@ async def delete_account_permanently(
     user_count = result.scalar()
 
     if user_count > 1:
-        logger.warning(
-            f"User {user_id} attempted to delete multi-user account {account_id} "
-            f"({user_count} users linked)"
+        # Multiple users have this account - unlink current user instead of blocking
+        logger.info(
+            f"User {user_id} requested delete of multi-user account {account_id} "
+            f"({user_count} users linked) - unlinking instead"
         )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Cannot delete account linked to {user_count} users. "
-                "Other users must unlink this account before it can be deleted."
+
+        was_primary = link.is_primary
+
+        # Delete the user's link to this account
+        await db.delete(link)
+        await db.commit()
+
+        # If this was primary, set another account as primary
+        if was_primary:
+            result = await db.execute(
+                select(UserAccount)
+                .where(UserAccount.user_id == user_id)
+                .limit(1)
+            )
+            next_account = result.scalar_one_or_none()
+
+            if next_account:
+                next_account.is_primary = True
+                await db.commit()
+                logger.info(f"Set account {next_account.account_id} as new primary for user {user_id}")
+
+        return DeleteAccountResponse(
+            message="Account unlinked (other users have access, data preserved)",
+            deleted_account_id=account_id,
+            statistics=DeletionStatistics(
+                messages_deleted=0,
+                attachments_deleted=0,
+                inbound_files_deleted=0,
+                outbound_files_deleted=0,
+                bytes_freed=0
             )
         )
 
