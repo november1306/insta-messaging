@@ -231,8 +231,8 @@ def create_oauth_success_html(
             </style>
             <script>
                 function refreshSession() {{
-                    // Clear old session from localStorage
-                    localStorage.removeItem('session_token');
+                    // Clear account-specific data to force refresh of account list
+                    // Keep session_token to preserve JWT authentication
                     localStorage.removeItem('session_account_id');
                     localStorage.removeItem('session_expires_at');
 

@@ -9,6 +9,7 @@ from typing import Optional
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import asyncio
 import httpx
 import logging
 import uuid
@@ -101,9 +102,10 @@ class AccountLinkingService:
             "state": state
         }
 
-        # Add force_reauth if requested (for linking multiple accounts)
+        # Add auth_type=rerequest if requested (for linking multiple accounts)
+        # This is more reliably honored by Instagram than force_reauth=true
         if force_reauth:
-            params["force_reauth"] = "true"
+            params["auth_type"] = "rerequest"
 
         query_string = urlencode(params)
         auth_url = f"https://www.instagram.com/oauth/authorize?{query_string}"
@@ -368,6 +370,48 @@ class AccountLinkingService:
 
         logger.info(f"Linked account {account_id} to user {user_id} (primary: {not has_primary})")
 
+    async def _fetch_conversations_with_retry(
+        self,
+        instagram_client: InstagramClient,
+        max_retries: int = 2
+    ) -> list[dict]:
+        """
+        Fetch conversations with retry logic for transient API failures.
+
+        Instagram API occasionally returns 500 errors, especially for newly linked accounts.
+        This method retries with exponential backoff to handle transient failures gracefully.
+
+        Returns:
+            List of conversations (empty list if API fails after all retries)
+        """
+        for attempt in range(max_retries + 1):
+            try:
+                conversations = await instagram_client.get_conversations(
+                    limit=50,
+                    include_messages=False
+                )
+                if conversations is not None:
+                    return conversations
+                # API returned None (error response) - treat as retryable
+                raise Exception("Instagram API returned error response")
+            except Exception as e:
+                is_last_attempt = attempt >= max_retries
+                if is_last_attempt:
+                    logger.warning(
+                        f"⚠️ Conversation fetch failed after {max_retries + 1} attempts: {e}. "
+                        "Sync will be attempted on next inbound message."
+                    )
+                    return []
+
+                delay = attempt + 1  # 1s, 2s
+                logger.warning(
+                    f"⚠️ Conversation fetch attempt {attempt + 1}/{max_retries + 1} failed, "
+                    f"retrying in {delay}s: {e}"
+                )
+                await asyncio.sleep(delay)
+
+        return []  # Unreachable, but satisfies type checker
+
     async def _sync_conversation_history(
         self,
         instagram_client: InstagramClient,
@@ -386,13 +430,10 @@ class AccountLinkingService:
         try:
             # PHASE 1: Fast fetch - get conversation list without nested messages
             logger.info("📥 Phase 1: Fetching conversation list (fast)...")
-            conversations = await instagram_client.get_conversations(
-                limit=50,
-                include_messages=False  # Skip nested messages for speed
-            )
+            conversations = await self._fetch_conversations_with_retry(instagram_client)
 
             if not conversations:
-                logger.info("No conversations returned from Instagram API (may not be supported)")
+                logger.info("No conversations to sync")
                 return 0
 
             # Filter to last 24 hours (Instagram's messaging window)
