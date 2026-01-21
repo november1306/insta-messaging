@@ -73,6 +73,7 @@
               :src="getProxiedImageUrl(account.profile_picture_url)"
               :alt="account.username"
               class="w-8 h-8 rounded-full object-cover"
+              @error="account.profile_picture_url = null"
             />
             <div
               v-else

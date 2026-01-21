@@ -56,6 +56,7 @@
             :src="getProxiedImageUrl(conversation.profile_picture_url)"
             :alt="conversation.sender_name"
             class="w-14 h-14 rounded-full object-cover"
+            @error="conversation.profile_picture_url = null"
           />
           <div
             v-else

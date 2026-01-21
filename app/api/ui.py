@@ -11,7 +11,7 @@ Refactored to use centralized cache service.
 import logging
 import httpx
 import jwt
-from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, status, Query, BackgroundTasks
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_, and_, case
@@ -24,12 +24,89 @@ from app.config import settings
 from app.api.auth import verify_api_key, verify_ui_session, verify_jwt_or_api_key, LoginRequest
 from app.services.user_service import UserService
 from app.infrastructure.cache_service import get_cached_username
+from app.api.events import sse_manager
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# ============================================
+# Background Tasks
+# ============================================
+
+async def refresh_user_profile_pictures(user_id: int):
+    """
+    Background task to refresh profile pictures for all user's Instagram accounts.
+
+    Fetches fresh profile picture URLs from Instagram API and broadcasts updates via SSE.
+    Called asynchronously after successful login to ensure profile pics are current.
+    """
+    from app.db.connection import get_db_session_context
+    from app.services.encryption_service import decrypt_credential
+
+    async with get_db_session_context() as db:
+        # Get all accounts linked to this user
+        result = await db.execute(
+            select(UserAccount, Account).join(
+                Account, UserAccount.account_id == Account.id
+            ).where(UserAccount.user_id == user_id)
+        )
+        user_accounts = result.all()
+
+        if not user_accounts:
+            logger.debug(f"No accounts to refresh for user {user_id}")
+            return
+
+        logger.info(f"Refreshing profile pictures for {len(user_accounts)} accounts (user_id={user_id})")
+
+        for user_account, account in user_accounts:
+            try:
+                # Skip if no access token
+                if not account.access_token_encrypted:
+                    logger.debug(f"Account {account.id} has no access token, skipping profile refresh")
+                    continue
+
+                # Decrypt access token
+                access_token = decrypt_credential(
+                    account.access_token_encrypted,
+                    settings.session_secret
+                )
+
+                # Create Instagram client and fetch fresh profile
+                async with httpx.AsyncClient() as http_client:
+                    instagram_client = InstagramClient(http_client, access_token)
+                    fresh_profile = await instagram_client.get_business_account_profile(
+                        account.instagram_account_id
+                    )
+
+                if fresh_profile and fresh_profile.get("profile_picture_url"):
+                    old_url = account.profile_picture_url
+                    new_url = fresh_profile["profile_picture_url"]
+
+                    # Only update if URL changed
+                    if old_url != new_url:
+                        account.profile_picture_url = new_url
+                        await db.commit()
+
+                        logger.info(f"Updated profile picture for account {account.id} (@{account.username})")
+
+                        # Broadcast update via SSE
+                        await sse_manager.broadcast("account_updated", {
+                            "account_id": account.id,
+                            "profile_picture_url": new_url,
+                            "username": account.username
+                        })
+                    else:
+                        logger.debug(f"Profile picture unchanged for account {account.id}")
+                else:
+                    logger.debug(f"No profile picture in API response for account {account.id}")
+
+            except Exception as e:
+                logger.warning(f"Failed to refresh profile for account {account.id}: {e}")
+                # Continue with other accounts
 
 
 # ============================================
@@ -162,6 +239,7 @@ class MessagesResponse(BaseModel):
 )
 async def create_session(
     request: LoginRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -256,6 +334,10 @@ async def create_session(
     )
 
     logger.info(f"Created UI session for user '{user.username}' (id={user.id}, primary_account={primary_account_id})")
+
+    # Trigger async profile picture refresh in background
+    # This ensures profile pics are fresh without delaying login response
+    background_tasks.add_task(refresh_user_profile_pictures, user.id)
 
     return SessionResponse(
         token=token,
@@ -942,12 +1024,15 @@ async def proxy_instagram_image(
                 )
 
             # Return image with caching headers
+            # Note: Referrer-Policy and X-Content-Type-Options help Firefox compatibility
             return Response(
                 content=response.content,
                 media_type=response.headers.get("content-type", "image/jpeg"),
                 headers={
                     "Cache-Control": "public, max-age=86400",  # Cache for 24 hours
                     "Access-Control-Allow-Origin": "*",  # Allow CORS
+                    "Referrer-Policy": "no-referrer",  # Prevent referrer leaking to CDN
+                    "X-Content-Type-Options": "nosniff",  # Security header
                 }
             )
 
