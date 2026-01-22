@@ -102,10 +102,10 @@ class AccountLinkingService:
             "state": state
         }
 
-        # Add auth_type=rerequest if requested (for linking multiple accounts)
-        # This is more reliably honored by Instagram than force_reauth=true
+        # Add force_reauth=true if requested (for linking multiple accounts)
+        # This is the parameter Meta uses in their own embed URLs
         if force_reauth:
-            params["auth_type"] = "rerequest"
+            params["force_reauth"] = "true"
 
         query_string = urlencode(params)
         auth_url = f"https://www.instagram.com/oauth/authorize?{query_string}"
