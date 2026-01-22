@@ -304,7 +304,7 @@ function selectAccount(account) {
 
 function openOAuthModal() {
   oauthError.value = null
-  forceReauth.value = false
+  forceReauth.value = true  // Default to true to prevent OAuth caching issues
   showOAuthModal.value = true
 }
 
