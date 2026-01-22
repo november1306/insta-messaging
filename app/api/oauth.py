@@ -231,10 +231,9 @@ def create_oauth_success_html(
             </style>
             <script>
                 function refreshSession() {{
-                    // Clear account-specific data to force refresh of account list
-                    // Keep session_token to preserve JWT authentication
+                    // Clear only account-specific data to force refresh of account list
+                    // DO NOT remove session_token or session_expires_at - needed for authentication!
                     localStorage.removeItem('session_account_id');
-                    localStorage.removeItem('session_expires_at');
 
                     // Redirect to frontend chat
                     window.location.href = '{final_redirect_url}';

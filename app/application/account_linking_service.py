@@ -102,8 +102,9 @@ class AccountLinkingService:
             "state": state
         }
 
-        # Add force_reauth=true if requested (for linking multiple accounts)
-        # This is the parameter Meta uses in their own embed URLs
+        # ⚠️ DO NOT CHANGE THIS - force_reauth=true is the correct Instagram OAuth parameter
+        # Meta uses this exact parameter in their own Developer Dashboard embed URLs
+        # Do NOT use auth_type=rerequest (that's Facebook-only, for re-requesting declined permissions)
         if force_reauth:
             params["force_reauth"] = "true"
 
