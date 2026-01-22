@@ -313,16 +313,15 @@ class AccountLinkingService:
             account.token_expires_at = token_expires_at
             account.profile_picture_url = profile_picture_url
             account.account_type = account_type
-            # Set messaging_channel_id if not already set (backfill for OAuth-only accounts)
-            if not account.messaging_channel_id:
-                account.messaging_channel_id = instagram_account_id
+            # Note: Do NOT set messaging_channel_id here - let webhook binding set the correct value
+            # The instagram_account_id (from OAuth) can differ from messaging_channel_id (from webhooks)
             logger.info(f"Updated existing account: {account.id}")
         else:
             # Create new account
             account = Account(
                 id=f"acc_{uuid.uuid4().hex[:12]}",
                 instagram_account_id=instagram_account_id,
-                messaging_channel_id=instagram_account_id,  # Initialize with OAuth profile ID
+                messaging_channel_id=None,  # Let webhook binding or conversation sync set the correct value
                 username=username,
                 access_token_encrypted=self.encryption.encrypt(access_token),
                 token_expires_at=token_expires_at,
@@ -510,12 +509,16 @@ class AccountLinkingService:
                     business_participant_id = participant1_id
                     customer_id = participant2_id
 
-                # Update messaging_channel_id if we detected a different business ID
-                # This handles the case where Instagram uses different IDs for OAuth vs messaging
-                if business_participant_id != account.messaging_channel_id:
-                    logger.info(f"📝 Updating messaging_channel_id from {account.messaging_channel_id} to {business_participant_id}")
+                # Update messaging_channel_id only if:
+                # 1. It's currently NULL (not yet set), AND
+                # 2. The detected ID is DIFFERENT from instagram_account_id (proof it's the actual channel ID)
+                # If detected ID == instagram_account_id, we can't be sure - let webhook binding confirm it
+                if not account.messaging_channel_id and business_participant_id != account.instagram_account_id:
+                    logger.info(f"📝 Setting messaging_channel_id to {business_participant_id} (different from instagram_account_id)")
                     account.messaging_channel_id = business_participant_id
                     # Note: Will be committed by parent transaction
+                elif not account.messaging_channel_id:
+                    logger.info(f"📝 Detected business ID {business_participant_id} matches instagram_account_id, leaving messaging_channel_id NULL for webhook binding")
 
                 if not customer_id:
                     logger.warning(f"⚠️ Could not identify customer in conversation {conv.get('id')[:20]}")
