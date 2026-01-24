@@ -668,7 +668,7 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
         # Skip echo messages (messages we sent that Instagram echoes back)
         # Instagram sends these with is_echo: true to confirm delivery
         if message.get("is_echo"):
-            logger.debug(f"Skipping echo message: {message.get('mid')}")
+            logger.info(f"ℹ️ Skipping echo message (outbound confirmation): mid={message.get('mid')}, sender={messaging_event.get('sender', {}).get('id')}")
             return None
 
         text = message.get("text")
@@ -690,7 +690,12 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
 
         # Validate required fields (text is now optional)
         if not all([sender_id, recipient_id, message_id, timestamp_ms]):
-            logger.warning("Missing required fields in message event")
+            missing = []
+            if not sender_id: missing.append("sender_id")
+            if not recipient_id: missing.append("recipient_id")
+            if not message_id: missing.append("message_id (mid)")
+            if not timestamp_ms: missing.append("timestamp")
+            logger.warning(f"⚠️ Missing required fields in message event: {missing}. Keys present: {list(messaging_event.keys())}, message keys: {list(message.keys())}")
             return None
 
         # Convert timestamp from milliseconds to datetime (UTC timezone-aware)
