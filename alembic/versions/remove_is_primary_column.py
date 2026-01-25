@@ -21,11 +21,22 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Drop the index first (required before dropping the column)
-    op.drop_index('idx_user_accounts_user_primary', table_name='user_accounts')
+    # Get connection to check if index exists
+    conn = op.get_bind()
 
-    # Drop the is_primary column
-    op.drop_column('user_accounts', 'is_primary')
+    # Check if index exists before trying to drop it
+    # (VPS database may not have had this index created)
+    result = conn.execute(sa.text(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_user_accounts_user_primary'"
+    ))
+    if result.fetchone():
+        op.drop_index('idx_user_accounts_user_primary', table_name='user_accounts')
+
+    # Check if column exists before trying to drop it
+    result = conn.execute(sa.text("PRAGMA table_info(user_accounts)"))
+    columns = [row[1] for row in result.fetchall()]
+    if 'is_primary' in columns:
+        op.drop_column('user_accounts', 'is_primary')
 
 
 def downgrade() -> None:
