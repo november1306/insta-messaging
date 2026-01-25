@@ -24,6 +24,7 @@ from app.config import settings
 from app.api.auth import verify_api_key, verify_ui_session, verify_jwt_or_api_key, LoginRequest
 from app.services.user_service import UserService
 from app.infrastructure.cache_service import get_cached_username
+from app.application.instagram_sync_service import InstagramSyncService, SyncResult as ServiceSyncResult
 from app.api.events import sse_manager
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
@@ -1096,10 +1097,8 @@ async def sync_messages_from_instagram(
     **Authentication:** API key or JWT token
     """
     from app.services.encryption_service import decrypt_credential
-    from sqlalchemy.exc import IntegrityError
 
     user_id = auth.get("user_id")
-    errors = []
 
     # Get account_id from query param or auth context
     if not account_id:
@@ -1155,9 +1154,8 @@ async def sync_messages_from_instagram(
             detail="Failed to decrypt account credentials"
         )
 
-    # Fetch conversations from Instagram API using two-phase approach for performance:
-    # Phase 1: Get conversation list WITHOUT messages (fast, ~2s)
-    # Phase 2: Filter to last 24h, then fetch messages only for those (much faster)
+    # Use InstagramSyncService for consistent sync logic
+    # This includes retry handling, proper customer detection, and ID normalization
     logger.info(f"🔄 Starting Instagram sync for account {account_id} (@{account.username})")
 
     async with httpx.AsyncClient() as http_client:
@@ -1167,156 +1165,8 @@ async def sync_messages_from_instagram(
             logger_instance=logger
         )
 
-        # PHASE 1: Get conversations WITHOUT messages (fast)
-        conversations = await instagram_client.get_conversations(limit=50, include_messages=False)
-
-        if conversations is None:
-            logger.error(f"Failed to fetch conversations from Instagram API for account {account_id}")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Failed to fetch conversations from Instagram. The API may be unavailable."
-            )
-
-        conversations_found = len(conversations)
-
-        # Filter to last 24 hours (Instagram's messaging window)
-        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
-        recent_conversations = []
-
-        for conv in conversations:
-            updated_time_str = conv.get("updated_time")
-            if updated_time_str:
-                try:
-                    timestamp = updated_time_str.replace('+0000', '+00:00').replace('Z', '+00:00')
-                    updated_time = datetime.fromisoformat(timestamp)
-                    if updated_time >= cutoff_time:
-                        recent_conversations.append(conv)
-                except (ValueError, AttributeError):
-                    recent_conversations.append(conv)
-            else:
-                recent_conversations.append(conv)
-
-        logger.info(f"📅 Phase 1: {len(recent_conversations)}/{conversations_found} conversations from last 24h")
-
-        # PHASE 2: Fetch messages only for recent conversations
-        for conv in recent_conversations:
-            conv_id = conv.get("id")
-            if conv_id:
-                messages = await instagram_client.get_conversation_messages(conv_id, limit=25)
-                if messages:
-                    conv["messages"] = {"data": messages}
-
-        logger.info(f"📥 Phase 2: Fetched messages for {len(recent_conversations)} recent conversations")
-
-    messages_synced = 0
-    messages_skipped = 0
-
-    # Get our business account's messaging channel ID
-    # This is needed to determine message direction
-    messaging_channel_id = account.messaging_channel_id or account.instagram_account_id
-
-    # Process each conversation (only recent ones)
-    for conv in recent_conversations:
-        try:
-            # Extract messages from conversation
-            # Instagram returns messages nested under 'messages' -> 'data'
-            messages_data = conv.get("messages", {}).get("data", [])
-
-            # Pre-compute the "other party" ID for this conversation
-            # This is needed when participants field is not available (fallback mode)
-            other_party_id = None
-
-            # Try to get from participants first
-            participants = conv.get("participants", {}).get("data", [])
-            if participants:
-                for p in participants:
-                    p_id = p.get("id")
-                    if p_id and p_id != messaging_channel_id and p_id != account.instagram_account_id:
-                        other_party_id = p_id
-                        break
-
-            # If no participants, scan messages to find the other party
-            if not other_party_id and messages_data:
-                for msg in messages_data:
-                    msg_sender = msg.get("from", {}).get("id")
-                    if msg_sender and msg_sender != messaging_channel_id and msg_sender != account.instagram_account_id:
-                        other_party_id = msg_sender
-                        break
-
-            for msg in messages_data:
-                try:
-                    msg_id = msg.get("id")
-                    if not msg_id:
-                        continue
-
-                    # Check if message already exists
-                    existing = await db.execute(
-                        select(MessageModel).where(MessageModel.id == msg_id)
-                    )
-                    if existing.scalar_one_or_none():
-                        messages_skipped += 1
-                        continue
-
-                    # Parse message data
-                    # Instagram API format:
-                    # - id: message ID
-                    # - message: text content
-                    # - from: {id, name/username} - sender info
-                    # - created_time: ISO timestamp
-                    sender_info = msg.get("from", {})
-                    sender_id = sender_info.get("id", "unknown")
-                    message_text = msg.get("message", "")
-                    created_time = msg.get("created_time")
-
-                    # Determine direction based on sender
-                    # If sender is our business account, it's outbound
-                    # Otherwise, it's inbound
-                    if sender_id == messaging_channel_id or sender_id == account.instagram_account_id:
-                        direction = "outbound"
-                        # For outbound, sender is us, recipient is the other party
-                        final_sender_id = messaging_channel_id
-                        final_recipient_id = other_party_id or "unknown"
-                    else:
-                        direction = "inbound"
-                        final_sender_id = sender_id
-                        final_recipient_id = messaging_channel_id
-
-                    # Parse timestamp
-                    try:
-                        if created_time:
-                            # Instagram returns ISO format like "2026-01-25T10:30:00+0000"
-                            timestamp = datetime.fromisoformat(created_time.replace("+0000", "+00:00"))
-                        else:
-                            timestamp = datetime.now(timezone.utc)
-                    except Exception:
-                        timestamp = datetime.now(timezone.utc)
-
-                    # Create message record
-                    new_message = MessageModel(
-                        id=msg_id,
-                        account_id=account_id,
-                        sender_id=final_sender_id,
-                        recipient_id=final_recipient_id,
-                        message_text=message_text,
-                        direction=direction,
-                        timestamp=timestamp,
-                        delivery_status="synced"  # Mark as synced from API
-                    )
-
-                    db.add(new_message)
-                    messages_synced += 1
-
-                except IntegrityError:
-                    # Race condition - message was added by webhook while we were syncing
-                    await db.rollback()
-                    messages_skipped += 1
-                except Exception as e:
-                    logger.warning(f"Failed to process message {msg.get('id')}: {e}")
-                    errors.append(f"Message {msg.get('id')}: {str(e)}")
-
-        except Exception as e:
-            logger.warning(f"Failed to process conversation {conv.get('id')}: {e}")
-            errors.append(f"Conversation {conv.get('id')}: {str(e)}")
+        sync_service = InstagramSyncService(db, instagram_client)
+        sync_result = await sync_service.sync_account(account, hours_back=24)
 
     # Commit all changes
     try:
@@ -1329,15 +1179,9 @@ async def sync_messages_from_instagram(
             detail="Failed to save synced messages"
         )
 
-    logger.info(
-        f"✅ Instagram sync complete for account {account_id}: "
-        f"{len(recent_conversations)}/{conversations_found} conversations (24h filter), "
-        f"{messages_synced} new messages, {messages_skipped} skipped"
-    )
-
     return SyncResult(
-        conversations_found=conversations_found,
-        messages_synced=messages_synced,
-        messages_skipped=messages_skipped,
-        errors=errors
+        conversations_found=sync_result.conversations_found,
+        messages_synced=sync_result.messages_synced,
+        messages_skipped=sync_result.messages_skipped,
+        errors=sync_result.errors
     )

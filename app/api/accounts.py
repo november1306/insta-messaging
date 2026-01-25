@@ -153,7 +153,8 @@ class UserAccountInfo(BaseModel):
     """Information about an Instagram account linked to a user"""
     account_id: str = Field(..., example="acc_a3f7e8b2c1d4")
     instagram_account_id: str = Field(..., example="17841478096518771")
-    messaging_channel_id: Optional[str] = Field(None, example="17841478096518771", description="Unique channel ID for message routing")
+    messaging_channel_id: Optional[str] = Field(None, example="17841478096518771", description="Webhook routing ID (may be null for new accounts)")
+    effective_channel_id: str = Field(..., example="17841478096518771", description="Always-valid channel ID for filtering (messaging_channel_id or instagram_account_id fallback)")
     username: str = Field(..., example="myshop_official")
     profile_picture_url: Optional[str] = Field(None, example="https://scontent.cdninstagram.com/v/...")
     token_expires_at: Optional[datetime] = Field(None, example="2026-03-06T14:32:00.123Z", description="When OAuth token expires (60 days)")
@@ -208,12 +209,15 @@ async def list_user_accounts(
 
     accounts_list = []
     for user_account, account in links:
+        # Calculate effective_channel_id: use messaging_channel_id if set, otherwise instagram_account_id
+        # This ensures frontend filtering works even before first webhook sets the channel ID
+        effective_channel_id = account.messaging_channel_id or account.instagram_account_id
+
         accounts_list.append(UserAccountInfo(
             account_id=account.id,
             instagram_account_id=account.instagram_account_id,
-            # Use messaging_channel_id if set, otherwise fall back to instagram_account_id
-            # This ensures frontend filtering works before first webhook sets the channel ID
-            messaging_channel_id=account.messaging_channel_id or account.instagram_account_id,
+            messaging_channel_id=account.messaging_channel_id,  # Actual value (may be null)
+            effective_channel_id=effective_channel_id,  # Always valid (with fallback)
             username=account.username,
             profile_picture_url=account.profile_picture_url,
             token_expires_at=account.token_expires_at,
