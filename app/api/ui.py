@@ -1155,7 +1155,9 @@ async def sync_messages_from_instagram(
             detail="Failed to decrypt account credentials"
         )
 
-    # Fetch conversations from Instagram API
+    # Fetch conversations from Instagram API using two-phase approach for performance:
+    # Phase 1: Get conversation list WITHOUT messages (fast, ~2s)
+    # Phase 2: Filter to last 24h, then fetch messages only for those (much faster)
     logger.info(f"🔄 Starting Instagram sync for account {account_id} (@{account.username})")
 
     async with httpx.AsyncClient() as http_client:
@@ -1165,8 +1167,8 @@ async def sync_messages_from_instagram(
             logger_instance=logger
         )
 
-        # Get conversations with messages included
-        conversations = await instagram_client.get_conversations(limit=50, include_messages=True)
+        # PHASE 1: Get conversations WITHOUT messages (fast)
+        conversations = await instagram_client.get_conversations(limit=50, include_messages=False)
 
         if conversations is None:
             logger.error(f"Failed to fetch conversations from Instagram API for account {account_id}")
@@ -1175,32 +1177,39 @@ async def sync_messages_from_instagram(
                 detail="Failed to fetch conversations from Instagram. The API may be unavailable."
             )
 
-    conversations_found = len(conversations)
+        conversations_found = len(conversations)
+
+        # Filter to last 24 hours (Instagram's messaging window)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
+        recent_conversations = []
+
+        for conv in conversations:
+            updated_time_str = conv.get("updated_time")
+            if updated_time_str:
+                try:
+                    timestamp = updated_time_str.replace('+0000', '+00:00').replace('Z', '+00:00')
+                    updated_time = datetime.fromisoformat(timestamp)
+                    if updated_time >= cutoff_time:
+                        recent_conversations.append(conv)
+                except (ValueError, AttributeError):
+                    recent_conversations.append(conv)
+            else:
+                recent_conversations.append(conv)
+
+        logger.info(f"📅 Phase 1: {len(recent_conversations)}/{conversations_found} conversations from last 24h")
+
+        # PHASE 2: Fetch messages only for recent conversations
+        for conv in recent_conversations:
+            conv_id = conv.get("id")
+            if conv_id:
+                messages = await instagram_client.get_conversation_messages(conv_id, limit=25)
+                if messages:
+                    conv["messages"] = {"data": messages}
+
+        logger.info(f"📥 Phase 2: Fetched messages for {len(recent_conversations)} recent conversations")
+
     messages_synced = 0
     messages_skipped = 0
-
-    # Filter to last 24 hours (Instagram's messaging window)
-    # This matches the behavior in account_linking_service.py
-    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
-    recent_conversations = []
-
-    for conv in conversations:
-        updated_time_str = conv.get("updated_time")
-        if updated_time_str:
-            try:
-                # Parse ISO format with flexible timezone handling
-                timestamp = updated_time_str.replace('+0000', '+00:00').replace('Z', '+00:00')
-                updated_time = datetime.fromisoformat(timestamp)
-                if updated_time >= cutoff_time:
-                    recent_conversations.append(conv)
-            except (ValueError, AttributeError):
-                # If parsing fails, include to be safe
-                recent_conversations.append(conv)
-        else:
-            # No timestamp, include to be safe
-            recent_conversations.append(conv)
-
-    logger.info(f"📅 Filtered to {len(recent_conversations)}/{conversations_found} conversations from last 24h")
 
     # Get our business account's messaging channel ID
     # This is needed to determine message direction
