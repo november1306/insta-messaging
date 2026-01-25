@@ -502,11 +502,11 @@ class InstagramClient:
                 return conversations
             elif response.status_code == 500:
                 # Some accounts can't access nested fields (participants, messages)
-                # Fallback to minimal fields and fetch messages separately
+                # Fallback to minimal fields
                 self._logger.warning(
                     f"⚠️ Nested fields failed (500), trying minimal fields fallback"
                 )
-                return await self._get_conversations_minimal(limit)
+                return await self._get_conversations_minimal(limit, include_messages)
             else:
                 error_data = response.json() if response.text else {}
                 error_message = error_data.get("error", {}).get("message", "Unknown error")
@@ -520,15 +520,19 @@ class InstagramClient:
             self._logger.warning(f"⚠️ Error fetching conversations: {e}")
             return None
 
-    async def _get_conversations_minimal(self, limit: int = 50) -> Optional[list[dict]]:
+    async def _get_conversations_minimal(self, limit: int = 50, include_messages: bool = True) -> Optional[list[dict]]:
         """
         Fallback method to fetch conversations with minimal fields.
 
         Used when the main get_conversations fails due to permission issues
         with nested fields (participants, messages).
 
-        Returns conversations with just id and updated_time, then fetches
-        messages separately for each conversation.
+        Args:
+            limit: Maximum conversations to fetch
+            include_messages: If False, only get IDs/timestamps (fast). If True, also fetch messages (slow).
+
+        Returns conversations with id and updated_time. If include_messages=True,
+        also fetches messages for each conversation (slower).
         """
         url = f"{self._api_base_url}/me/conversations"
 
@@ -555,18 +559,18 @@ class InstagramClient:
 
             data = response.json()
             conversations = data.get("data", [])
-            self._logger.info(f"📋 Retrieved {len(conversations)} conversation IDs (minimal mode)")
+            self._logger.info(f"📋 Retrieved {len(conversations)} conversation IDs (minimal mode, include_messages={include_messages})")
 
-            # Now fetch messages for each conversation
-            for conv in conversations:
-                conv_id = conv.get("id")
-                if conv_id:
-                    messages = await self.get_conversation_messages(conv_id, limit=25)
-                    if messages:
-                        # Format messages to match the nested structure expected by sync
-                        conv["messages"] = {"data": messages}
+            # Only fetch messages if requested (skip for Phase 1 of two-phase sync)
+            if include_messages:
+                for conv in conversations:
+                    conv_id = conv.get("id")
+                    if conv_id:
+                        messages = await self.get_conversation_messages(conv_id, limit=25)
+                        if messages:
+                            conv["messages"] = {"data": messages}
+                self._logger.info(f"✅ Fetched messages for {len(conversations)} conversations (minimal mode)")
 
-            self._logger.info(f"✅ Fetched messages for {len(conversations)} conversations (minimal mode)")
             return conversations
 
         except Exception as e:
