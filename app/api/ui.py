@@ -1179,12 +1179,35 @@ async def sync_messages_from_instagram(
     messages_synced = 0
     messages_skipped = 0
 
+    # Filter to last 24 hours (Instagram's messaging window)
+    # This matches the behavior in account_linking_service.py
+    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
+    recent_conversations = []
+
+    for conv in conversations:
+        updated_time_str = conv.get("updated_time")
+        if updated_time_str:
+            try:
+                # Parse ISO format with flexible timezone handling
+                timestamp = updated_time_str.replace('+0000', '+00:00').replace('Z', '+00:00')
+                updated_time = datetime.fromisoformat(timestamp)
+                if updated_time >= cutoff_time:
+                    recent_conversations.append(conv)
+            except (ValueError, AttributeError):
+                # If parsing fails, include to be safe
+                recent_conversations.append(conv)
+        else:
+            # No timestamp, include to be safe
+            recent_conversations.append(conv)
+
+    logger.info(f"📅 Filtered to {len(recent_conversations)}/{conversations_found} conversations from last 24h")
+
     # Get our business account's messaging channel ID
     # This is needed to determine message direction
     messaging_channel_id = account.messaging_channel_id or account.instagram_account_id
 
-    # Process each conversation
-    for conv in conversations:
+    # Process each conversation (only recent ones)
+    for conv in recent_conversations:
         try:
             # Extract messages from conversation
             # Instagram returns messages nested under 'messages' -> 'data'
@@ -1299,8 +1322,8 @@ async def sync_messages_from_instagram(
 
     logger.info(
         f"✅ Instagram sync complete for account {account_id}: "
-        f"{conversations_found} conversations, {messages_synced} new messages, "
-        f"{messages_skipped} skipped"
+        f"{len(recent_conversations)}/{conversations_found} conversations (24h filter), "
+        f"{messages_synced} new messages, {messages_skipped} skipped"
     )
 
     return SyncResult(
