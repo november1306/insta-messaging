@@ -146,6 +146,16 @@ watch(
   async (newAccountId, oldAccountId) => {
     if (newAccountId && newAccountId !== oldAccountId) {
       await refreshConversations()
+
+      // Auto-select the most recent conversation for the new account
+      // filteredConversations is sorted by last_message_time (most recent first)
+      if (filteredConversations.value.length > 0) {
+        const mostRecent = filteredConversations.value[0]
+        await handleSelectConversation(mostRecent.sender_id)
+      } else {
+        // No conversations for this account - clear selection
+        store.setActiveConversation(null)
+      }
     }
   }
 )
