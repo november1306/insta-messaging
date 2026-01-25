@@ -1188,6 +1188,27 @@ async def sync_messages_from_instagram(
             # Instagram returns messages nested under 'messages' -> 'data'
             messages_data = conv.get("messages", {}).get("data", [])
 
+            # Pre-compute the "other party" ID for this conversation
+            # This is needed when participants field is not available (fallback mode)
+            other_party_id = None
+
+            # Try to get from participants first
+            participants = conv.get("participants", {}).get("data", [])
+            if participants:
+                for p in participants:
+                    p_id = p.get("id")
+                    if p_id and p_id != messaging_channel_id and p_id != account.instagram_account_id:
+                        other_party_id = p_id
+                        break
+
+            # If no participants, scan messages to find the other party
+            if not other_party_id and messages_data:
+                for msg in messages_data:
+                    msg_sender = msg.get("from", {}).get("id")
+                    if msg_sender and msg_sender != messaging_channel_id and msg_sender != account.instagram_account_id:
+                        other_party_id = msg_sender
+                        break
+
             for msg in messages_data:
                 try:
                     msg_id = msg.get("id")
@@ -1219,17 +1240,8 @@ async def sync_messages_from_instagram(
                     if sender_id == messaging_channel_id or sender_id == account.instagram_account_id:
                         direction = "outbound"
                         # For outbound, sender is us, recipient is the other party
-                        # We need to find the other participant
-                        participants = conv.get("participants", {}).get("data", [])
-                        recipient_id = None
-                        for p in participants:
-                            if p.get("id") != sender_id:
-                                recipient_id = p.get("id")
-                                break
-                        if not recipient_id:
-                            recipient_id = "unknown"
                         final_sender_id = messaging_channel_id
-                        final_recipient_id = recipient_id
+                        final_recipient_id = other_party_id or "unknown"
                     else:
                         direction = "inbound"
                         final_sender_id = sender_id

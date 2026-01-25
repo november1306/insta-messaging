@@ -463,14 +463,16 @@ class InstagramClient:
         Returns:
             List of conversation objects with:
             - id: Conversation ID
-            - participants: List of participant objects (always included)
-            - messages: Preview of latest messages (if include_messages=True)
+            - participants: List of participant objects (if available)
+            - messages: Preview of latest messages (if include_messages=True and available)
             - updated_time: Last activity timestamp (always included)
 
             Returns None if API call fails or endpoint not available.
 
         Note: This endpoint may not be available for all Instagram accounts.
-              The method gracefully degrades by returning None on failure.
+              Some accounts can't access participants/messages nested fields due to
+              permission limitations. The method will fallback to simpler fields
+              and fetch messages separately if needed.
         """
         url = f"{self._api_base_url}/me/conversations"
 
@@ -498,6 +500,13 @@ class InstagramClient:
                 conversations = data.get("data", [])
                 self._logger.info(f"✅ Retrieved {len(conversations)} conversations (include_messages={include_messages})")
                 return conversations
+            elif response.status_code == 500:
+                # Some accounts can't access nested fields (participants, messages)
+                # Fallback to minimal fields and fetch messages separately
+                self._logger.warning(
+                    f"⚠️ Nested fields failed (500), trying minimal fields fallback"
+                )
+                return await self._get_conversations_minimal(limit)
             else:
                 error_data = response.json() if response.text else {}
                 error_message = error_data.get("error", {}).get("message", "Unknown error")
@@ -509,6 +518,59 @@ class InstagramClient:
 
         except Exception as e:
             self._logger.warning(f"⚠️ Error fetching conversations: {e}")
+            return None
+
+    async def _get_conversations_minimal(self, limit: int = 50) -> Optional[list[dict]]:
+        """
+        Fallback method to fetch conversations with minimal fields.
+
+        Used when the main get_conversations fails due to permission issues
+        with nested fields (participants, messages).
+
+        Returns conversations with just id and updated_time, then fetches
+        messages separately for each conversation.
+        """
+        url = f"{self._api_base_url}/me/conversations"
+
+        try:
+            # First, get conversation IDs with minimal fields
+            response = await self._http_client.get(
+                url,
+                params={
+                    "fields": "id,updated_time",
+                    "limit": limit,
+                    "access_token": self._token
+                },
+                timeout=15.0
+            )
+
+            if response.status_code != 200:
+                error_data = response.json() if response.text else {}
+                error_message = error_data.get("error", {}).get("message", "Unknown error")
+                self._logger.warning(
+                    f"⚠️ Minimal fields also failed - status: {response.status_code}, "
+                    f"message: {error_message}"
+                )
+                return None
+
+            data = response.json()
+            conversations = data.get("data", [])
+            self._logger.info(f"📋 Retrieved {len(conversations)} conversation IDs (minimal mode)")
+
+            # Now fetch messages for each conversation
+            for conv in conversations:
+                conv_id = conv.get("id")
+                if conv_id:
+                    messages = await self.get_conversation_messages(conv_id, limit=25)
+                    if messages:
+                        # Format messages to match the nested structure expected by sync
+                        conv["messages"] = {"data": messages}
+
+            self._logger.info(f"✅ Fetched messages for {len(conversations)} conversations (minimal mode)")
+            return conversations
+
+        except Exception as e:
+            self._logger.warning(f"⚠️ Error in minimal conversations fetch: {e}")
             return None
 
     async def get_conversation_messages(
