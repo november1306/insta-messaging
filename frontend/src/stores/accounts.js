@@ -3,9 +3,12 @@
  *
  * Handles:
  * - Fetching user's linked accounts
- * - Switching between accounts (set primary)
+ * - Switching between accounts (session-only, not persisted)
  * - Initiating OAuth flow to link new accounts
  * - Unlinking accounts
+ *
+ * Note: "Focused account" is simply the selectedAccountId - it's not persisted
+ * to the database. On page refresh, the first account becomes the default.
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -21,15 +24,13 @@ export const useAccountsStore = defineStore('accounts', () => {
   const error = ref(null)
 
   // Computed
-  const primaryAccount = computed(() => {
-    return accounts.value.find(acc => acc.is_primary) || accounts.value[0] || null
-  })
-
   const selectedAccount = computed(() => {
     if (selectedAccountId.value) {
-      return accounts.value.find(acc => acc.account_id === selectedAccountId.value) || primaryAccount.value
+      // Try to find the selected account, fall back to first account if not found
+      return accounts.value.find(acc => acc.account_id === selectedAccountId.value) || accounts.value[0] || null
     }
-    return primaryAccount.value
+    // Default to first account (the "focused" account is session-only)
+    return accounts.value[0] || null
   })
 
   const hasAccounts = computed(() => accounts.value.length > 0)
@@ -55,53 +56,15 @@ export const useAccountsStore = defineStore('accounts', () => {
 
       accounts.value = response.data.accounts || []
 
-      // Set selected account to primary if not already set
-      if (!selectedAccountId.value && primaryAccount.value) {
-        selectedAccountId.value = primaryAccount.value.account_id
+      // Set selected account to first account if not already set
+      if (!selectedAccountId.value && accounts.value.length > 0) {
+        selectedAccountId.value = accounts.value[0].account_id
       }
 
     } catch (err) {
       console.error('Failed to fetch accounts:', err)
       error.value = err.response?.data?.detail || 'Failed to load accounts'
       accounts.value = []
-    } finally {
-      loading.value = false
-    }
-  }
-
-  async function setPrimaryAccount(accountId) {
-    const sessionStore = useSessionStore()
-
-    if (!sessionStore.isAuthenticated) {
-      throw new Error('Not authenticated')
-    }
-
-    loading.value = true
-    error.value = null
-
-    try {
-      await apiClient.post(
-        `/accounts/${accountId}/set-primary`,
-        {},
-        {
-          headers: {
-            Authorization: `Bearer ${sessionStore.token}`
-          }
-        }
-      )
-
-      // Update local state
-      accounts.value = accounts.value.map(acc => ({
-        ...acc,
-        is_primary: acc.account_id === accountId
-      }))
-
-      selectedAccountId.value = accountId
-
-    } catch (err) {
-      console.error('Failed to set primary account:', err)
-      error.value = err.response?.data?.detail || 'Failed to set primary account'
-      throw err
     } finally {
       loading.value = false
     }
@@ -127,9 +90,9 @@ export const useAccountsStore = defineStore('accounts', () => {
       // Remove from local state
       accounts.value = accounts.value.filter(acc => acc.account_id !== accountId)
 
-      // If we unlinked the selected account, select the primary
+      // If we unlinked the selected account, select the first remaining account
       if (selectedAccountId.value === accountId) {
-        selectedAccountId.value = primaryAccount.value?.account_id || null
+        selectedAccountId.value = accounts.value[0]?.account_id || null
       }
 
     } catch (err) {
@@ -199,13 +162,11 @@ export const useAccountsStore = defineStore('accounts', () => {
     error,
 
     // Computed
-    primaryAccount,
     selectedAccount,
     hasAccounts,
 
     // Actions
     fetchAccounts,
-    setPrimaryAccount,
     unlinkAccount,
     startOAuthFlow,
     selectAccount,

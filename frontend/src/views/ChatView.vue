@@ -82,7 +82,6 @@
         <AccountDetailsPanel
           v-if="activeAccountDetails"
           :account="activeAccountDetails"
-          @set-primary="handleSetPrimary"
           @unlink="handleUnlink"
           @delete="handleDelete"
         />
@@ -287,12 +286,6 @@ async function refreshConversations() {
 
 function handleShowAccountDetails(account) {
   activeAccountDetails.value = account
-}
-
-function handleSetPrimary() {
-  if (activeAccountDetails.value && accountTabsRef.value) {
-    accountTabsRef.value.setPrimary(activeAccountDetails.value)
-  }
 }
 
 function handleUnlink() {

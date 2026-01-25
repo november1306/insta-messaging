@@ -27,7 +27,7 @@ class AccountId:
     - Internal API calls
     - User permissions (UserAccount lookups)
     - Database foreign keys
-    - JWT tokens (primary_account_id)
+    - API request parameters (account_id query param)
     """
 
     value: str

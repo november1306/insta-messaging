@@ -69,14 +69,13 @@ class APITestClient:
             return data
 
     async def generate_api_token(self, username: str, password: str) -> str:
-        """Step 2: Generate API token using Basic Auth"""
-        credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
-
+        """Step 2: Generate API token using JSON body"""
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.base_url}/auth/token",
-                headers={
-                    "Authorization": f"Basic {credentials}"
+                json={
+                    "username": username,
+                    "password": password
                 }
             )
             response.raise_for_status()
@@ -159,7 +158,6 @@ class APITestClient:
                     user_link = UserAccount(
                         user_id=self.user_id,
                         account_id=existing.id,
-                        is_primary=True,
                         linked_at=datetime.now(timezone.utc)
                     )
                     db.add(user_link)
@@ -188,7 +186,6 @@ class APITestClient:
             user_link = UserAccount(
                 user_id=self.user_id,
                 account_id=account_id,
-                is_primary=True,
                 linked_at=datetime.now(timezone.utc)
             )
             db.add(user_link)
@@ -377,7 +374,6 @@ class TestThirdPartyIntegration:
             print(f"     - Account ID: {account['account_id']}")
             print(f"     - Instagram ID: {account['instagram_account_id']}")
             print(f"     - Username: {account['username']}")
-            print(f"     - Is Primary: {account['is_primary']}")
 
             assert len(accounts) >= 1
             assert account["account_id"] == account_id

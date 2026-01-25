@@ -281,21 +281,19 @@ class UserAccount(Base):
     Links users to their Instagram business accounts.
     Supports multiple accounts per user and multiple users per account (team collaboration).
 
-    Fields:
-    - is_primary: User's default account for sending messages
+    Note: There is no "primary" account concept - the frontend manages which account
+    is currently selected (session-only state, not persisted).
     """
     __tablename__ = "user_accounts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     account_id = Column(String(50), ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
-    is_primary = Column(Boolean, nullable=False, default=False)  # User's default account
     linked_at = Column(TZDateTime, nullable=False, default=func.now())
 
     __table_args__ = (
         Index('idx_user_accounts_user_id', 'user_id'),
         Index('idx_user_accounts_account_id', 'account_id'),
-        Index('idx_user_accounts_user_primary', 'user_id', 'is_primary'),  # Fast lookup for primary account
         UniqueConstraint('user_id', 'account_id', name='uq_user_account'),  # Prevent duplicate links
         {'sqlite_autoincrement': True}  # Ensure autoincrement works on SQLite
     )

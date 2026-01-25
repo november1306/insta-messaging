@@ -81,16 +81,6 @@
             >
               <span class="text-white font-semibold text-xs">{{ getInitials(account.username) }}</span>
             </div>
-            <!-- Primary Badge -->
-            <div
-              v-if="account.is_primary"
-              class="absolute -top-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-white"
-              title="Primary account"
-            >
-              <svg class="w-1.5 h-1.5 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-              </svg>
-            </div>
           </div>
 
           <!-- Account Username -->
@@ -442,41 +432,8 @@ async function unlinkAccount(account) {
   }
 }
 
-async function setPrimary(account) {
-  try {
-    const response = await fetch(
-      `/api/v1/accounts/${account.account_id}/set-primary`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${sessionStore.token}`
-        }
-      }
-    )
-
-    if (!response.ok) {
-      throw new Error(`Set primary failed: ${response.status}`)
-    }
-
-    deleteSuccess.value = `@${account.username} set as primary account.`
-
-    // Refresh account list to update primary status
-    await accountsStore.fetchAccounts()
-
-    // Clear success message after 3 seconds
-    setTimeout(() => {
-      deleteSuccess.value = null
-    }, 3000)
-
-  } catch (err) {
-    console.error('Failed to set primary account:', err)
-    deleteError.value = 'Failed to set primary account. Please try again.'
-  }
-}
-
 // Expose functions for parent component to call
 defineExpose({
-  setPrimary,
   unlinkAccount,
   showDeleteModal
 })
