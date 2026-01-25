@@ -3,7 +3,7 @@ Account Service - Centralized account and token management
 
 Provides utilities for:
 - Fetching and decrypting account tokens
-- Getting user's primary account
+- Getting user's first linked account
 - Account access validation
 """
 import logging
@@ -77,51 +77,36 @@ class AccountService:
             raise ValueError(f"Failed to decrypt account token: {e}")
 
     @staticmethod
-    async def get_primary_account(db: AsyncSession, user_id: int) -> Optional[Account]:
+    async def get_first_account(db: AsyncSession, user_id: int) -> Optional[Account]:
         """
-        Get user's primary Instagram account.
+        Get user's first linked Instagram account (most recently linked).
 
-        Returns the account marked as primary for this user.
-        If no primary account, returns the first linked account.
-        If no accounts linked, returns None.
+        The "focused" account is managed by the frontend session state.
+        This method returns the first account as a fallback when no account
+        is explicitly selected.
 
         Args:
             db: Database session
-            user_id: User ID to fetch primary account for
+            user_id: User ID to fetch account for
 
         Returns:
             Account object or None if user has no linked accounts
         """
-        # Try to get primary account
-        result = await db.execute(
-            select(Account)
-            .join(UserAccount, UserAccount.account_id == Account.id)
-            .where(
-                UserAccount.user_id == user_id,
-                UserAccount.is_primary == True
-            )
-        )
-        primary_account = result.scalar_one_or_none()
-
-        if primary_account:
-            logger.debug(f"Found primary account for user {user_id}: {primary_account.id} (@{primary_account.username})")
-            return primary_account
-
-        # Fallback: Get first linked account
         result = await db.execute(
             select(Account)
             .join(UserAccount, UserAccount.account_id == Account.id)
             .where(UserAccount.user_id == user_id)
+            .order_by(UserAccount.linked_at.desc())
             .limit(1)
         )
         first_account = result.scalar_one_or_none()
 
         if first_account:
-            logger.debug(f"No primary account for user {user_id}, using first account: {first_account.id} (@{first_account.username})")
-            return first_account
+            logger.debug(f"Found first account for user {user_id}: {first_account.id} (@{first_account.username})")
+        else:
+            logger.debug(f"User {user_id} has no linked Instagram accounts")
 
-        logger.debug(f"User {user_id} has no linked Instagram accounts")
-        return None
+        return first_account
 
     @staticmethod
     async def get_account_by_instagram_id(

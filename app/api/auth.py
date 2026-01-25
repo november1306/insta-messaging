@@ -450,13 +450,11 @@ async def verify_ui_session(
                 detail="Invalid token type. Please login again."
             )
 
-        # Extract session context (user_id, username, primary_account_id)
+        # Extract session context (user_id, username)
+        # Note: JWT no longer contains account_id - frontend manages account selection
         user_id = payload.get("user_id")
         username = payload.get("username")
-        # Support both old "account_id" and new "primary_account_id" for backward compatibility
-        primary_account_id = payload.get("primary_account_id") or payload.get("account_id")
 
-        # user_id is required, but primary_account_id may be None for new users
         if not user_id:
             logger.warning("UI session rejected: Missing user_id in token")
             raise HTTPException(
@@ -464,9 +462,8 @@ async def verify_ui_session(
                 detail="Invalid token structure. Please login again."
             )
 
-        logger.debug(f"UI session validated for user: {user_id} (account: {primary_account_id})")
+        logger.debug(f"UI session validated for user: {user_id}")
         return {
-            "account_id": primary_account_id,  # Return as account_id for backward compatibility
             "user_id": user_id,
             "username": username
         }
@@ -523,22 +520,12 @@ async def verify_jwt_or_api_key(
             logger.debug(f"JWT decoded successfully. Payload: {payload}")
 
             if payload.get("type") == "ui_session":
-                # Support both new "primary_account_id" and old "account_id" for backward compatibility
-                account_id = payload.get("primary_account_id") or payload.get("account_id")
                 user_id = payload.get("user_id")
 
-                # Note: If account_id is missing (old token before account linking),
-                # get_current_account() will handle fallback by querying the database.
-                # We intentionally don't query here to keep JWT validation stateless and fast.
-
-                if account_id:
-                    logger.debug(f"Authenticated via JWT for account: {account_id}")
-                    return {"account_id": account_id, "auth_type": "jwt", "user_id": user_id}
-                elif user_id:
-                    # User authenticated but token has no account_id (created before OAuth linking)
-                    # This is acceptable - downstream handlers like get_current_account will fetch from DB
-                    logger.debug(f"JWT valid for user {user_id}, but no account_id in token (will be fetched by endpoint)")
-                    return {"account_id": None, "auth_type": "jwt", "user_id": user_id}
+                if user_id:
+                    # JWT is valid - account selection is handled by frontend/query params
+                    logger.debug(f"Authenticated via JWT for user: {user_id}")
+                    return {"auth_type": "jwt", "user_id": user_id}
                 else:
                     logger.warning("JWT validation failed: Missing user_id in token")
             else:

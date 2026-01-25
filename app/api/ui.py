@@ -116,7 +116,6 @@ async def refresh_user_profile_pictures(user_id: int):
 class SessionResponse(BaseModel):
     """UI session creation response"""
     token: str = Field(..., example="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", description="JWT token for subsequent requests")
-    account_id: Optional[str] = Field(None, example="acc_a3f7e8b2c1d4", description="Primary Instagram account ID (None if no accounts linked yet)")
     user_id: int = Field(..., example=1, description="User ID")
     username: str = Field(..., example="admin", description="Username")
     expires_in: int = Field(..., example=86400, description="Token expiration time in seconds (24 hours)")
@@ -305,23 +304,11 @@ async def create_session(
             # NOTE: No WWW-Authenticate header to avoid browser/nginx auth popup
         )
 
-    # Query user's primary Instagram account (if any)
-    result = await db.execute(
-        select(UserAccount).where(
-            UserAccount.user_id == user.id,
-            UserAccount.is_primary == True
-        )
-    )
-    primary_link = result.scalar_one_or_none()
-    primary_account_id = primary_link.account_id if primary_link else None
-
-    # Create JWT with user and account context
-    # Note: primary_account_id can be None if user hasn't linked any Instagram accounts yet
+    # Create JWT with user context only (no account_id - frontend manages selection)
     expiration_time = datetime.now(timezone.utc) + timedelta(hours=settings.jwt_expiration_hours)
     payload = {
         "user_id": user.id,
         "username": user.username,
-        "primary_account_id": primary_account_id,  # Can be None for new users
         "exp": expiration_time,
         "type": "ui_session"
     }
@@ -333,7 +320,7 @@ async def create_session(
         algorithm=settings.jwt_algorithm
     )
 
-    logger.info(f"Created UI session for user '{user.username}' (id={user.id}, primary_account={primary_account_id})")
+    logger.info(f"Created UI session for user '{user.username}' (id={user.id})")
 
     # Trigger async profile picture refresh in background
     # This ensures profile pics are fresh without delaying login response
@@ -341,7 +328,6 @@ async def create_session(
 
     return SessionResponse(
         token=token,
-        account_id=primary_account_id,  # May be None for new users
         user_id=user.id,
         username=user.username,
         expires_in=settings.jwt_expiration_hours * 3600  # Convert hours to seconds
@@ -369,7 +355,7 @@ async def get_current_account(
     Returns account details including username, profile picture, and messaging channel ID.
 
     **Query Parameters**:
-    - `account_id` (optional): Specific account to fetch. If not provided, uses your primary account from JWT token.
+    - `account_id` (optional): Specific account to fetch. If not provided, uses first linked account.
 
     **Response Fields**:
     - `account_id`: Your account ID (e.g., acc_a3f7e8b2c1d4)
@@ -383,33 +369,29 @@ async def get_current_account(
     try:
         user_id = auth.get("user_id")
 
-        # If no account_id provided, use primary account from auth
+        # If no account_id provided, use first linked account as fallback
         if not account_id:
-            account_id = auth.get("account_id")  # This is primary_account_id
-            if not account_id:
-                # Auth doesn't have account_id (might be stale after OAuth linking)
-                # Query database for user's current primary account
-                result = await db.execute(
-                    select(UserAccount).where(
-                        UserAccount.user_id == user_id,
-                        UserAccount.is_primary == True
-                    )
-                )
-                primary_link = result.scalar_one_or_none()
+            # Query database for user's first account (most recently linked)
+            result = await db.execute(
+                select(UserAccount).where(
+                    UserAccount.user_id == user_id
+                ).order_by(UserAccount.linked_at.desc()).limit(1)
+            )
+            first_link = result.scalar_one_or_none()
 
-                if primary_link:
-                    account_id = primary_link.account_id
-                    logger.info(f"User {user_id} session has no account_id, using primary account from database: {account_id}")
-                else:
-                    # User truly has no linked accounts yet
-                    logger.info(f"User {user_id} has no linked accounts")
-                    return CurrentAccountResponse(
-                        account_id=None,
-                        instagram_account_id="",
-                        username="No account linked",
-                        instagram_handle=None,
-                        profile_picture_url=None
-                    )
+            if first_link:
+                account_id = first_link.account_id
+                logger.info(f"User {user_id} - no account_id provided, using first account: {account_id}")
+            else:
+                # User truly has no linked accounts yet
+                logger.info(f"User {user_id} has no linked accounts")
+                return CurrentAccountResponse(
+                    account_id=None,
+                    instagram_account_id="",
+                    username="No account linked",
+                    instagram_handle=None,
+                    profile_picture_url=None
+                )
 
         # Verify user has access to this account
         result = await db.execute(
@@ -604,7 +586,7 @@ async def get_conversations(
 
         # If no account_id provided, use primary account from auth
         if not account_id:
-            account_id = auth.get("account_id")  # This is primary_account_id
+            account_id = auth.get("account_id")  # From query param or API key context
             if not account_id:
                 # User has no linked accounts yet
                 logger.info(f"User {user_id} has no linked accounts, returning empty conversations")
@@ -816,7 +798,7 @@ async def get_messages(
 
         # If no account_id provided, use primary account from auth
         if not account_id:
-            account_id = auth.get("account_id")  # This is primary_account_id
+            account_id = auth.get("account_id")  # From query param or API key context
             if not account_id:
                 # User has no linked accounts yet
                 logger.warning(f"User {user_id} has no linked accounts, cannot fetch messages")

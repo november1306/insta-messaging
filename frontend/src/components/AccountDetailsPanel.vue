@@ -15,16 +15,6 @@
         >
           {{ getInitials(account.username) }}
         </div>
-        <!-- Primary Badge -->
-        <div
-          v-if="account.is_primary"
-          class="absolute -bottom-1 -right-1 w-8 h-8 bg-green-500 rounded-full border-4 border-white flex items-center justify-center shadow-lg"
-          title="Primary account"
-        >
-          <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-          </svg>
-        </div>
       </div>
       <h3 class="font-bold text-xl text-gray-900 mb-1">
         @{{ account.username }}
@@ -66,20 +56,6 @@
             </div>
           </div>
         </div>
-      </div>
-
-      <!-- Primary Account Action -->
-      <div v-if="!account.is_primary" class="bg-white rounded-lg p-4 border border-gray-200">
-        <h4 class="text-xs font-semibold text-gray-500 uppercase mb-3">Actions</h4>
-        <button
-          @click="$emit('set-primary')"
-          class="w-full px-4 py-2.5 text-sm font-medium text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg transition-colors flex items-center justify-center gap-2"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-          </svg>
-          Set as Primary Account
-        </button>
       </div>
 
       <!-- CRM Integration -->
@@ -157,7 +133,7 @@ defineProps({
   }
 })
 
-defineEmits(['set-primary', 'unlink', 'delete'])
+defineEmits(['unlink', 'delete'])
 
 function formatDate(timestamp) {
   if (!timestamp) return 'N/A'

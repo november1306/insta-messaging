@@ -97,25 +97,12 @@
             >
               <span class="text-white font-semibold text-sm">{{ getInitials(account.username) }}</span>
             </div>
-            <!-- Primary Badge -->
-            <div
-              v-if="account.is_primary"
-              class="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white"
-              title="Primary account"
-            >
-              <svg class="w-2.5 h-2.5 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-              </svg>
-            </div>
           </div>
 
           <!-- Account Info -->
           <div class="flex-1 min-w-0 text-left">
             <div class="flex items-center gap-2">
               <span class="text-sm font-semibold text-gray-900 truncate">@{{ account.username }}</span>
-              <span v-if="account.is_primary" class="text-xs font-medium text-green-600 bg-green-50 px-1.5 py-0.5 rounded">
-                Primary
-              </span>
             </div>
             <div class="text-xs text-gray-500 truncate">{{ account.role || 'owner' }}</div>
           </div>

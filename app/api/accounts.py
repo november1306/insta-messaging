@@ -156,7 +156,6 @@ class UserAccountInfo(BaseModel):
     messaging_channel_id: Optional[str] = Field(None, example="17841478096518771", description="Unique channel ID for message routing")
     username: str = Field(..., example="myshop_official")
     profile_picture_url: Optional[str] = Field(None, example="https://scontent.cdninstagram.com/v/...")
-    is_primary: bool = Field(..., example=True, description="Whether this is the user's primary account")
     token_expires_at: Optional[datetime] = Field(None, example="2026-03-06T14:32:00.123Z", description="When OAuth token expires (60 days)")
     linked_at: datetime = Field(..., example="2026-01-06T14:32:00.123Z", description="When account was linked via OAuth")
 
@@ -182,14 +181,13 @@ async def list_user_accounts(
     List all Instagram accounts linked to the authenticated user.
 
     Returns account details including:
-    - Primary account status (used as default for messaging)
     - OAuth token expiration (60 days from linking)
     - Instagram username and profile picture
     - Messaging channel ID for webhook routing
 
     **Accepts both JWT session tokens and API keys.**
 
-    Accounts are sorted with primary account first, then by most recently linked.
+    Accounts are sorted by most recently linked first.
     """
     user_id = auth.get("user_id")
 
@@ -199,12 +197,12 @@ async def list_user_accounts(
             detail="Invalid session: missing user_id"
         )
 
-    # Query all accounts linked to this user
+    # Query all accounts linked to this user (sorted by most recently linked)
     result = await db.execute(
         select(UserAccount, Account)
         .join(Account, UserAccount.account_id == Account.id)
         .where(UserAccount.user_id == user_id)
-        .order_by(UserAccount.is_primary.desc(), UserAccount.linked_at.desc())
+        .order_by(UserAccount.linked_at.desc())
     )
     links = result.all()
 
@@ -216,7 +214,6 @@ async def list_user_accounts(
             messaging_channel_id=account.messaging_channel_id,
             username=account.username,
             profile_picture_url=account.profile_picture_url,
-            is_primary=user_account.is_primary,
             token_expires_at=account.token_expires_at,
             linked_at=user_account.linked_at
         ))
@@ -224,73 +221,6 @@ async def list_user_accounts(
     logger.info(f"Listing {len(accounts_list)} accounts for user {user_id}")
 
     return UserAccountsListResponse(accounts=accounts_list)
-
-
-@router.post(
-    "/accounts/{account_id}/set-primary",
-    summary="Set an account as primary"
-)
-async def set_primary_account(
-    account_id: str,
-    auth: dict = Depends(verify_jwt_or_api_key),
-    db: AsyncSession = Depends(get_db_session)
-):
-    """
-    Set an account as the user's primary account.
-
-    **Primary Account Behavior**:
-    - Used as default when sending messages from UI
-    - Included in JWT token for faster access
-    - Only one account can be primary at a time
-    - Setting a new primary automatically un-marks the previous one
-
-    **Example Use Case**:
-    If you manage multiple Instagram business accounts, set your main account
-    as primary to avoid selecting it for every message.
-
-    **Accepts both JWT session tokens and API keys.**
-    """
-    user_id = auth.get("user_id")
-
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid session: missing user_id"
-        )
-
-    # Verify user owns this account
-    result = await db.execute(
-        select(UserAccount).where(
-            UserAccount.user_id == user_id,
-            UserAccount.account_id == account_id
-        )
-    )
-    link = result.scalar_one_or_none()
-
-    if not link:
-        logger.warning(f"User {user_id} attempted to set primary for account {account_id} they don't own")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have access to this account"
-        )
-
-    # Set all user's accounts to non-primary
-    result = await db.execute(
-        select(UserAccount).where(UserAccount.user_id == user_id)
-    )
-    all_links = result.scalars().all()
-
-    for user_account in all_links:
-        user_account.is_primary = (user_account.account_id == account_id)
-
-    await db.commit()
-
-    logger.info(f"User {user_id} set account {account_id} as primary")
-
-    return {
-        "message": "Primary account updated successfully",
-        "primary_account_id": account_id
-    }
 
 
 @router.delete(
@@ -315,10 +245,6 @@ async def unlink_account(
     - Does NOT delete the account
     - Does NOT delete messages or media files
     - Does NOT remove the account from other users
-
-    **Primary Account Handling**:
-    If this was your primary account, another account will automatically
-    be set as primary (if you have any remaining accounts).
 
     **To permanently delete the account and all data**, use:
     `DELETE /accounts/{account_id}/delete-permanently`
@@ -349,25 +275,9 @@ async def unlink_account(
             detail="You don't have access to this account"
         )
 
-    was_primary = link.is_primary
-
     # Delete the link
     await db.delete(link)
     await db.commit()
-
-    # If this was primary, set another account as primary
-    if was_primary:
-        result = await db.execute(
-            select(UserAccount)
-            .where(UserAccount.user_id == user_id)
-            .limit(1)
-        )
-        next_account = result.scalar_one_or_none()
-
-        if next_account:
-            next_account.is_primary = True
-            await db.commit()
-            logger.info(f"Set account {next_account.account_id} as new primary for user {user_id}")
 
     logger.info(f"User {user_id} unlinked account {account_id}")
 
@@ -511,30 +421,14 @@ async def delete_account_permanently(
             f"({user_count} users linked) - unlinking instead"
         )
 
-        was_primary = link.is_primary
-
         # Delete the user's link to this account
         await db.delete(link)
         await db.commit()
 
-        # If this was primary, set another account as primary
-        if was_primary:
-            result = await db.execute(
-                select(UserAccount)
-                .where(UserAccount.user_id == user_id)
-                .limit(1)
-            )
-            next_account = result.scalar_one_or_none()
-
-            if next_account:
-                next_account.is_primary = True
-                await db.commit()
-                logger.info(f"Set account {next_account.account_id} as new primary for user {user_id}")
-
         return DeleteAccountResponse(
             message="Account unlinked (other users have access, data preserved)",
             deleted_account_id=account_id,
-            statistics=DeletionStatistics(
+            statistics=DeleteAccountStatistics(
                 messages_deleted=0,
                 attachments_deleted=0,
                 inbound_files_deleted=0,

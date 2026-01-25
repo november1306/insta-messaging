@@ -350,25 +350,15 @@ class AccountLinkingService:
             logger.info(f"Account {account_id} already linked to user {user_id}")
             return
 
-        # Check if user has any primary account
-        result = await self.db.execute(
-            select(UserAccount).where(
-                UserAccount.user_id == user_id,
-                UserAccount.is_primary == True
-            )
-        )
-        has_primary = result.scalar_one_or_none() is not None
-
-        # Create link (first account becomes primary)
+        # Create link (no primary concept - frontend manages account selection)
         user_account = UserAccount(
             user_id=user_id,
-            account_id=account_id,
-            is_primary=not has_primary
+            account_id=account_id
         )
         self.db.add(user_account)
         # Note: No commit - relies on parent transaction
 
-        logger.info(f"Linked account {account_id} to user {user_id} (primary: {not has_primary})")
+        logger.info(f"Linked account {account_id} to user {user_id}")
 
     async def _fetch_conversations_with_retry(
         self,
