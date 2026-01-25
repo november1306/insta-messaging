@@ -211,7 +211,9 @@ async def list_user_accounts(
         accounts_list.append(UserAccountInfo(
             account_id=account.id,
             instagram_account_id=account.instagram_account_id,
-            messaging_channel_id=account.messaging_channel_id,
+            # Use messaging_channel_id if set, otherwise fall back to instagram_account_id
+            # This ensures frontend filtering works before first webhook sets the channel ID
+            messaging_channel_id=account.messaging_channel_id or account.instagram_account_id,
             username=account.username,
             profile_picture_url=account.profile_picture_url,
             token_expires_at=account.token_expires_at,
