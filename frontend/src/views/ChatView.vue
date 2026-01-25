@@ -25,6 +25,7 @@
           :conversations="filteredConversations"
           :active-id="store.activeConversationId"
           :loading="store.loading"
+          :syncing="isSyncing"
           @select="handleSelectConversation"
           @refresh="refreshConversations"
         />
@@ -126,6 +127,7 @@ const accountsStore = useAccountsStore()
 // Refs
 const accountTabsRef = ref(null)
 const activeAccountDetails = ref(null)
+const isSyncing = ref(false)
 
 // Filter conversations by selected messaging channel
 const filteredConversations = computed(() => {
@@ -284,10 +286,29 @@ async function handleSendMessage(formData, onProgress) {
 async function refreshConversations() {
   // Pass selected account ID to fetch conversations for the active account
   const accountId = accountsStore.selectedAccount?.account_id || null
+
+  // First, sync messages from Instagram API (fetches messages sent from native app)
+  // This shows a spinning animation on the refresh button
+  isSyncing.value = true
+  try {
+    const syncResult = await store.syncFromInstagram(accountId)
+    if (syncResult?.messages_synced > 0) {
+      console.log(`✅ Synced ${syncResult.messages_synced} new messages from Instagram`)
+    }
+  } finally {
+    isSyncing.value = false
+  }
+
+  // Then fetch updated conversations from local database
   await Promise.all([
     store.fetchCurrentAccount(),
     store.fetchConversations(accountId)
   ])
+
+  // Also refresh messages for active conversation if one is selected
+  if (store.activeConversationId) {
+    await store.fetchMessages(store.activeConversationId, accountId)
+  }
 }
 
 // ============================================

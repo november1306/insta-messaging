@@ -1030,3 +1030,268 @@ async def proxy_instagram_image(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch image"
         )
+
+
+# ============================================
+# Sync Response Models
+# ============================================
+
+class SyncResult(BaseModel):
+    """Result of syncing messages from Instagram API"""
+    conversations_found: int = Field(..., description="Number of conversations found in Instagram API")
+    messages_synced: int = Field(..., description="Number of new messages stored")
+    messages_skipped: int = Field(..., description="Number of messages already in database (duplicates)")
+    errors: List[str] = Field(default_factory=list, description="Any errors encountered during sync")
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Instagram Message Sync Endpoint
+# ============================================
+
+@router.post(
+    "/ui/sync",
+    response_model=SyncResult,
+    summary="Sync messages from Instagram API",
+    responses={
+        200: {"description": "Sync completed successfully"},
+        400: {"description": "Account not properly configured"},
+        403: {"description": "No permission to access this account"},
+        404: {"description": "Account not found"},
+        503: {"description": "Instagram API unavailable"}
+    }
+)
+async def sync_messages_from_instagram(
+    account_id: Optional[str] = Query(None, description="Instagram account ID to sync"),
+    auth: dict = Depends(verify_jwt_or_api_key),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Sync messages from Instagram's Conversations API.
+
+    This endpoint fetches the full message history from Instagram and stores
+    any messages that are not already in the database. Use this to sync
+    messages sent from the native Instagram app.
+
+    **How it works:**
+    1. Fetches conversations from Instagram API (`GET /me/conversations`)
+    2. For each conversation, gets all messages
+    3. Stores new messages in database (deduplicates by message ID)
+    4. Returns sync statistics
+
+    **Use cases:**
+    - Sync messages sent from Instagram mobile/web app
+    - Initial sync when connecting an account
+    - Recover missed webhook messages
+
+    **Rate limits:**
+    - Instagram API has rate limits (~200 calls/hour)
+    - This endpoint makes 1 API call for conversations list
+    - Consider using sparingly (e.g., manual refresh only)
+
+    **Authentication:** API key or JWT token
+    """
+    from app.services.encryption_service import decrypt_credential
+    from sqlalchemy.exc import IntegrityError
+
+    user_id = auth.get("user_id")
+    errors = []
+
+    # Get account_id from query param or auth context
+    if not account_id:
+        account_id = auth.get("account_id")
+        if not account_id:
+            logger.warning(f"User {user_id} has no linked accounts for sync")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No account linked. Please link an Instagram account first."
+            )
+
+    # Verify user has access to this account
+    result = await db.execute(
+        select(UserAccount).where(
+            UserAccount.user_id == user_id,
+            UserAccount.account_id == account_id
+        )
+    )
+    user_account_link = result.scalar_one_or_none()
+
+    if not user_account_link:
+        logger.warning(f"User {user_id} attempted to sync account {account_id} without permission")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this account"
+        )
+
+    # Get account details
+    result = await db.execute(
+        select(Account).where(Account.id == account_id)
+    )
+    account = result.scalar_one_or_none()
+
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found"
+        )
+
+    if not account.access_token_encrypted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account has no access token. Please re-link the account."
+        )
+
+    # Decrypt access token
+    try:
+        access_token = decrypt_credential(account.access_token_encrypted, settings.session_secret)
+    except Exception as e:
+        logger.error(f"Failed to decrypt access token for account {account_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to decrypt account credentials"
+        )
+
+    # Fetch conversations from Instagram API
+    logger.info(f"🔄 Starting Instagram sync for account {account_id} (@{account.username})")
+
+    async with httpx.AsyncClient() as http_client:
+        instagram_client = InstagramClient(
+            http_client=http_client,
+            access_token=access_token,
+            logger_instance=logger
+        )
+
+        # Get conversations with messages included
+        conversations = await instagram_client.get_conversations(limit=50, include_messages=True)
+
+        if conversations is None:
+            logger.error(f"Failed to fetch conversations from Instagram API for account {account_id}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Failed to fetch conversations from Instagram. The API may be unavailable."
+            )
+
+    conversations_found = len(conversations)
+    messages_synced = 0
+    messages_skipped = 0
+
+    # Get our business account's messaging channel ID
+    # This is needed to determine message direction
+    messaging_channel_id = account.messaging_channel_id or account.instagram_account_id
+
+    # Process each conversation
+    for conv in conversations:
+        try:
+            # Extract messages from conversation
+            # Instagram returns messages nested under 'messages' -> 'data'
+            messages_data = conv.get("messages", {}).get("data", [])
+
+            for msg in messages_data:
+                try:
+                    msg_id = msg.get("id")
+                    if not msg_id:
+                        continue
+
+                    # Check if message already exists
+                    existing = await db.execute(
+                        select(MessageModel).where(MessageModel.id == msg_id)
+                    )
+                    if existing.scalar_one_or_none():
+                        messages_skipped += 1
+                        continue
+
+                    # Parse message data
+                    # Instagram API format:
+                    # - id: message ID
+                    # - message: text content
+                    # - from: {id, name/username} - sender info
+                    # - created_time: ISO timestamp
+                    sender_info = msg.get("from", {})
+                    sender_id = sender_info.get("id", "unknown")
+                    message_text = msg.get("message", "")
+                    created_time = msg.get("created_time")
+
+                    # Determine direction based on sender
+                    # If sender is our business account, it's outbound
+                    # Otherwise, it's inbound
+                    if sender_id == messaging_channel_id or sender_id == account.instagram_account_id:
+                        direction = "outbound"
+                        # For outbound, sender is us, recipient is the other party
+                        # We need to find the other participant
+                        participants = conv.get("participants", {}).get("data", [])
+                        recipient_id = None
+                        for p in participants:
+                            if p.get("id") != sender_id:
+                                recipient_id = p.get("id")
+                                break
+                        if not recipient_id:
+                            recipient_id = "unknown"
+                        final_sender_id = messaging_channel_id
+                        final_recipient_id = recipient_id
+                    else:
+                        direction = "inbound"
+                        final_sender_id = sender_id
+                        final_recipient_id = messaging_channel_id
+
+                    # Parse timestamp
+                    try:
+                        if created_time:
+                            # Instagram returns ISO format like "2026-01-25T10:30:00+0000"
+                            timestamp = datetime.fromisoformat(created_time.replace("+0000", "+00:00"))
+                        else:
+                            timestamp = datetime.now(timezone.utc)
+                    except Exception:
+                        timestamp = datetime.now(timezone.utc)
+
+                    # Create message record
+                    new_message = MessageModel(
+                        id=msg_id,
+                        account_id=account_id,
+                        sender_id=final_sender_id,
+                        recipient_id=final_recipient_id,
+                        message_text=message_text,
+                        direction=direction,
+                        timestamp=timestamp,
+                        delivery_status="synced"  # Mark as synced from API
+                    )
+
+                    db.add(new_message)
+                    messages_synced += 1
+
+                except IntegrityError:
+                    # Race condition - message was added by webhook while we were syncing
+                    await db.rollback()
+                    messages_skipped += 1
+                except Exception as e:
+                    logger.warning(f"Failed to process message {msg.get('id')}: {e}")
+                    errors.append(f"Message {msg.get('id')}: {str(e)}")
+
+        except Exception as e:
+            logger.warning(f"Failed to process conversation {conv.get('id')}: {e}")
+            errors.append(f"Conversation {conv.get('id')}: {str(e)}")
+
+    # Commit all changes
+    try:
+        await db.commit()
+    except Exception as e:
+        logger.error(f"Failed to commit synced messages: {e}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save synced messages"
+        )
+
+    logger.info(
+        f"✅ Instagram sync complete for account {account_id}: "
+        f"{conversations_found} conversations, {messages_synced} new messages, "
+        f"{messages_skipped} skipped"
+    )
+
+    return SyncResult(
+        conversations_found=conversations_found,
+        messages_synced=messages_synced,
+        messages_skipped=messages_skipped,
+        errors=errors
+    )

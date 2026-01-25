@@ -50,6 +50,31 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
+  async function syncFromInstagram(accountId = null) {
+    /**
+     * Sync messages from Instagram's API.
+     * This fetches the full conversation history including messages
+     * sent from the native Instagram app.
+     *
+     * @param {string|null} accountId - Account to sync, or null for default
+     * @returns {Promise<{conversations_found: number, messages_synced: number, messages_skipped: number}>}
+     */
+    loading.value = true
+    error.value = null
+    try {
+      const params = accountId ? { account_id: accountId } : {}
+      const response = await apiClient.post('/ui/sync', null, { params })
+      console.log('📥 Instagram sync result:', response.data)
+      return response.data
+    } catch (err) {
+      // Don't set error for sync failures - it's optional
+      console.warn('Instagram sync failed (will use cached data):', err.message)
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function fetchMessages(senderId, accountId = null) {
     loading.value = true
     error.value = null
@@ -223,6 +248,7 @@ export const useMessagesStore = defineStore('messages', () => {
     // Actions
     fetchCurrentAccount,
     fetchConversations,
+    syncFromInstagram,
     fetchMessages,
     sendMessage,
     addIncomingMessage,
