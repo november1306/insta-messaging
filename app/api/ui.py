@@ -621,11 +621,12 @@ async def get_conversations(
                 detail="Account not found"
             )
 
-        messaging_channel_id = account.messaging_channel_id
+        # Use messaging_channel_id if set, otherwise fall back to instagram_account_id
+        # This is consistent with the sync function behavior
+        messaging_channel_id = account.messaging_channel_id or account.instagram_account_id
 
         if not messaging_channel_id:
-            logger.warning(f"Account {account_id} has no messaging_channel_id bound yet")
-            # Return empty conversations if channel not bound yet
+            logger.warning(f"Account {account_id} has no messaging_channel_id or instagram_account_id")
             return ConversationsResponse(conversations=[])
 
         # Subquery to get the latest message for each contact (customer)
@@ -836,13 +837,14 @@ async def get_messages(
                 detail="Account not found"
             )
 
-        messaging_channel_id = account.messaging_channel_id
+        # Use messaging_channel_id if set, otherwise fall back to instagram_account_id
+        messaging_channel_id = account.messaging_channel_id or account.instagram_account_id
 
         if not messaging_channel_id:
-            logger.warning(f"Account {account_id} has no messaging_channel_id bound yet")
+            logger.warning(f"Account {account_id} has no messaging_channel_id or instagram_account_id")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Account has no messaging channel bound yet. Please receive a message first."
+                detail="Account has no messaging channel bound yet."
             )
 
         # Decrypt account access token for profile fetching
