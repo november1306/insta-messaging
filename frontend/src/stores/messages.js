@@ -224,6 +224,18 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
+  function updateConversationForOutbound(recipientId, messageText, timestamp) {
+    // Update conversation list when an outbound message is sent
+    // This ensures last_message and last_message_time are updated in the sidebar
+    const convIndex = conversations.value.findIndex(c => c.sender_id === recipientId)
+    if (convIndex >= 0) {
+      conversations.value[convIndex].last_message = messageText || ''
+      conversations.value[convIndex].last_message_time = timestamp
+    }
+    // Note: If no conversation exists, we don't create one here
+    // The conversation should already exist since we're replying to a customer
+  }
+
   function setActiveConversation(senderId) {
     activeConversationId.value = senderId
 
@@ -253,6 +265,7 @@ export const useMessagesStore = defineStore('messages', () => {
     sendMessage,
     addIncomingMessage,
     updateMessageStatus,
+    updateConversationForOutbound,
     setActiveConversation
   }
 })

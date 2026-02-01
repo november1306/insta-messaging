@@ -235,6 +235,14 @@ async function handleSSEMessage(data) {
           // Add new outbound message from SSE (e.g., sent from another tab)
           store.messages[recipientId].push(data.data)
         }
+
+        // Update conversation list sidebar with new message info
+        // This ensures last_message and last_message_time update for outbound messages
+        store.updateConversationForOutbound(
+          recipientId,
+          data.data.text,
+          data.data.timestamp
+        )
       }
       break
     case 'message_status':

@@ -636,13 +636,17 @@ async def get_conversations(
         # Contact ID is:
         #   - sender_id if direction='inbound'
         #   - recipient_id if direction='outbound'
+        #
+        # IMPORTANT: We use MAX(timestamp) instead of MAX(id) because message IDs
+        # are strings (e.g., 'mid_xxx') and MAX() on strings returns alphabetically
+        # highest, NOT chronologically latest.
         subq = (
             select(
                 case(
                     (MessageModel.direction == 'inbound', MessageModel.sender_id),
                     else_=MessageModel.recipient_id
                 ).label('contact_id'),
-                func.max(MessageModel.id).label('latest_message_id')
+                func.max(MessageModel.timestamp).label('latest_timestamp')
             )
             .where(
                 or_(
@@ -663,7 +667,7 @@ async def get_conversations(
         )
 
         # Join to get full message details
-        # Match on contact_id AND message ID to get the actual latest message
+        # Match on contact_id AND timestamp to get the actual latest message
         stmt = (
             select(MessageModel)
             .join(
@@ -673,7 +677,7 @@ async def get_conversations(
                         and_(MessageModel.direction == 'inbound', MessageModel.sender_id == subq.c.contact_id),
                         and_(MessageModel.direction == 'outbound', MessageModel.recipient_id == subq.c.contact_id)
                     ),
-                    MessageModel.id == subq.c.latest_message_id
+                    MessageModel.timestamp == subq.c.latest_timestamp
                 )
             )
             .where(subq.c.contact_id != messaging_channel_id)  # Exclude self-messages
