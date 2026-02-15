@@ -283,6 +283,7 @@ def test_instagram_account():
 # =============================================================================
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 class TestThirdPartyIntegration:
     """
     Complete integration test from third-party perspective.
