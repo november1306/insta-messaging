@@ -1,11 +1,12 @@
 {
-  "permissions": {
-    "bash": {
-      "allowed": [
-        "ralph-wiggum:*",
-        "*/scripts/setup-ralph-loop.sh*"
+ "permissions": {
+      "defaultMode": "acceptEdits",
+      "allow": [
+        "Read",
+        "Edit",
+        "Bash(git:*)",
+        "Bash(npm:*)",
+        "Bash(python:*)"
       ]
     }
-  },
-  "enabledPlugins": {}
 }

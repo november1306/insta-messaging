@@ -1,11 +1,12 @@
 # Account ID Field Guide
 
-## Problem: Two Different ID Types
+## Problem: Three Different ID Types
 
-The application uses **two different types of IDs** to identify Instagram accounts, which can be confusing:
+The application uses **three different types of IDs** to identify Instagram accounts, which can be confusing:
 
 1. **Database Account ID** (`account_id`) - Internal ID for our database
-2. **Instagram Account ID** (`instagram_account_id`) - Instagram's actual account ID
+2. **Instagram Account ID** (`instagram_account_id`) - Instagram's OAuth profile ID
+3. **Messaging Channel ID** (`messaging_channel_id`) - Instagram's webhook routing ID
 
 Understanding when to use which ID is critical for avoiding bugs.
 
@@ -49,30 +50,153 @@ POST /api/v1/messages/send
 ### Format
 - Numeric string (17-20 digits)
 - Example: `24370771369265571`, `25021617690783377`
-- Source: Instagram Graph API OAuth response
+- Source: Instagram Graph API OAuth response (`/me` endpoint)
 
 ### Used For
 - **Instagram API Calls**: Sending messages, fetching account info
-- **Webhook Routing**: Identifying which account received a message
-- **Conversation Filtering**: Matching messages to the correct account
-- **Public Identification**: This is Instagram's official account identifier
+- **OAuth Identification**: Links OAuth session to account
+- **Fallback Routing**: When `messaging_channel_id` is not yet set
 
 ### Where You'll See It
 - `Account.instagram_account_id` (unique column in database)
-- Webhook payloads: `recipient.id` or `sender.id`
+- OAuth token response: `user_id` field
+- Instagram Graph API: Profile queries
+
+### Key Insight
+This ID comes from Instagram's **OAuth profile API** and identifies the business account. However, Instagram may use a **different ID** in webhook payloads for the same account (see `messaging_channel_id` below).
+
+---
+
+## ID Type 3: Messaging Channel ID (`messaging_channel_id`)
+
+### Format
+- Numeric string (17-20 digits)
+- Example: `17841478096518771`
+- Source: Webhook payload `recipient.id` field (for inbound messages)
+
+### Used For
+- **Webhook Routing**: Primary identifier for routing incoming messages
+- **Message Filtering**: Matching messages to the correct account in UI
+- **Conversation Grouping**: Consistent ID across all messages in a conversation
+
+### Where You'll See It
+- `Account.messaging_channel_id` (nullable column in database)
+- Webhook payloads: `recipient.id` (inbound) or `sender.id` (outbound echoes)
 - Messages table: `sender_id`, `recipient_id`
-- Instagram Graph API responses
 - Frontend conversation filters
 
-### Example Usage
+### Key Insight
+This ID is **often the same** as `instagram_account_id`, but can be **different** depending on Instagram's internal routing. The `messaging_channel_id`:
+- Is `NULL` for newly linked accounts (no webhook received yet)
+- Gets populated on first inbound webhook OR during conversation sync
+- Should be used for all message filtering once available
+
+### Example: When IDs Differ
 ```python
-# Webhook from Instagram
+# OAuth gives us:
+instagram_account_id = "24370771369265571"
+
+# But webhook arrives with:
 {
     "messaging": [{
-        "sender": {"id": "1558635688632972"},      # Customer's Instagram ID
-        "recipient": {"id": "24370771369265571"}   # ← Your business account ID
+        "recipient": {"id": "17841478096518771"}  # Different!
     }]
 }
+
+# So we store:
+messaging_channel_id = "17841478096518771"
+```
+
+---
+
+## The AccountIdentity Abstraction
+
+To handle the complexity of three ID types, we use the `AccountIdentity` class (`app/domain/account_identity.py`).
+
+### Purpose
+`AccountIdentity` is a **frozen dataclass** that encapsulates all ID-related logic in one place:
+
+```python
+from app.domain.account_identity import AccountIdentity
+
+# Create from Account model
+identity = AccountIdentity.from_account(account)
+
+# Get the effective channel ID (with fallback)
+channel_id = identity.effective_channel_id
+
+# Check if an ID belongs to this business account
+if identity.is_business_id(sender_id):
+    direction = "outbound"
+
+# Detect message direction
+direction = identity.detect_direction(sender_id)  # 'inbound' or 'outbound'
+
+# Identify the customer in a message
+customer_id = identity.identify_other_party(sender_id, recipient_id)
+```
+
+### Key Properties and Methods
+
+| Property/Method | Description |
+|----------------|-------------|
+| `effective_channel_id` | Returns `messaging_channel_id` if set, otherwise `instagram_account_id` |
+| `business_ids` | Set of all known business IDs for O(1) membership testing |
+| `is_business_id(id)` | Returns `True` if the ID matches any business ID |
+| `detect_direction(sender_id)` | Returns `'inbound'` or `'outbound'` |
+| `identify_other_party(sender, recipient)` | Returns the customer's ID |
+| `normalize_message_ids(sender, customer)` | Returns consistent (sender, recipient) tuple |
+
+### Why This Matters
+Before `AccountIdentity`, the codebase had scattered double comparisons:
+
+```python
+# OLD: Repeated in multiple files
+if sender_id == messaging_channel_id or sender_id == account.instagram_account_id:
+    direction = "outbound"
+```
+
+Now there's a single source of truth:
+
+```python
+# NEW: Clean, testable, consistent
+if identity.is_business_id(sender_id):
+    direction = "outbound"
+```
+
+---
+
+## The `effective_channel_id` API Field
+
+The `/api/v1/accounts/me` endpoint returns an `effective_channel_id` field that frontends should use for message filtering.
+
+### API Response
+```json
+{
+  "accounts": [{
+    "account_id": "acc_89baed550ed9",
+    "instagram_account_id": "24370771369265571",
+    "messaging_channel_id": null,
+    "effective_channel_id": "24370771369265571",
+    "username": "myshop_official"
+  }]
+}
+```
+
+### Field Semantics
+
+| Field | Value | Use Case |
+|-------|-------|----------|
+| `messaging_channel_id` | Actual webhook ID or `null` | Diagnostic/debugging |
+| `effective_channel_id` | Always valid (with fallback) | **Use this for filtering** |
+
+### Frontend Usage
+```javascript
+// Always use effective_channel_id for filtering
+const filteredMessages = messages.filter(msg =>
+    msg.recipient_id === account.effective_channel_id ||
+    msg.sender_id === account.effective_channel_id
+)
 ```
 
 ---
@@ -86,68 +210,112 @@ POST /api/v1/messages/send
 - ✅ Passing IDs in JWT tokens
 - ✅ Frontend form submissions
 
-### Use `instagram_account_id` (Instagram ID) when:
-- ✅ Calling Instagram Graph API
-- ✅ Filtering messages/conversations by account
-- ✅ Routing incoming webhooks to correct account
-- ✅ Matching `recipient_id` in webhook payloads
+### Use `effective_channel_id` when:
+- ✅ Filtering messages/conversations by account in UI
+- ✅ Determining message direction
+- ✅ Grouping conversations
+- ✅ Any place you need "the ID that appears in messages"
+
+### Use `instagram_account_id` when:
+- ✅ Calling Instagram Graph API directly
+- ✅ Looking up account by OAuth response
+- ✅ Diagnostic logging
+
+### Use `messaging_channel_id` when:
+- ✅ Routing incoming webhooks (lookup by `recipient.id`)
+- ✅ Checking if webhook binding has occurred
+- ✅ Diagnostic purposes
 
 ---
 
 ## Common Patterns
 
-### Pattern 1: API Endpoint Accepts Database ID, Uses Instagram ID Internally
+### Pattern 1: Using AccountIdentity for Message Direction
 
 ```python
-# Frontend sends database account_id
-POST /api/v1/messages/send
-{
-    "account_id": "acc_89baed550ed9"  # Database ID
-}
+from app.domain.account_identity import AccountIdentity
 
-# Backend looks up Instagram ID
-account = await db.get(Account, "acc_89baed550ed9")
-instagram_client.send_message(
-    account_id=account.instagram_account_id,  # Instagram ID
-    recipient_id="1558635688632972",
-    message_text="Hello"
+# In webhook handler or sync service
+identity = AccountIdentity.from_account(account)
+
+# Determine direction
+direction = identity.detect_direction(sender_id)
+
+# Normalize IDs for storage
+normalized_sender, normalized_recipient = identity.normalize_message_ids(
+    sender_id, customer_id
+)
+
+# Create message with consistent IDs
+message = MessageModel(
+    sender_id=normalized_sender,
+    recipient_id=normalized_recipient,
+    direction=direction,
+    ...
 )
 ```
 
-### Pattern 2: Webhook Contains Instagram ID, Lookup Database ID
+### Pattern 2: Webhook Routing with Fallback
 
 ```python
-# Webhook payload
-webhook_data = {
-    "recipient": {"id": "24370771369265571"}  # Instagram ID
-}
+# Webhook arrives with recipient.id
+webhook_recipient_id = payload["messaging"][0]["recipient"]["id"]
 
-# Look up database account
+# Try messaging_channel_id first (exact match)
 account = await db.execute(
     select(Account).where(
-        Account.instagram_account_id == "24370771369265571"
+        Account.messaging_channel_id == webhook_recipient_id
     )
-)
-# Now have account.id = "acc_89baed550ed9" (database ID)
+).scalar_one_or_none()
+
+# Fallback to instagram_account_id (for newly linked accounts)
+if not account:
+    account = await db.execute(
+        select(Account).where(
+            Account.instagram_account_id == webhook_recipient_id
+        )
+    ).scalar_one_or_none()
+
+    # Bind the messaging_channel_id for future routing
+    if account:
+        account.messaging_channel_id = webhook_recipient_id
 ```
 
 ### Pattern 3: Frontend Conversation Filtering
 
 ```javascript
-// Frontend filters conversations by Instagram ID
-const filteredConversations = conversations.filter(conv =>
-    conv.instagram_account_id === accountsStore.selectedAccount.instagram_account_id
+// Get effective_channel_id from accounts API
+const { effective_channel_id } = selectedAccount
+
+// Filter conversations where this account is involved
+const myConversations = conversations.filter(conv =>
+    conv.recipient_id === effective_channel_id ||
+    conv.sender_id === effective_channel_id
 )
 
-// But when sending a reply, uses database ID
-fetch('/api/v1/messages/send', {
+// When sending a reply, use database account_id
+await fetch('/api/v1/messages/send', {
     method: 'POST',
     body: JSON.stringify({
-        account_id: accountsStore.selectedAccount.account_id,  // Database ID
-        recipient_id: conv.sender_id,
+        account_id: selectedAccount.account_id,  // Database ID for API
+        recipient_id: conv.customer_id,
         message_text: "Reply"
     })
 })
+```
+
+### Pattern 4: Syncing Messages with InstagramSyncService
+
+```python
+from app.application.instagram_sync_service import InstagramSyncService
+
+# The sync service uses AccountIdentity internally
+sync_service = InstagramSyncService(db, instagram_client)
+result = await sync_service.sync_account(account, hours_back=24)
+
+# Result includes statistics
+print(f"Synced {result.messages_synced} new messages")
+print(f"Skipped {result.messages_skipped} duplicates")
 ```
 
 ---
@@ -157,29 +325,36 @@ fetch('/api/v1/messages/send', {
 | Location | Field Name | ID Type | Example Value |
 |----------|-----------|---------|---------------|
 | `Account.id` | account_id | Database | `acc_89baed550ed9` |
-| `Account.instagram_account_id` | instagram_account_id | Instagram | `24370771369265571` |
+| `Account.instagram_account_id` | instagram_account_id | Instagram OAuth | `24370771369265571` |
+| `Account.messaging_channel_id` | messaging_channel_id | Webhook Channel | `17841478096518771` |
 | `UserAccount.account_id` | account_id | Database | `acc_89baed550ed9` |
-| `MessageModel.sender_id` | sender_id | Instagram | `1558635688632972` |
-| `MessageModel.recipient_id` | recipient_id | Instagram | `24370771369265571` |
+| `MessageModel.sender_id` | sender_id | Instagram (effective) | `17841478096518771` |
+| `MessageModel.recipient_id` | recipient_id | Instagram (effective) | `17841478096518771` |
 | JWT `primary_account_id` | account_id | Database | `acc_89baed550ed9` |
-| Webhook `recipient.id` | - | Instagram | `24370771369265571` |
+| Webhook `recipient.id` | - | Messaging Channel | `17841478096518771` |
 | API param `account_id` | account_id | Database | `acc_89baed550ed9` |
-| Frontend `conversation.instagram_account_id` | instagram_account_id | Instagram | `24370771369265571` |
-| Frontend `conversation.account_id` | account_id | Database | `acc_89baed550ed9` |
+| API response `effective_channel_id` | effective_channel_id | Instagram (with fallback) | `17841478096518771` |
+| `AccountIdentity.effective_channel_id` | - | Instagram (with fallback) | `17841478096518771` |
 
 ---
 
-## Why Two IDs?
+## Why Three IDs?
 
-**Historical Context**: The original implementation used environment variables for a single account. When OAuth multi-account support was added, we needed:
+### Historical Context
+Instagram's API uses different IDs in different contexts:
+- **OAuth API** returns one ID (`instagram_account_id`)
+- **Webhooks** may use a different ID (`messaging_channel_id`)
 
-1. **Internal database IDs** - To manage user-account relationships, permissions, and avoid conflicts
-2. **Instagram's IDs** - To interact with Instagram's API and route webhooks correctly
+This appears to be an artifact of Instagram's internal architecture, where messaging channels can have different identifiers than account profiles.
 
-**Design Decision**: Keep both IDs rather than using Instagram's ID as the primary key because:
-- Instagram IDs are external (we don't control the format/changes)
-- Database IDs can have meaningful prefixes (`acc_`, `usr_`, etc.)
-- Clear separation between internal logic (database ID) and external API (Instagram ID)
+### Design Decision
+We store both IDs and provide `effective_channel_id` as the resolution:
+
+1. **`instagram_account_id`** - Always populated (from OAuth), used for API calls
+2. **`messaging_channel_id`** - Populated by webhooks/sync, used for routing
+3. **`effective_channel_id`** - Computed: `messaging_channel_id || instagram_account_id`
+
+The `AccountIdentity` class encapsulates this logic so application code doesn't need to handle fallbacks manually.
 
 ---
 
@@ -190,22 +365,45 @@ fetch('/api/v1/messages/send', {
 **Fix**: Use `account_id` (database ID) for all API endpoints
 
 ### Bug: Conversations not filtering correctly
-**Cause**: Using `account_id` to filter messages instead of `instagram_account_id`
-**Fix**: Use `instagram_account_id` to match against `recipient_id` in messages
+**Cause**: Using `account_id` or raw `instagram_account_id` to filter messages
+**Fix**: Use `effective_channel_id` from the accounts API response
 
 ### Bug: Webhook not routing to correct account
-**Cause**: Looking up account by `account_id` instead of `instagram_account_id`
-**Fix**: Look up `Account.instagram_account_id` to match webhook `recipient.id`
+**Cause**: Only checking `instagram_account_id`, not `messaging_channel_id`
+**Fix**: Check `messaging_channel_id` first, then fall back to `instagram_account_id`
+
+### Bug: Messages have inconsistent sender/recipient IDs
+**Cause**: Not normalizing IDs before storage
+**Fix**: Use `AccountIdentity.normalize_message_ids()` to ensure consistent IDs
+
+### Bug: New account shows no messages after OAuth
+**Cause**: `messaging_channel_id` is NULL, frontend filtering by wrong ID
+**Fix**: Use `effective_channel_id` which provides the fallback automatically
 
 ---
 
 ## Best Practices
 
-1. **Name variables clearly**: Use `db_account_id` vs `instagram_account_id` when both are in scope
-2. **Document API contracts**: Always specify which ID type each endpoint parameter expects
-3. **Type hints**: Consider adding TypeScript for frontend to catch ID type mismatches
-4. **Validation**: Add validation that `account_id` starts with `acc_` prefix
-5. **Logging**: Log both IDs when debugging: `@{username} (DB: {account.id}, IG: {account.instagram_account_id})`
+1. **Use AccountIdentity**: Always use `AccountIdentity.from_account()` for ID-related logic
+2. **Use effective_channel_id**: Frontend should always filter by `effective_channel_id`
+3. **Name variables clearly**: Use `db_account_id` vs `instagram_id` when both are in scope
+4. **Validate prefixes**: Add validation that `account_id` starts with `acc_` prefix
+5. **Logging**: Log all three IDs when debugging:
+   ```python
+   logger.info(f"@{account.username} (DB: {account.id}, IG: {account.instagram_account_id}, Channel: {account.messaging_channel_id})")
+   ```
+6. **Don't assume equality**: Never assume `instagram_account_id == messaging_channel_id`
+
+---
+
+## Architecture: Key Files
+
+| File | Responsibility |
+|------|----------------|
+| `app/domain/account_identity.py` | `AccountIdentity` class - ID resolution logic |
+| `app/application/instagram_sync_service.py` | Message sync using `AccountIdentity` |
+| `app/api/accounts.py` | API returns `effective_channel_id` |
+| `app/api/webhooks.py` | Webhook routing with channel ID binding |
 
 ---
 
@@ -244,56 +442,6 @@ Where `attachment_id` = `{message_id}_{attachment_index}`
 3. **Simple Lookup**: Backend looks up attachment by ID, verifies ownership via message → account relationship
 4. **Clean URLs**: Frontend uses `/media/attachments/mid_abc123_0` (no need to know account/sender)
 
-### Implementation Details
-
-**Backend Storage** (`app/services/media_downloader.py`):
-```python
-# Generate attachment ID from message metadata
-attachment_id = f"{message_id}_{attachment_index}"
-
-# Store at: media/attachments/{attachment_id}.{ext}
-local_path = self.base_dir / "attachments" / f"{attachment_id}{extension}"
-```
-
-**Backend Serving** (`app/main.py`):
-```python
-@app.get("/media/attachments/{attachment_id}")
-async def serve_media(
-    attachment_id: str,
-    auth_context: dict = Depends(verify_jwt_or_api_key),
-    db: AsyncSession = Depends(get_db_session)
-):
-    # Look up attachment in database
-    attachment = await db.get(MessageAttachment, attachment_id)
-
-    # Verify user owns the message via account ownership
-    message = await db.get(MessageModel, attachment.message_id)
-    account = await get_account_by_recipient_id(message.recipient_id)
-    verify_user_has_access(user_id, account.id)
-
-    # Serve file
-    return FileResponse(attachment.media_url_local)
-```
-
-**Frontend Extraction** (`useAuthenticatedMedia.js`):
-```javascript
-// Database stores: "media/attachments/mid_abc123_0.jpg"
-// Extract attachment ID: "mid_abc123_0"
-const attachmentId = mediaPath.match(/media\/attachments\/([^/.]+)/)[1]
-
-// Request: /media/attachments/mid_abc123_0
-const response = await fetch(`/media/attachments/${attachmentId}`)
-```
-
-### Access Control
-
-Access is verified through the **message ownership chain**:
-1. User owns account (via `UserAccount` table)
-2. Account received the message (via `MessageModel.recipient_id` matching `Account.messaging_channel_id` or `Account.instagram_account_id`)
-3. Message contains the attachment (via `MessageAttachment.message_id`)
-
-This ensures users can only access media from conversations they own, without needing account IDs in the URL.
-
 ---
 
 ## Future Consideration
@@ -304,4 +452,4 @@ This ensures users can only access media from conversations they own, without ne
 - Would require migration and frontend updates
 - Trade-off: Simpler model but less control over ID format
 
-**Current Recommendation**: Keep both IDs. The clarity and control are worth the minor complexity.
+**Current Recommendation**: Keep both IDs. The `AccountIdentity` abstraction makes the complexity manageable while providing flexibility.
