@@ -147,6 +147,7 @@ class ConversationItem(BaseModel):
     unread_count: int = Field(..., example=0, description="Number of unread messages (always 0 in MVP)")
     messaging_channel_id: str = Field(..., example="17841478096518771", description="Messaging channel ID for this conversation")
     account_id: str = Field(..., example="acc_a3f7e8b2c1d4", description="Account ID this conversation belongs to")
+    account_type: Optional[str] = Field(None, example="business", description="Contact account type: 'private', 'business', or null (unknown)")
 
     class Config:
         from_attributes = True
@@ -524,7 +525,8 @@ async def _fetch_instagram_profile(sender_id: str, access_token: str = None) -> 
                 return {
                     "username": f"@{profile['username']}",
                     # Note: Field name is 'profile_pic' for ISGIDs, 'profile_picture_url' for business accounts
-                    "profile_picture_url": profile.get("profile_pic") or profile.get("profile_picture_url")
+                    "profile_picture_url": profile.get("profile_pic") or profile.get("profile_picture_url"),
+                    "account_type": profile.get("account_type"),
                 }
     except Exception as e:
         logger.warning(f"Failed to fetch profile for {sender_id}: {e}")
@@ -752,15 +754,18 @@ async def get_conversations(
                 profile_map[cid] = api_profile
                 # Store actual pic URL, or NO_ACCESS if user has no pic available
                 pic_to_cache = api_profile.get("profile_picture_url") or PROFILE_PIC_NO_ACCESS
+                acct_type = api_profile.get("account_type")
                 if cached:
                     cached.username = api_profile["username"].lstrip("@")
                     cached.profile_picture_url = pic_to_cache
+                    cached.account_type = acct_type
                     cached.last_updated = now
                 else:
                     db.add(InstagramProfile(
                         sender_id=cid,
                         username=api_profile["username"].lstrip("@"),
                         profile_picture_url=pic_to_cache,
+                        account_type=acct_type,
                         last_updated=now,
                     ))
             elif cid in api_results and api_results[cid] is None:
@@ -775,9 +780,10 @@ async def get_conversations(
                         profile_map[cid] = {
                             "username": f"@{cached.username}" if not cached.username.startswith("@") else cached.username,
                             "profile_picture_url": None,
+                            "account_type": cached.account_type,
                         }
                     else:
-                        profile_map[cid] = {"username": cid, "profile_picture_url": None}
+                        profile_map[cid] = {"username": cid, "profile_picture_url": None, "account_type": cached.account_type}
                 else:
                     # No cache at all - create entry with NO_ACCESS marker
                     db.add(InstagramProfile(
@@ -786,16 +792,17 @@ async def get_conversations(
                         profile_picture_url=PROFILE_PIC_NO_ACCESS,
                         last_updated=now,
                     ))
-                    profile_map[cid] = {"username": cid, "profile_picture_url": None}
+                    profile_map[cid] = {"username": cid, "profile_picture_url": None, "account_type": None}
             elif cached and cached.username:
                 # Not fetched (cache was fresh) - use cached data
                 pic_url = cached.profile_picture_url if cached.profile_picture_url != PROFILE_PIC_NO_ACCESS else None
                 profile_map[cid] = {
                     "username": f"@{cached.username}" if not cached.username.startswith("@") else cached.username,
                     "profile_picture_url": pic_url,
+                    "account_type": cached.account_type,
                 }
             else:
-                profile_map[cid] = {"username": cid, "profile_picture_url": None}
+                profile_map[cid] = {"username": cid, "profile_picture_url": None, "account_type": cached.account_type if cached else None}
 
         # Commit cache updates (best-effort)
         try:
@@ -812,7 +819,7 @@ async def get_conversations(
             channel_id = msg.recipient_id if msg.direction == 'inbound' else msg.sender_id
 
             # Get profile from pre-fetched map
-            profile = profile_map.get(contact_id, {"username": contact_id, "profile_picture_url": None})
+            profile = profile_map.get(contact_id, {"username": contact_id, "profile_picture_url": None, "account_type": None})
 
             # Ensure msg.timestamp is timezone-aware (assume UTC if naive)
             msg_timestamp = msg.timestamp
@@ -827,7 +834,8 @@ async def get_conversations(
                 "last_message_time": msg_timestamp.isoformat() if msg_timestamp else None,
                 "unread_count": 0,  # TODO: Implement read/unread tracking
                 "messaging_channel_id": channel_id,  # The messaging channel
-                "account_id": account_id  # The database account ID (e.g., acc_xxx)
+                "account_id": account_id,  # The database account ID (e.g., acc_xxx)
+                "account_type": profile.get("account_type"),  # Contact's account type
             })
 
         return ConversationsResponse(conversations=conversations)
