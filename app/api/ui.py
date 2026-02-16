@@ -702,14 +702,13 @@ async def get_conversations(
             logger.warning(f"Failed to decrypt access token for account {account_id}: {e}")
             access_token = None
 
-        # Batch fetch profiles - cache-first strategy to avoid slow API calls
-        # and handle Instagram "User consent required" errors gracefully
+        # Batch fetch profiles with DB cache fallback for Instagram "User consent" errors
         unique_contact_ids = list(set(
             msg.sender_id if msg.direction == 'inbound' else msg.recipient_id
             for msg in messages
         ))
 
-        # Step 1: Load cached profiles from DB (fast, always available)
+        # Step 1: Load cached profiles from DB (used as fallback when API fails)
         cached_result = await db.execute(
             select(InstagramProfile).where(
                 InstagramProfile.sender_id.in_(unique_contact_ids)
@@ -717,33 +716,25 @@ async def get_conversations(
         )
         cached_profiles = {p.sender_id: p for p in cached_result.scalars().all()}
 
-        # Step 2: Identify contacts that need a fresh API fetch
-        # Only fetch from API if: no cache exists, or cache has no username
+        # Step 2: Fetch ALL profiles from Instagram API (in parallel)
         import asyncio
-        ids_needing_fetch = [
-            cid for cid in unique_contact_ids
-            if cid not in cached_profiles
-            or not cached_profiles[cid].username
-        ]
-
-        # Step 3: Fetch missing profiles from Instagram API (in parallel)
-        if ids_needing_fetch and access_token:
-            fetch_tasks = [_get_instagram_profile(cid, access_token) for cid in ids_needing_fetch]
+        if access_token:
+            fetch_tasks = [_get_instagram_profile(cid, access_token) for cid in unique_contact_ids]
             fetched = await asyncio.gather(*fetch_tasks)
-            api_results = dict(zip(ids_needing_fetch, fetched))
+            api_results = dict(zip(unique_contact_ids, fetched))
         else:
             api_results = {}
 
-        # Step 4: Build final profile map - prefer API result with username, fallback to cache
+        # Step 3: Build profile map - use API result if successful, otherwise fall back to cache
         profile_map = {}
         for cid in unique_contact_ids:
             api_profile = api_results.get(cid)
             cached = cached_profiles.get(cid)
 
-            # Use API result if it returned a real username (not just the raw ID)
+            # API returned a real username (not just the raw ID fallback)
             if api_profile and api_profile["username"] != cid:
                 profile_map[cid] = api_profile
-                # Update cache in background (non-blocking)
+                # Update cache with fresh data
                 if cached:
                     cached.username = api_profile["username"].lstrip("@")
                     if api_profile.get("profile_picture_url"):
@@ -757,7 +748,7 @@ async def get_conversations(
                         last_updated=datetime.now(timezone.utc),
                     ))
             elif cached and cached.username:
-                # API failed but we have cached data - use it
+                # API failed (e.g. "User consent required") but we have cached data
                 profile_map[cid] = {
                     "username": f"@{cached.username}" if not cached.username.startswith("@") else cached.username,
                     "profile_picture_url": cached.profile_picture_url,
