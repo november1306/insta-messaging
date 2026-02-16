@@ -169,20 +169,23 @@ class MessageService:
         recipient_id: str,
         message_text: Optional[str],
         timestamp: datetime,
-        attachments: Optional[List[dict]] = None
+        attachments: Optional[List[dict]] = None,
+        direction: str = 'inbound'
     ) -> Message:
         """
-        Process inbound message from Instagram webhook.
+        Process message from Instagram webhook (inbound or echo/outbound).
 
         Args:
             uow: Unit of Work for transaction
             messaging_channel_id: Routing ID from webhook
             instagram_message_id: Instagram's message ID
-            sender_id: Customer's Instagram user ID
-            recipient_id: Our account's Instagram ID (from webhook)
+            sender_id: Sender's Instagram user ID
+            recipient_id: Recipient's Instagram user ID
             message_text: Message content
             timestamp: When message was sent
             attachments: List of attachment metadata
+            direction: Message direction ('inbound' or 'outbound').
+                       Set to 'outbound' for echo messages (business-sent, echoed by Instagram).
 
         Returns:
             Saved message
@@ -230,10 +233,11 @@ class MessageService:
             sender_id=InstagramUserId(sender_id),
             recipient_id=InstagramUserId(recipient_id),
             message_text=message_text,
-            direction='inbound',
+            direction=direction,
             timestamp=timestamp,
             created_at=datetime.now(timezone.utc),
-            attachments=attachment_entities
+            attachments=attachment_entities,
+            delivery_status='sent' if direction == 'outbound' else None
         )
 
         # 3. Save message

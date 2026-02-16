@@ -373,6 +373,19 @@ async def handle_webhook(
                                         "mime_type": None
                                     })
 
+                        # Determine direction and normalize IDs based on echo flag
+                        is_echo = message_data.get("is_echo", False)
+                        if is_echo:
+                            # Echo: business sent this message, customer received it
+                            direction = "outbound"
+                            sender_id_for_storage = messaging_channel_id
+                            recipient_id_for_storage = message_data["recipient_id"]
+                        else:
+                            # Normal inbound: customer sent, business received
+                            direction = "inbound"
+                            sender_id_for_storage = message_data["sender_id"]
+                            recipient_id_for_storage = messaging_channel_id
+
                         # Save message using Unit of Work + MessageService
                         try:
                             # Create Unit of Work
@@ -382,11 +395,12 @@ async def handle_webhook(
                                     uow=uow,
                                     messaging_channel_id=MessagingChannelId(messaging_channel_id),
                                     instagram_message_id=message_data["id"],
-                                    sender_id=message_data["sender_id"],
-                                    recipient_id=messaging_channel_id,  # Use messaging_channel_id for routing
+                                    sender_id=sender_id_for_storage,
+                                    recipient_id=recipient_id_for_storage,
                                     message_text=message_data["text"],
                                     timestamp=message_data["timestamp"],
-                                    attachments=attachments_list if attachments_list else None
+                                    attachments=attachments_list if attachments_list else None,
+                                    direction=direction
                                 )
 
                                 # Get account for SSE broadcast and auto-reply
@@ -474,9 +488,9 @@ async def handle_webhook(
                                             "sender_name": sender_username,
                                             "profile_picture_url": profile_picture_url,
                                             "text": saved_message.message_text,
-                                            "direction": "inbound",
+                                            "direction": direction,
                                             "timestamp": saved_message.timestamp.isoformat() if saved_message.timestamp else None,
-                                            "messaging_channel_id": saved_message.recipient_id.value,
+                                            "messaging_channel_id": messaging_channel_id,
                                             "account_id": saved_message.account_id.value if saved_message.account_id else None,
                                             "attachments": attachments_data
                                         })
@@ -492,8 +506,9 @@ async def handle_webhook(
                             attachment_summary = f" with {saved_message.attachment_count} attachment(s)" if saved_message.attachment_count > 0 else ""
                             logger.info(f"✅ Stored message {saved_message.id.value} from {saved_message.sender_id.value}{attachment_summary}")
 
-                            # Handle auto-reply ONLY for newly saved messages
-                            if account:
+                            # Handle auto-reply ONLY for newly saved INBOUND messages
+                            # Echo (outbound) messages should not trigger auto-replies
+                            if account and not is_echo:
                                 try:
                                     # Create new UoW for auto-reply (separate transaction)
                                     async with SQLAlchemyUnitOfWork(db) as auto_reply_uow:
@@ -527,8 +542,9 @@ async def handle_webhook(
                                 except Exception as auto_reply_error:
                                     logger.error(f"⚠️ Auto-reply failed: {auto_reply_error}", exc_info=True)
 
-                            # Forward to CRM webhook (fire-and-forget)
-                            asyncio.create_task(_forward_to_crm_domain(saved_message, messaging_channel_id))
+                            # Forward to CRM webhook (fire-and-forget) - only for inbound messages
+                            if not is_echo:
+                                asyncio.create_task(_forward_to_crm_domain(saved_message, messaging_channel_id))
 
                         except Exception as save_error:
                             # DuplicateMessageError or other errors
@@ -665,11 +681,14 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
 
         message = messaging_event["message"]
 
-        # Skip echo messages (messages we sent that Instagram echoes back)
-        # Instagram sends these with is_echo: true to confirm delivery
-        if message.get("is_echo"):
-            logger.info(f"ℹ️ Skipping echo message (outbound confirmation): mid={message.get('mid')}, sender={messaging_event.get('sender', {}).get('id')}")
-            return None
+        # Detect echo messages (messages sent by business, echoed back by Instagram)
+        # These are outbound messages - store them instead of skipping
+        is_echo = bool(message.get("is_echo"))
+        if is_echo:
+            logger.info(
+                f"Echo message detected (outbound): mid={message.get('mid')}, "
+                f"sender={messaging_event.get('sender', {}).get('id')}"
+            )
 
         text = message.get("text")
         attachments = message.get("attachments", [])
@@ -736,6 +755,7 @@ def _extract_message_data(messaging_event: dict) -> dict | None:
                     message_data["text"] = "[Unsupported file type]"
                     logger.warning(f"Could not parse any attachments from message {message_data['id']}")
 
+        message_data["is_echo"] = is_echo
         return message_data
 
     except Exception as e:
