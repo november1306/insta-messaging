@@ -493,21 +493,18 @@ async def _get_instagram_username(sender_id: str, access_token: str = None, is_b
     return username or sender_id  # Fallback to sender_id if fetch fails
 
 
-async def _get_instagram_profile(sender_id: str, access_token: str = None) -> dict:
-    """
-    Get Instagram profile data for a sender ID.
+# Sentinel value stored in profile_picture_url to indicate Instagram denied access
+# (vs None which means "never fetched yet")
+PROFILE_PIC_NO_ACCESS = "NO_ACCESS"
 
-    Args:
-        sender_id: Instagram user ID (IGID scoped to messaging channel)
-        access_token: Optional account-specific access token. If not provided, uses global settings token (legacy).
 
-    Returns:
-        Dictionary with username and profile_picture_url, or default values if fetch fails
+async def _fetch_instagram_profile(sender_id: str, access_token: str = None) -> dict:
     """
-    # Fetch from Instagram API
+    Fetch profile from Instagram API. Returns dict with username/profile_picture_url,
+    or None if the API call failed (e.g. "User consent required").
+    """
     try:
         async with httpx.AsyncClient() as http_client:
-            # Use account-specific token if provided (multi-account), otherwise fallback to global settings
             if access_token:
                 instagram_client = InstagramClient(
                     http_client=http_client,
@@ -532,11 +529,7 @@ async def _get_instagram_profile(sender_id: str, access_token: str = None) -> di
     except Exception as e:
         logger.warning(f"Failed to fetch profile for {sender_id}: {e}")
 
-    # Fallback
-    return {
-        "username": sender_id,
-        "profile_picture_url": None
-    }
+    return None
 
 
 @router.get(
@@ -702,13 +695,19 @@ async def get_conversations(
             logger.warning(f"Failed to decrypt access token for account {account_id}: {e}")
             access_token = None
 
-        # Batch fetch profiles with DB cache fallback for Instagram "User consent" errors
+        # Profile resolution strategy:
+        # 1. Use cached profile from DB (fast, no API calls)
+        # 2. If no cache or cache is stale (>30 days), fetch from Instagram API
+        # 3. If API returns "User consent required", mark as NO_ACCESS to avoid retrying
+        import asyncio
+        PROFILE_STALE_DAYS = 30
+
         unique_contact_ids = list(set(
             msg.sender_id if msg.direction == 'inbound' else msg.recipient_id
             for msg in messages
         ))
 
-        # Step 1: Load cached profiles from DB (used as fallback when API fails)
+        # Step 1: Load all cached profiles from DB
         cached_result = await db.execute(
             select(InstagramProfile).where(
                 InstagramProfile.sender_id.in_(unique_contact_ids)
@@ -716,45 +715,84 @@ async def get_conversations(
         )
         cached_profiles = {p.sender_id: p for p in cached_result.scalars().all()}
 
-        # Step 2: Fetch ALL profiles from Instagram API (in parallel)
-        import asyncio
-        if access_token:
-            fetch_tasks = [_get_instagram_profile(cid, access_token) for cid in unique_contact_ids]
-            fetched = await asyncio.gather(*fetch_tasks)
-            api_results = dict(zip(unique_contact_ids, fetched))
-        else:
-            api_results = {}
+        # Step 2: Determine which contacts need an API fetch
+        # Fetch if: no cache at all, or cache is stale (>30 days)
+        # Skip if: cache has NO_ACCESS marker (Instagram denied) AND not yet stale
+        now = datetime.now(timezone.utc)
+        stale_threshold = now - timedelta(days=PROFILE_STALE_DAYS)
+        ids_needing_fetch = []
+        for cid in unique_contact_ids:
+            cached = cached_profiles.get(cid)
+            if not cached:
+                # Never fetched - need API call
+                ids_needing_fetch.append(cid)
+            elif cached.profile_picture_url is None:
+                # profile_picture_url is None -> never attempted a pic fetch yet
+                ids_needing_fetch.append(cid)
+            elif cached.last_updated.replace(tzinfo=timezone.utc) < stale_threshold:
+                # Cache is stale (>30 days) - refresh even NO_ACCESS entries
+                ids_needing_fetch.append(cid)
+            # else: cache is fresh (has username, pic or NO_ACCESS) - use as-is
 
-        # Step 3: Build profile map - use API result if successful, otherwise fall back to cache
+        # Step 3: Fetch from Instagram API in parallel (only for contacts that need it)
+        api_results = {}
+        if ids_needing_fetch and access_token:
+            fetch_tasks = [_fetch_instagram_profile(cid, access_token) for cid in ids_needing_fetch]
+            fetched = await asyncio.gather(*fetch_tasks)
+            api_results = dict(zip(ids_needing_fetch, fetched))
+
+        # Step 4: Build profile map and update cache
         profile_map = {}
         for cid in unique_contact_ids:
-            api_profile = api_results.get(cid)
+            api_profile = api_results.get(cid)  # None if not fetched or API failed
             cached = cached_profiles.get(cid)
 
-            # API returned a real username (not just the raw ID fallback)
-            if api_profile and api_profile["username"] != cid:
+            if api_profile:
+                # API succeeded - use fresh data and update cache
                 profile_map[cid] = api_profile
-                # Update cache with fresh data
                 if cached:
                     cached.username = api_profile["username"].lstrip("@")
-                    if api_profile.get("profile_picture_url"):
-                        cached.profile_picture_url = api_profile["profile_picture_url"]
-                    cached.last_updated = datetime.now(timezone.utc)
+                    cached.profile_picture_url = api_profile.get("profile_picture_url")
+                    cached.last_updated = now
                 else:
                     db.add(InstagramProfile(
                         sender_id=cid,
                         username=api_profile["username"].lstrip("@"),
                         profile_picture_url=api_profile.get("profile_picture_url"),
-                        last_updated=datetime.now(timezone.utc),
+                        last_updated=now,
                     ))
+            elif cid in api_results and api_results[cid] is None:
+                # API was attempted but failed (e.g. "User consent required")
+                # Mark as NO_ACCESS so we don't retry every page load
+                if cached:
+                    if cached.profile_picture_url is None:
+                        cached.profile_picture_url = PROFILE_PIC_NO_ACCESS
+                        cached.last_updated = now
+                    # Use cached username if available
+                    if cached.username:
+                        profile_map[cid] = {
+                            "username": f"@{cached.username}" if not cached.username.startswith("@") else cached.username,
+                            "profile_picture_url": None,
+                        }
+                    else:
+                        profile_map[cid] = {"username": cid, "profile_picture_url": None}
+                else:
+                    # No cache at all - create entry with NO_ACCESS marker
+                    db.add(InstagramProfile(
+                        sender_id=cid,
+                        username=None,
+                        profile_picture_url=PROFILE_PIC_NO_ACCESS,
+                        last_updated=now,
+                    ))
+                    profile_map[cid] = {"username": cid, "profile_picture_url": None}
             elif cached and cached.username:
-                # API failed (e.g. "User consent required") but we have cached data
+                # Not fetched (cache was fresh) - use cached data
+                pic_url = cached.profile_picture_url if cached.profile_picture_url != PROFILE_PIC_NO_ACCESS else None
                 profile_map[cid] = {
                     "username": f"@{cached.username}" if not cached.username.startswith("@") else cached.username,
-                    "profile_picture_url": cached.profile_picture_url,
+                    "profile_picture_url": pic_url,
                 }
             else:
-                # No data at all - show raw ID
                 profile_map[cid] = {"username": cid, "profile_picture_url": None}
 
         # Commit cache updates (best-effort)
