@@ -750,15 +750,17 @@ async def get_conversations(
             if api_profile:
                 # API succeeded - use fresh data and update cache
                 profile_map[cid] = api_profile
+                # Store actual pic URL, or NO_ACCESS if user has no pic available
+                pic_to_cache = api_profile.get("profile_picture_url") or PROFILE_PIC_NO_ACCESS
                 if cached:
                     cached.username = api_profile["username"].lstrip("@")
-                    cached.profile_picture_url = api_profile.get("profile_picture_url")
+                    cached.profile_picture_url = pic_to_cache
                     cached.last_updated = now
                 else:
                     db.add(InstagramProfile(
                         sender_id=cid,
                         username=api_profile["username"].lstrip("@"),
-                        profile_picture_url=api_profile.get("profile_picture_url"),
+                        profile_picture_url=pic_to_cache,
                         last_updated=now,
                     ))
             elif cid in api_results and api_results[cid] is None:
