@@ -70,51 +70,60 @@ class InstagramClient:
         """
         Get user profile information from Instagram.
 
-        NOTE: Instagram-Scoped IDs (sender IDs) support 'name', 'username', and 'profile_pic' fields.
-        Requires User Profile API permission (pages_messaging) to retrieve profile_pic.
+        Tries 'profile_pic' field first (for regular Instagram-Scoped IDs / customers),
+        then falls back to 'profile_picture_url' (for business/creator accounts).
 
         Args:
-            user_id: Instagram user's PSID (Page-Scoped ID / Instagram-Scoped ID)
+            user_id: Instagram user ID (IGSID for customers, or IG User ID for business accounts)
 
         Returns:
-            Dictionary with user profile data (name, username, profile_pic) or None if failed
-            Note: Field is 'profile_pic' for ISGIDs, not 'profile_picture_url'
-
-        Example:
-            profile = await client.get_user_profile("1558635688632972")
-            # Returns: {"name": "John Doe", "username": "johndoe", "profile_pic": "https://..."}
+            Dictionary with user profile data. Profile picture is normalized to 'profile_pic' key.
+            Returns None if all attempts fail.
         """
         url = f"{self._api_base_url}/{user_id}"
 
-        try:
-            response = await self._http_client.get(
-                url,
-                params={
-                    # IMPORTANT: Use 'profile_pic' for Instagram-Scoped IDs (customers)
-                    # Use 'profile_picture_url' only for business accounts via get_business_account_profile()
-                    # Requires User Profile API permission (pages_messaging)
-                    "fields": "name,username,profile_pic",  # Note: profile_pic for IGSID, not profile_picture_url
-                    "access_token": self._token
-                },
-                timeout=5.0
-            )
-            
-            if response.status_code == 200:
-                profile_data = response.json()
-                self._logger.info(f"✅ Retrieved profile for user {user_id}")
-                return profile_data
-            else:
+        # Try profile_pic first (works for regular IGSID customers)
+        # If it fails with "nonexisting field", retry with profile_picture_url (business accounts)
+        field_sets = [
+            ("name,username,profile_pic", "IGSID"),
+            ("username,profile_picture_url", "business"),
+        ]
+
+        for fields, account_type in field_sets:
+            try:
+                response = await self._http_client.get(
+                    url,
+                    params={"fields": fields, "access_token": self._token},
+                    timeout=5.0
+                )
+
+                if response.status_code == 200:
+                    profile_data = response.json()
+                    # Normalize: ensure profile_pic key exists for downstream consumers
+                    if "profile_picture_url" in profile_data and "profile_pic" not in profile_data:
+                        profile_data["profile_pic"] = profile_data["profile_picture_url"]
+                    self._logger.info(f"Retrieved profile for {account_type} user {user_id}")
+                    return profile_data
+
                 error_data = response.json() if response.text else {}
                 error_message = error_data.get("error", {}).get("message", "Unknown error")
+
+                # If "nonexisting field (profile_pic)" -> this is a business account, try next field set
+                if "nonexisting field" in error_message and account_type == "IGSID":
+                    self._logger.debug(f"User {user_id} is a business account, retrying with profile_picture_url")
+                    continue
+
                 self._logger.warning(
-                    f"⚠️ Failed to get user profile - status: {response.status_code}, "
+                    f"Failed to get user profile for {user_id} - status: {response.status_code}, "
                     f"message: {error_message}"
                 )
                 return None
-                
-        except Exception as e:
-            self._logger.warning(f"⚠️ Error fetching user profile for {user_id}: {e}")
-            return None
+
+            except Exception as e:
+                self._logger.warning(f"Error fetching user profile for {user_id}: {e}")
+                return None
+
+        return None
 
     async def get_business_account_profile(self, ig_user_id: str) -> Optional[dict]:
         """
