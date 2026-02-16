@@ -462,17 +462,20 @@ async def handle_webhook(
                                                             # Extract profile_pic from API response and store as profile_picture_url
                                                             # Note: Field name is 'profile_pic' for ISGIDs, 'profile_picture_url' for business accounts
                                                             profile_picture_url = profile.get('profile_pic') or profile.get('profile_picture_url')
+                                                            contact_account_type = profile.get('account_type')
 
                                                             # Update or create cache entry
                                                             if cached_profile:
                                                                 cached_profile.username = username
                                                                 cached_profile.profile_picture_url = profile_picture_url
+                                                                cached_profile.account_type = contact_account_type
                                                                 cached_profile.last_updated = datetime.now(timezone.utc)
                                                             else:
                                                                 new_profile = InstagramProfile(
                                                                     sender_id=saved_message.sender_id.value,
                                                                     username=username,
                                                                     profile_picture_url=profile_picture_url,
+                                                                    account_type=contact_account_type,
                                                                     last_updated=datetime.now(timezone.utc)
                                                                 )
                                                                 db.add(new_profile)

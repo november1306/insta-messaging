@@ -181,6 +181,7 @@ class InstagramProfile(Base):
     sender_id = Column(String(50), primary_key=True)  # Instagram user ID (PSID)
     username = Column(String(100), nullable=True)  # Instagram username (without @ prefix)
     profile_picture_url = Column(String(500), nullable=True)  # Profile picture URL
+    account_type = Column(String(20), nullable=True)  # 'private', 'business', or None (unknown)
     last_updated = Column(TZDateTime, nullable=False, default=func.now())  # When profile was last fetched
 
     __table_args__ = (

@@ -199,7 +199,8 @@ export const useMessagesStore = defineStore('messages', () => {
         last_message_time: message.timestamp,
         unread_count: 1,
         messaging_channel_id: message.messaging_channel_id,  // Messaging channel that received the message
-        account_id: message.account_id  // Database account ID for sending messages
+        account_id: message.account_id,  // Database account ID for sending messages
+        account_type: message.account_type || null  // Contact account type (private/business)
       })
     }
 

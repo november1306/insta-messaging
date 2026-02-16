@@ -76,8 +76,18 @@
         <!-- Conversation Info -->
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between mb-1">
-            <h3 class="font-semibold text-gray-900 truncate">
+            <h3 class="font-semibold text-gray-900 truncate flex items-center gap-1.5">
               {{ conversation.sender_name }}
+              <span
+                v-if="conversation.account_type === 'business'"
+                class="inline-flex items-center gap-0.5 text-[10px] font-medium text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded-full flex-shrink-0"
+                title="Business account"
+              >
+                <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M6 6V5a3 3 0 013-3h2a3 3 0 013 3v1h2a2 2 0 012 2v3.57A22.952 22.952 0 0110 13a22.95 22.95 0 01-8-1.43V8a2 2 0 012-2h2zm2-1a1 1 0 011-1h2a1 1 0 011 1v1H8V5zm-2 8a1 1 0 100-2 1 1 0 000 2zm10 0a1 1 0 100-2 1 1 0 000 2zM4 16a2 2 0 012-2h8a2 2 0 012 2v1H4v-1z" clip-rule="evenodd" />
+                </svg>
+                Biz
+              </span>
             </h3>
             <span class="text-xs text-gray-500 flex-shrink-0 ml-2">
               {{ formatTime(conversation.last_message_time) }}

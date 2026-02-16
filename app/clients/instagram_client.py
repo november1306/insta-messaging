@@ -89,7 +89,7 @@ class InstagramClient:
             ("username,profile_picture_url", "business"),
         ]
 
-        for fields, account_type in field_sets:
+        for fields, field_set_label in field_sets:
             try:
                 response = await self._http_client.get(
                     url,
@@ -102,14 +102,16 @@ class InstagramClient:
                     # Normalize: ensure profile_pic key exists for downstream consumers
                     if "profile_picture_url" in profile_data and "profile_pic" not in profile_data:
                         profile_data["profile_pic"] = profile_data["profile_picture_url"]
-                    self._logger.info(f"Retrieved profile for {account_type} user {user_id}")
+                    # Tag account type based on which field set succeeded
+                    profile_data["account_type"] = "private" if field_set_label == "IGSID" else "business"
+                    self._logger.info(f"Retrieved profile for {field_set_label} user {user_id}")
                     return profile_data
 
                 error_data = response.json() if response.text else {}
                 error_message = error_data.get("error", {}).get("message", "Unknown error")
 
                 # If "nonexisting field (profile_pic)" -> this is a business account, try next field set
-                if "nonexisting field" in error_message and account_type == "IGSID":
+                if "nonexisting field" in error_message and field_set_label == "IGSID":
                     self._logger.debug(f"User {user_id} is a business account, retrying with profile_picture_url")
                     continue
 
