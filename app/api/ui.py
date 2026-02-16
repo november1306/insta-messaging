@@ -18,7 +18,7 @@ from sqlalchemy import select, func, desc, or_, and_, case
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
 from app.db.connection import get_db_session
-from app.db.models import MessageModel, APIKey, UserAccount, Account
+from app.db.models import MessageModel, APIKey, UserAccount, Account, InstagramProfile
 from app.clients.instagram_client import InstagramClient
 from app.config import settings
 from app.api.auth import verify_api_key, verify_ui_session, verify_jwt_or_api_key, LoginRequest
@@ -702,20 +702,75 @@ async def get_conversations(
             logger.warning(f"Failed to decrypt access token for account {account_id}: {e}")
             access_token = None
 
-        # Batch fetch profiles in parallel to avoid N+1 query problem
-        # Collect unique contact IDs (sender for inbound, recipient for outbound)
+        # Batch fetch profiles - cache-first strategy to avoid slow API calls
+        # and handle Instagram "User consent required" errors gracefully
         unique_contact_ids = list(set(
             msg.sender_id if msg.direction == 'inbound' else msg.recipient_id
             for msg in messages
         ))
 
-        # Fetch all profiles concurrently using account-specific token
-        import asyncio
-        profile_tasks = [_get_instagram_profile(contact_id, access_token) for contact_id in unique_contact_ids]
-        profiles = await asyncio.gather(*profile_tasks)
+        # Step 1: Load cached profiles from DB (fast, always available)
+        cached_result = await db.execute(
+            select(InstagramProfile).where(
+                InstagramProfile.sender_id.in_(unique_contact_ids)
+            )
+        )
+        cached_profiles = {p.sender_id: p for p in cached_result.scalars().all()}
 
-        # Create contact_id -> profile mapping
-        profile_map = dict(zip(unique_contact_ids, profiles))
+        # Step 2: Identify contacts that need a fresh API fetch
+        # Only fetch from API if: no cache exists, or cache has no username
+        import asyncio
+        ids_needing_fetch = [
+            cid for cid in unique_contact_ids
+            if cid not in cached_profiles
+            or not cached_profiles[cid].username
+        ]
+
+        # Step 3: Fetch missing profiles from Instagram API (in parallel)
+        if ids_needing_fetch and access_token:
+            fetch_tasks = [_get_instagram_profile(cid, access_token) for cid in ids_needing_fetch]
+            fetched = await asyncio.gather(*fetch_tasks)
+            api_results = dict(zip(ids_needing_fetch, fetched))
+        else:
+            api_results = {}
+
+        # Step 4: Build final profile map - prefer API result with username, fallback to cache
+        profile_map = {}
+        for cid in unique_contact_ids:
+            api_profile = api_results.get(cid)
+            cached = cached_profiles.get(cid)
+
+            # Use API result if it returned a real username (not just the raw ID)
+            if api_profile and api_profile["username"] != cid:
+                profile_map[cid] = api_profile
+                # Update cache in background (non-blocking)
+                if cached:
+                    cached.username = api_profile["username"].lstrip("@")
+                    if api_profile.get("profile_picture_url"):
+                        cached.profile_picture_url = api_profile["profile_picture_url"]
+                    cached.last_updated = datetime.now(timezone.utc)
+                else:
+                    db.add(InstagramProfile(
+                        sender_id=cid,
+                        username=api_profile["username"].lstrip("@"),
+                        profile_picture_url=api_profile.get("profile_picture_url"),
+                        last_updated=datetime.now(timezone.utc),
+                    ))
+            elif cached and cached.username:
+                # API failed but we have cached data - use it
+                profile_map[cid] = {
+                    "username": f"@{cached.username}" if not cached.username.startswith("@") else cached.username,
+                    "profile_picture_url": cached.profile_picture_url,
+                }
+            else:
+                # No data at all - show raw ID
+                profile_map[cid] = {"username": cid, "profile_picture_url": None}
+
+        # Commit cache updates (best-effort)
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
 
         conversations = []
         for msg in messages:

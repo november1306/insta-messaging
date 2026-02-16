@@ -466,7 +466,8 @@ class InstagramSyncService:
             cached = result.scalar_one_or_none()
 
             username = profile.get("username", "")
-            profile_pic = profile.get("profile_picture_url")
+            # Note: Field name is 'profile_pic' for ISGIDs, not 'profile_picture_url'
+            profile_pic = profile.get("profile_pic") or profile.get("profile_picture_url")
 
             if cached:
                 # Update existing
