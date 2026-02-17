@@ -144,6 +144,7 @@ class Account(Base):
     instagram_account_id = Column(String(50), unique=True, nullable=False)  # Instagram's OAuth profile ID (public)
     username = Column(String(100), nullable=False)  # Instagram username
     messaging_channel_id = Column(String(50), unique=True, nullable=True)  # Messaging channel ID from webhook entry.id (stable, used for routing)
+    conversations_api_id = Column(String(50), nullable=True)  # Business ID from Instagram Conversations API (may differ from other IDs)
     access_token_encrypted = Column(Text, nullable=False)  # Encrypted Instagram access token (Fernet)
 
     # OAuth-specific fields

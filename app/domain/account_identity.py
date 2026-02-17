@@ -43,6 +43,7 @@ class AccountIdentity:
     account_id: str           # Database account ID (acc_xxx)
     instagram_account_id: str  # OAuth profile ID (from Instagram API)
     messaging_channel_id: Optional[str]  # Webhook routing ID (may be None)
+    conversations_api_id: Optional[str] = None  # Business ID from Conversations API (may differ)
 
     @property
     def effective_channel_id(self) -> str:
@@ -74,6 +75,8 @@ class AccountIdentity:
         ids = {self.instagram_account_id}
         if self.messaging_channel_id:
             ids.add(self.messaging_channel_id)
+        if self.conversations_api_id:
+            ids.add(self.conversations_api_id)
         return ids
 
     def is_business_id(self, instagram_id: str) -> bool:
@@ -169,5 +172,6 @@ class AccountIdentity:
         return cls(
             account_id=account.id,
             instagram_account_id=account.instagram_account_id,
-            messaging_channel_id=account.messaging_channel_id
+            messaging_channel_id=account.messaging_channel_id,
+            conversations_api_id=getattr(account, 'conversations_api_id', None)
         )
