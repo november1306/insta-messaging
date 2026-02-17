@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 import asyncio
 import logging
@@ -118,6 +118,18 @@ class InstagramSyncService:
                 return result
 
             result.conversations_found = len(conversations)
+
+            # Discover conversations_api_id from participants
+            discovered_id = self._discover_conversations_api_id(conversations, account)
+            if discovered_id and discovered_id != account.conversations_api_id:
+                logger.info(
+                    f"Discovered conversations_api_id={discovered_id} for account {account.id}"
+                )
+                account.conversations_api_id = discovered_id
+                # Recreate identity with the new ID
+                identity = AccountIdentity.from_account(account)
+                # Fix previously misclassified messages
+                await self._fix_misclassified_messages(account, identity, discovered_id)
 
             # Filter to recent conversations
             cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours_back)
@@ -486,3 +498,81 @@ class InstagramSyncService:
         except Exception as e:
             # Profile caching is non-critical, just log and continue
             logger.debug(f"Failed to cache profile for {customer_id}: {e}")
+
+    def _discover_conversations_api_id(
+        self,
+        conversations: list[dict],
+        account: Account
+    ) -> Optional[str]:
+        """
+        Discover the business account's Conversations API ID from participant data.
+
+        Instagram uses a THIRD ID in the Conversations API that may differ from both
+        the OAuth profile ID and the webhook messaging_channel_id. This method finds
+        that ID by matching the account's username against conversation participants.
+
+        Args:
+            conversations: List of conversation dicts from Instagram API
+            account: Account model with username to match against
+
+        Returns:
+            The discovered Conversations API ID, or None if not found
+        """
+        if not account.username:
+            return None
+
+        identity = AccountIdentity.from_account(account)
+
+        for conv in conversations:
+            participants = conv.get("participants", {}).get("data", [])
+            for participant in participants:
+                p_username = participant.get("username", "")
+                p_id = participant.get("id")
+                if not p_id or not p_username:
+                    continue
+                # Match by username (case-insensitive)
+                if p_username.lower() == account.username.lower():
+                    if not identity.is_business_id(p_id):
+                        # Found a new ID for this business account
+                        return p_id
+                    # Already known ID
+                    return None
+        return None
+
+    async def _fix_misclassified_messages(
+        self,
+        account: Account,
+        identity: AccountIdentity,
+        conversations_api_id: str
+    ) -> None:
+        """
+        Fix messages that were incorrectly classified as inbound.
+
+        When the Conversations API uses a different ID than what's in business_ids,
+        outbound messages (sent by the business) get classified as inbound because
+        their sender_id doesn't match any known business ID. This method corrects
+        those messages by:
+        1. Setting direction to 'outbound'
+        2. Normalizing sender_id to effective_channel_id for consistency
+
+        Args:
+            account: Account model
+            identity: AccountIdentity with the newly discovered ID
+            conversations_api_id: The newly discovered Conversations API ID
+        """
+        stmt = (
+            update(MessageModel)
+            .where(
+                MessageModel.account_id == account.id,
+                MessageModel.sender_id == conversations_api_id,
+                MessageModel.direction == 'inbound'
+            )
+            .values(
+                direction='outbound',
+                sender_id=identity.effective_channel_id
+            )
+        )
+        result = await self.db.execute(stmt)
+        count = result.rowcount
+        if count > 0:
+            logger.info(f"Fixed {count} misclassified outbound messages for account {account.id}")

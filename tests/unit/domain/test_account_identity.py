@@ -24,6 +24,7 @@ pytestmark = pytest.mark.unit  # Mark all tests in this module as unit tests
 
 INSTAGRAM_ACCOUNT_ID = "17841478096518771"
 MESSAGING_CHANNEL_ID = "25964748486442669"
+CONVERSATIONS_API_ID = "17841428904469177"
 CUSTOMER_ID = "customer_12345"
 ACCOUNT_ID = "acc_test123"
 
@@ -121,6 +122,46 @@ class TestBusinessIds:
         # Assert
         assert None not in identity.business_ids
         assert len(identity.business_ids) == 1
+
+    def test_includes_conversations_api_id_when_set(self):
+        """business_ids should contain conversations_api_id when set."""
+        # Arrange
+        identity = AccountIdentity(
+            account_id=ACCOUNT_ID,
+            instagram_account_id=INSTAGRAM_ACCOUNT_ID,
+            messaging_channel_id=MESSAGING_CHANNEL_ID,
+            conversations_api_id=CONVERSATIONS_API_ID
+        )
+
+        # Assert
+        assert CONVERSATIONS_API_ID in identity.business_ids
+        assert len(identity.business_ids) == 3
+
+    def test_excludes_none_conversations_api_id(self):
+        """business_ids should not include conversations_api_id when None."""
+        # Arrange
+        identity = AccountIdentity(
+            account_id=ACCOUNT_ID,
+            instagram_account_id=INSTAGRAM_ACCOUNT_ID,
+            messaging_channel_id=MESSAGING_CHANNEL_ID,
+            conversations_api_id=None
+        )
+
+        # Assert
+        assert len(identity.business_ids) == 2
+
+    def test_conversations_api_id_defaults_to_none(self):
+        """conversations_api_id should default to None when not provided."""
+        # Arrange
+        identity = AccountIdentity(
+            account_id=ACCOUNT_ID,
+            instagram_account_id=INSTAGRAM_ACCOUNT_ID,
+            messaging_channel_id=MESSAGING_CHANNEL_ID
+        )
+
+        # Assert
+        assert identity.conversations_api_id is None
+        assert len(identity.business_ids) == 2
 
 
 # ============================================
@@ -231,6 +272,38 @@ class TestDetectDirection:
         # Assert
         assert result == "outbound"
 
+    def test_returns_outbound_for_conversations_api_id_sender(self):
+        """Messages from conversations_api_id should be detected as outbound."""
+        # Arrange - this is the core bug scenario: a third ID used by Conversations API
+        identity = AccountIdentity(
+            account_id=ACCOUNT_ID,
+            instagram_account_id=INSTAGRAM_ACCOUNT_ID,
+            messaging_channel_id=MESSAGING_CHANNEL_ID,
+            conversations_api_id=CONVERSATIONS_API_ID
+        )
+
+        # Act
+        result = identity.detect_direction(CONVERSATIONS_API_ID)
+
+        # Assert
+        assert result == "outbound"
+
+    def test_returns_inbound_for_unknown_third_id_without_conversations_api_id(self):
+        """Without conversations_api_id set, a third ID is misclassified as inbound."""
+        # Arrange - demonstrates the bug before the fix
+        identity = AccountIdentity(
+            account_id=ACCOUNT_ID,
+            instagram_account_id=INSTAGRAM_ACCOUNT_ID,
+            messaging_channel_id=MESSAGING_CHANNEL_ID,
+            conversations_api_id=None  # Not yet discovered
+        )
+
+        # Act
+        result = identity.detect_direction(CONVERSATIONS_API_ID)
+
+        # Assert - without the third ID, it's incorrectly classified
+        assert result == "inbound"
+
 
 # ============================================
 # identify_other_party Tests
@@ -338,6 +411,7 @@ class TestFromAccount:
         assert identity.account_id == sample_account.id
         assert identity.instagram_account_id == sample_account.instagram_account_id
         assert identity.messaging_channel_id == sample_account.messaging_channel_id
+        assert identity.conversations_api_id == getattr(sample_account, 'conversations_api_id', None)
 
     def test_creates_identity_with_none_messaging_channel(self, sample_account_no_channel):
         """Factory should handle None messaging_channel_id."""
