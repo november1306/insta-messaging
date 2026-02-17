@@ -12,6 +12,8 @@ config = context.config
 # Override sqlalchemy.url from DATABASE_URL env var if set.
 # This ensures Alembic targets the same DB as the app in production.
 import os
+from dotenv import load_dotenv
+load_dotenv()  # Load .env so DATABASE_URL is available without shell export
 database_url = os.environ.get("DATABASE_URL")
 if database_url:
     # Alembic needs synchronous driver; strip async prefix
