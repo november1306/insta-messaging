@@ -28,6 +28,7 @@ def upgrade() -> None:
         "SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'"
     ))
     if not result.fetchone():
+        # Table doesn't exist yet; create_all() will handle it with the new column
         return
 
     # Check if column already exists (idempotent)
