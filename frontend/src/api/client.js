@@ -16,7 +16,7 @@ const apiClient = axios.create({
     'Content-Type': 'application/json'
     // Authorization header is set dynamically by session store
   },
-  timeout: 10000
+  timeout: 60000
 })
 
 // Request interceptor
