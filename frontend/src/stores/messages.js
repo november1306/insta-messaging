@@ -35,19 +35,42 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
-  async function fetchConversations(accountId = null) {
-    loading.value = true
+  async function fetchConversations(accountId = null, contactIds = null) {
+    // Only show loading spinner for full fetches, not incremental batch updates
+    const isBatchFetch = contactIds && contactIds.length > 0
+    if (!isBatchFetch) loading.value = true
     error.value = null
     try {
-      const params = accountId ? { account_id: accountId } : {}
+      const params = {}
+      if (accountId) params.account_id = accountId
+      if (contactIds && contactIds.length > 0) params.contact_ids = contactIds.join(',')
       const response = await apiClient.get('/ui/conversations', { params })
-      conversations.value = response.data.conversations
+      if (isBatchFetch) {
+        mergeConversations(response.data.conversations)
+      } else {
+        conversations.value = response.data.conversations
+      }
     } catch (err) {
       error.value = err.message
       console.error('Failed to fetch conversations:', err)
     } finally {
-      loading.value = false
+      if (!isBatchFetch) loading.value = false
     }
+  }
+
+  function mergeConversations(newConvs) {
+    for (const newConv of newConvs) {
+      const idx = conversations.value.findIndex(c => c.sender_id === newConv.sender_id)
+      if (idx >= 0) {
+        conversations.value[idx] = newConv
+      } else {
+        conversations.value.unshift(newConv)
+      }
+    }
+    // Re-sort by last_message_time descending
+    conversations.value.sort((a, b) =>
+      new Date(b.last_message_time) - new Date(a.last_message_time)
+    )
   }
 
   async function startSync(accountId = null) {
@@ -256,6 +279,7 @@ export const useMessagesStore = defineStore('messages', () => {
     // Actions
     fetchCurrentAccount,
     fetchConversations,
+    mergeConversations,
     startSync,
     fetchMessages,
     sendMessage,

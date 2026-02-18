@@ -264,14 +264,17 @@ async function handleSSEMessage(data) {
       break
 
     case 'sync_batch_complete':
-      // Refresh conversation list incrementally as each batch finishes
+      // Fetch ONLY the contacts in this batch — tiny targeted request, no full list reload
       if (data.data.account_id === accountsStore.selectedAccount?.account_id) {
-        store.fetchConversations(accountsStore.selectedAccount.account_id)
+        const contactIds = data.data.contact_ids || []
+        if (contactIds.length > 0) {
+          store.fetchConversations(accountsStore.selectedAccount.account_id, contactIds)
+        }
       }
       break
 
     case 'sync_complete':
-      // Sync finished — hide spinner and do a final refresh
+      // Sync finished — hide spinner and do one final full refresh
       if (data.data.account_id === accountsStore.selectedAccount?.account_id) {
         clearTimeout(syncTimeout)
         isSyncing.value = false

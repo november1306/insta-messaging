@@ -541,6 +541,7 @@ async def _fetch_instagram_profile(sender_id: str, access_token: str = None) -> 
 )
 async def get_conversations(
     account_id: Optional[str] = Query(None, description="Instagram account ID to filter by"),
+    contact_ids: Optional[str] = Query(None, description="Comma-separated contact IDs to filter (used for incremental sync updates)"),
     auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
@@ -672,6 +673,17 @@ async def get_conversations(
             .where(subq.c.contact_id != messaging_channel_id)  # Exclude self-messages
             .order_by(desc(MessageModel.timestamp))
         )
+
+        # Optional contact_ids filter (used for incremental sync updates per batch)
+        if contact_ids:
+            ids = [cid.strip() for cid in contact_ids.split(',') if cid.strip()]
+            if ids:
+                stmt = stmt.where(
+                    or_(
+                        and_(MessageModel.direction == 'inbound', MessageModel.sender_id.in_(ids)),
+                        and_(MessageModel.direction == 'outbound', MessageModel.recipient_id.in_(ids))
+                    )
+                )
 
         result = await db.execute(stmt)
         messages = result.scalars().all()
