@@ -613,12 +613,22 @@ async def get_conversations(
             )
 
         # Use messaging_channel_id if set, otherwise fall back to instagram_account_id
-        # This is consistent with the sync function behavior
+        # This is the canonical channel ID used in the response for frontend filtering
         messaging_channel_id = account.messaging_channel_id or account.instagram_account_id
 
         if not messaging_channel_id:
             logger.warning(f"Account {account_id} has no messaging_channel_id or instagram_account_id")
             return ConversationsResponse(conversations=[])
+
+        # Collect ALL possible business IDs for this account.
+        # Messages may have been stored with any of these IDs as the channel,
+        # depending on which ID was "effective" at the time of storage (sync or webhook).
+        # e.g. messages synced before messaging_channel_id was set used instagram_account_id.
+        business_ids = list(filter(None, [
+            account.messaging_channel_id,
+            account.instagram_account_id,
+            account.conversations_api_id,
+        ]))
 
         # Subquery to get the latest message for each contact (customer)
         # A conversation is identified by the contact's Instagram ID
@@ -640,15 +650,15 @@ async def get_conversations(
             )
             .where(
                 or_(
-                    # Inbound to this channel
+                    # Inbound to any known business channel ID
                     and_(
                         MessageModel.direction == 'inbound',
-                        MessageModel.recipient_id == messaging_channel_id
+                        MessageModel.recipient_id.in_(business_ids)
                     ),
-                    # Outbound from this channel
+                    # Outbound from any known business channel ID
                     and_(
                         MessageModel.direction == 'outbound',
-                        MessageModel.sender_id == messaging_channel_id
+                        MessageModel.sender_id.in_(business_ids)
                     )
                 )
             )
@@ -670,7 +680,7 @@ async def get_conversations(
                     MessageModel.timestamp == subq.c.latest_timestamp
                 )
             )
-            .where(subq.c.contact_id != messaging_channel_id)  # Exclude self-messages
+            .where(~subq.c.contact_id.in_(business_ids))  # Exclude self-messages (any business ID)
             .order_by(desc(MessageModel.timestamp))
         )
 
@@ -822,7 +832,9 @@ async def get_conversations(
             # For inbound: contact is the sender
             # For outbound: contact is the recipient
             contact_id = msg.sender_id if msg.direction == 'inbound' else msg.recipient_id
-            channel_id = msg.recipient_id if msg.direction == 'inbound' else msg.sender_id
+            # Always use the canonical messaging_channel_id for the response,
+            # regardless of which business ID was stored in the DB row.
+            # This ensures the frontend filteredConversations match correctly.
 
             # Get profile from pre-fetched map
             profile = profile_map.get(contact_id, {"username": contact_id, "profile_picture_url": None, "account_type": None})
@@ -839,7 +851,7 @@ async def get_conversations(
                 "last_message": msg.message_text or "",
                 "last_message_time": msg_timestamp.isoformat() if msg_timestamp else None,
                 "unread_count": 0,  # TODO: Implement read/unread tracking
-                "messaging_channel_id": channel_id,  # The messaging channel
+                "messaging_channel_id": messaging_channel_id,  # Always the canonical channel ID
                 "account_id": account_id,  # The database account ID (e.g., acc_xxx)
                 "account_type": profile.get("account_type"),  # Contact's account type
             })
