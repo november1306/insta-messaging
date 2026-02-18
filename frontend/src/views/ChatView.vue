@@ -128,6 +128,7 @@ const accountsStore = useAccountsStore()
 const accountTabsRef = ref(null)
 const activeAccountDetails = ref(null)
 const isSyncing = ref(false)
+let syncTimeout = null
 
 // Filter conversations by selected messaging channel
 const filteredConversations = computed(() => {
@@ -261,6 +262,23 @@ async function handleSSEMessage(data) {
         errorMessage
       )
       break
+
+    case 'sync_batch_complete':
+      // Refresh conversation list incrementally as each batch finishes
+      if (data.data.account_id === accountsStore.selectedAccount?.account_id) {
+        store.fetchConversations(accountsStore.selectedAccount.account_id)
+      }
+      break
+
+    case 'sync_complete':
+      // Sync finished — hide spinner and do a final refresh
+      if (data.data.account_id === accountsStore.selectedAccount?.account_id) {
+        clearTimeout(syncTimeout)
+        isSyncing.value = false
+        store.fetchConversations(accountsStore.selectedAccount.account_id)
+        console.log(`[sync] Complete: ${data.data.messages_synced} messages synced`)
+      }
+      break
   }
 }
 
@@ -292,31 +310,23 @@ async function handleSendMessage(formData, onProgress) {
 }
 
 async function refreshConversations() {
-  // Pass selected account ID to fetch conversations for the active account
   const accountId = accountsStore.selectedAccount?.account_id || null
 
-  // First, sync messages from Instagram API (fetches messages sent from native app)
-  // This shows a spinning animation on the refresh button
+  // Start spinner — stays on until sync_complete SSE arrives (or 30s safety timeout)
   isSyncing.value = true
-  try {
-    const syncResult = await store.syncFromInstagram(accountId)
-    if (syncResult?.messages_synced > 0) {
-      console.log(`✅ Synced ${syncResult.messages_synced} new messages from Instagram`)
-    }
-  } finally {
-    isSyncing.value = false
-  }
+  clearTimeout(syncTimeout)
 
-  // Then fetch updated conversations from local database
+  // Fire-and-forget: returns immediately with job_id, sync runs in background
+  await store.startSync(accountId)
+
+  // Immediately show what's already in the DB while background sync runs
   await Promise.all([
     store.fetchCurrentAccount(),
     store.fetchConversations(accountId)
   ])
 
-  // Also refresh messages for active conversation if one is selected
-  if (store.activeConversationId) {
-    await store.fetchMessages(store.activeConversationId, accountId)
-  }
+  // Safety: clear spinner after 30s in case SSE disconnects mid-sync
+  syncTimeout = setTimeout(() => { isSyncing.value = false }, 30000)
 }
 
 // ============================================

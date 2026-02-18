@@ -539,6 +539,103 @@ class InstagramSyncService:
                     return None
         return None
 
+    async def sync_conversations_batched(
+        self,
+        account: Account,
+        hours_back: int = 24,
+        batch_size: int = 3,
+        on_batch_complete=None
+    ) -> SyncResult:
+        """
+        Sync messages in parallel batches, calling on_batch_complete after each.
+
+        This is the async/background version of sync_account(). It processes
+        batch_size conversations concurrently (via asyncio.gather) and commits
+        to the DB after each batch, enabling incremental SSE progress updates.
+
+        Args:
+            account: Account to sync
+            hours_back: Only sync conversations updated within this many hours
+            batch_size: Number of conversations to process concurrently per batch
+            on_batch_complete: async callable(contact_ids, done, total) called after each batch
+
+        Returns:
+            SyncResult with aggregate statistics
+        """
+        result = SyncResult()
+        identity = AccountIdentity.from_account(account)
+
+        try:
+            logger.info(f"Phase 1: Fetching conversation list for account {account.id}...")
+            conversations = await self._fetch_conversations_with_retry()
+
+            if not conversations:
+                logger.info(f"No conversations to sync for account {account.id}")
+                return result
+
+            result.conversations_found = len(conversations)
+
+            # Discover conversations_api_id and fix misclassified messages (same as sync_account)
+            discovered_id = self._discover_conversations_api_id(conversations, account)
+            if discovered_id and discovered_id != account.conversations_api_id:
+                logger.info(f"Discovered conversations_api_id={discovered_id} for account {account.id}")
+                account.conversations_api_id = discovered_id
+                identity = AccountIdentity.from_account(account)
+                await self._fix_misclassified_messages(account, identity, discovered_id)
+
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+            recent = self._filter_by_time(conversations, cutoff_time)
+
+            logger.info(
+                f"Phase 1 complete: {len(recent)}/{result.conversations_found} "
+                f"conversations from last {hours_back}h"
+            )
+
+            # Phase 2: Process in batches
+            for i in range(0, len(recent), batch_size):
+                batch = recent[i:i + batch_size]
+
+                batch_results = await asyncio.gather(
+                    *[
+                        self._sync_conversation(account, identity, conv, 25, True)
+                        for conv in batch
+                    ],
+                    return_exceptions=True
+                )
+
+                contact_ids = []
+                for conv, res in zip(batch, batch_results):
+                    if isinstance(res, Exception):
+                        conv_id = conv.get("id", "unknown")[:20]
+                        logger.warning(f"Batch sync error for conversation {conv_id}...: {res}")
+                        result.errors.append(str(res))
+                    else:
+                        result.conversations_synced += 1
+                        result.messages_synced += res.messages_synced
+                        result.messages_skipped += res.messages_skipped
+                        cid = self._identify_customer(conv, identity)
+                        if cid:
+                            contact_ids.append(cid)
+
+                # Commit this batch to make data available to UI immediately
+                await self.db.commit()
+
+                if on_batch_complete:
+                    done = min(i + batch_size, len(recent))
+                    await on_batch_complete(contact_ids, done, len(recent))
+
+            logger.info(
+                f"Batched sync complete for account {account.id}: "
+                f"{result.conversations_synced}/{result.conversations_found} conversations, "
+                f"{result.messages_synced} new messages, {result.messages_skipped} skipped"
+            )
+
+        except Exception as e:
+            logger.warning(f"Batched sync failed for account {account.id}: {e}")
+            result.errors.append(str(e))
+
+        return result
+
     async def _fix_misclassified_messages(
         self,
         account: Account,

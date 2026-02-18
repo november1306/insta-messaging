@@ -50,29 +50,24 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
-  async function syncFromInstagram(accountId = null) {
+  async function startSync(accountId = null) {
     /**
-     * Sync messages from Instagram's API.
-     * This fetches the full conversation history including messages
-     * sent from the native Instagram app.
+     * Fire-and-forget: starts background sync on the server and returns immediately.
+     * Progress is delivered via SSE events (sync_batch_complete, sync_complete).
      *
      * @param {string|null} accountId - Account to sync, or null for default
-     * @returns {Promise<{conversations_found: number, messages_synced: number, messages_skipped: number}>}
+     * @returns {Promise<{job_id, status, account_id}|null>}
      */
-    loading.value = true
-    error.value = null
     try {
       const params = accountId ? { account_id: accountId } : {}
       const response = await apiClient.post('/ui/sync', null, { params })
-      console.log('📥 Instagram sync result:', response.data)
+      console.log('[sync] Started:', response.data)
       return response.data
     } catch (err) {
-      // Don't set error for sync failures - it's optional
-      console.warn('Instagram sync failed (will use cached data):', err.message)
+      console.warn('[sync] Failed to start sync:', err.message)
       return null
-    } finally {
-      loading.value = false
     }
+    // No loading.value changes — sync runs in background via SSE
   }
 
   async function fetchMessages(senderId, accountId = null) {
@@ -261,7 +256,7 @@ export const useMessagesStore = defineStore('messages', () => {
     // Actions
     fetchCurrentAccount,
     fetchConversations,
-    syncFromInstagram,
+    startSync,
     fetchMessages,
     sendMessage,
     addIncomingMessage,

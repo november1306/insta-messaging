@@ -400,3 +400,35 @@ async def broadcast_message_status(
             data["error_message"] = error_message
 
     await sse_manager.broadcast("message_status", data)
+
+
+async def broadcast_sync_started(account_id: str, total: int, job_id: str):
+    """Broadcast that a background sync has started."""
+    await sse_manager.broadcast("sync_started", {
+        "account_id": account_id,
+        "total": total,
+        "job_id": job_id
+    })
+
+
+async def broadcast_sync_batch_complete(
+    account_id: str,
+    contact_ids: list,
+    done: int,
+    total: int
+):
+    """Broadcast progress after each batch of conversations is synced."""
+    await sse_manager.broadcast("sync_batch_complete", {
+        "account_id": account_id,
+        "contact_ids": contact_ids,
+        "progress": {"done": done, "total": total}
+    })
+
+
+async def broadcast_sync_complete(account_id: str, job_id: str, messages_synced: int):
+    """Broadcast that the background sync has finished (success or error)."""
+    await sse_manager.broadcast("sync_complete", {
+        "account_id": account_id,
+        "job_id": job_id,
+        "messages_synced": messages_synced
+    })

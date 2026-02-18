@@ -11,6 +11,7 @@ Refactored to use centralized cache service.
 import logging
 import httpx
 import jwt
+import uuid
 from fastapi import APIRouter, Depends, Header, HTTPException, status, Query, BackgroundTasks
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1130,15 +1131,89 @@ async def proxy_instagram_image(
 # Sync Response Models
 # ============================================
 
-class SyncResult(BaseModel):
-    """Result of syncing messages from Instagram API"""
-    conversations_found: int = Field(..., description="Number of conversations found in Instagram API")
-    messages_synced: int = Field(..., description="Number of new messages stored")
-    messages_skipped: int = Field(..., description="Number of messages already in database (duplicates)")
-    errors: List[str] = Field(default_factory=list, description="Any errors encountered during sync")
+class SyncStartedResponse(BaseModel):
+    """Response when a background sync job is started"""
+    job_id: str = Field(..., description="Unique job identifier (empty string if already_running)")
+    status: str = Field(..., description="'started' or 'already_running'")
+    account_id: str = Field(..., description="Account being synced")
 
     class Config:
         from_attributes = True
+
+
+# In-memory set of account_ids currently being synced.
+# Prevents duplicate parallel syncs per account on this server instance.
+_active_sync_jobs: set = set()
+
+
+# ============================================
+# Background Sync Task
+# ============================================
+
+async def _run_batched_sync(account_id: str, user_id: int, job_id: str):
+    """
+    Background task that performs batched Instagram sync and broadcasts SSE progress.
+
+    Follows the same pattern as refresh_user_profile_pictures():
+    opens its own DB session via get_db_session_context().
+    """
+    from app.db.connection import get_db_session_context
+    from app.services.encryption_service import decrypt_credential
+    from app.api.events import broadcast_sync_started, broadcast_sync_batch_complete, broadcast_sync_complete
+
+    try:
+        async with get_db_session_context() as db:
+            # Fetch account and verify access
+            result = await db.execute(
+                select(UserAccount).where(
+                    UserAccount.user_id == user_id,
+                    UserAccount.account_id == account_id
+                )
+            )
+            if not result.scalar_one_or_none():
+                logger.warning(f"Sync job {job_id}: user {user_id} lost access to account {account_id}")
+                return
+
+            result = await db.execute(select(Account).where(Account.id == account_id))
+            account = result.scalar_one_or_none()
+
+            if not account or not account.access_token_encrypted:
+                logger.warning(f"Sync job {job_id}: account {account_id} missing or has no token")
+                await broadcast_sync_complete(account_id, job_id, 0)
+                return
+
+            access_token = decrypt_credential(account.access_token_encrypted, settings.session_secret)
+
+            async with httpx.AsyncClient() as http_client:
+                instagram_client = InstagramClient(
+                    http_client=http_client,
+                    access_token=access_token,
+                    logger_instance=logger
+                )
+                sync_service = InstagramSyncService(db, instagram_client)
+
+                # Broadcast start — total unknown until after phase 1; use 0 as placeholder
+                await broadcast_sync_started(account_id, 0, job_id)
+
+                async def on_batch(contact_ids, done, total):
+                    await broadcast_sync_batch_complete(account_id, contact_ids, done, total)
+
+                result = await sync_service.sync_conversations_batched(
+                    account, hours_back=24, batch_size=3, on_batch_complete=on_batch
+                )
+
+            logger.info(
+                f"Sync job {job_id} done: {result.messages_synced} new messages, "
+                f"{result.messages_skipped} skipped"
+            )
+            await broadcast_sync_complete(account_id, job_id, result.messages_synced)
+
+    except Exception as e:
+        logger.error(f"Batched sync job {job_id} failed for account {account_id}: {e}")
+        from app.api.events import broadcast_sync_complete as _bsc
+        await _bsc(account_id, job_id, 0)
+    finally:
+        _active_sync_jobs.discard(account_id)
 
 
 # ============================================
@@ -1147,51 +1222,34 @@ class SyncResult(BaseModel):
 
 @router.post(
     "/ui/sync",
-    response_model=SyncResult,
-    summary="Sync messages from Instagram API",
+    response_model=SyncStartedResponse,
+    summary="Start background sync from Instagram API",
     responses={
-        200: {"description": "Sync completed successfully"},
+        200: {"description": "Sync started (or already running)"},
         400: {"description": "Account not properly configured"},
         403: {"description": "No permission to access this account"},
-        404: {"description": "Account not found"},
-        503: {"description": "Instagram API unavailable"}
+        404: {"description": "Account not found"}
     }
 )
 async def sync_messages_from_instagram(
     account_id: Optional[str] = Query(None, description="Instagram account ID to sync"),
+    background_tasks: BackgroundTasks = None,
     auth: dict = Depends(verify_jwt_or_api_key),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Sync messages from Instagram's Conversations API.
+    Start an async background sync from Instagram's Conversations API.
 
-    This endpoint fetches the full message history from Instagram and stores
-    any messages that are not already in the database. Use this to sync
-    messages sent from the native Instagram app.
-
-    **How it works:**
-    1. Fetches conversations from Instagram API (`GET /me/conversations`)
-    2. For each conversation, gets all messages
-    3. Stores new messages in database (deduplicates by message ID)
-    4. Returns sync statistics
-
-    **Use cases:**
-    - Sync messages sent from Instagram mobile/web app
-    - Initial sync when connecting an account
-    - Recover missed webhook messages
-
-    **Rate limits:**
-    - Instagram API has rate limits (~200 calls/hour)
-    - This endpoint makes 1 API call for conversations list
-    - Consider using sparingly (e.g., manual refresh only)
+    Returns immediately with a job_id. Progress is broadcast via SSE events:
+    - `sync_started` — fired once with total conversation count
+    - `sync_batch_complete` — fired after each batch of 3 conversations
+    - `sync_complete` — fired when all done (always fires, even on error)
 
     **Authentication:** API key or JWT token
     """
-    from app.services.encryption_service import decrypt_credential
-
     user_id = auth.get("user_id")
 
-    # Get account_id from query param or auth context
+    # Resolve account_id
     if not account_id:
         account_id = auth.get("account_id")
         if not account_id:
@@ -1208,26 +1266,19 @@ async def sync_messages_from_instagram(
             UserAccount.account_id == account_id
         )
     )
-    user_account_link = result.scalar_one_or_none()
-
-    if not user_account_link:
+    if not result.scalar_one_or_none():
         logger.warning(f"User {user_id} attempted to sync account {account_id} without permission")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have access to this account"
         )
 
-    # Get account details
-    result = await db.execute(
-        select(Account).where(Account.id == account_id)
-    )
+    # Verify account exists and has a token
+    result = await db.execute(select(Account).where(Account.id == account_id))
     account = result.scalar_one_or_none()
 
     if not account:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
 
     if not account.access_token_encrypted:
         raise HTTPException(
@@ -1235,44 +1286,15 @@ async def sync_messages_from_instagram(
             detail="Account has no access token. Please re-link the account."
         )
 
-    # Decrypt access token
-    try:
-        access_token = decrypt_credential(account.access_token_encrypted, settings.session_secret)
-    except Exception as e:
-        logger.error(f"Failed to decrypt access token for account {account_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to decrypt account credentials"
-        )
+    # Prevent duplicate parallel syncs for the same account
+    if account_id in _active_sync_jobs:
+        logger.info(f"Sync already running for account {account_id}, skipping")
+        return SyncStartedResponse(job_id="", status="already_running", account_id=account_id)
 
-    # Use InstagramSyncService for consistent sync logic
-    # This includes retry handling, proper customer detection, and ID normalization
-    logger.info(f"🔄 Starting Instagram sync for account {account_id} (@{account.username})")
+    job_id = str(uuid.uuid4())[:8]
+    _active_sync_jobs.add(account_id)
 
-    async with httpx.AsyncClient() as http_client:
-        instagram_client = InstagramClient(
-            http_client=http_client,
-            access_token=access_token,
-            logger_instance=logger
-        )
+    background_tasks.add_task(_run_batched_sync, account_id, user_id, job_id)
+    logger.info(f"Started batched sync job {job_id} for account {account_id} (user {user_id})")
 
-        sync_service = InstagramSyncService(db, instagram_client)
-        sync_result = await sync_service.sync_account(account, hours_back=24)
-
-    # Commit all changes
-    try:
-        await db.commit()
-    except Exception as e:
-        logger.error(f"Failed to commit synced messages: {e}")
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to save synced messages"
-        )
-
-    return SyncResult(
-        conversations_found=sync_result.conversations_found,
-        messages_synced=sync_result.messages_synced,
-        messages_skipped=sync_result.messages_skipped,
-        errors=sync_result.errors
-    )
+    return SyncStartedResponse(job_id=job_id, status="started", account_id=account_id)
