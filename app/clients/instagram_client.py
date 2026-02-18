@@ -110,9 +110,13 @@ class InstagramClient:
                 error_data = response.json() if response.text else {}
                 error_message = error_data.get("error", {}).get("message", "Unknown error")
 
-                # If "nonexisting field (profile_pic)" -> this is a business account, try next field set
-                if "nonexisting field" in error_message and field_set_label == "IGSID":
-                    self._logger.debug(f"User {user_id} is a business account, retrying with profile_picture_url")
+                # If IGSID fields failed, try business fields before giving up.
+                # Known triggers: "nonexisting field" error, or HTTP 500 from Graph API.
+                if field_set_label == "IGSID" and (
+                    "nonexisting field" in error_message
+                    or response.status_code == 500
+                ):
+                    self._logger.debug(f"User {user_id}: IGSID lookup failed (status={response.status_code}), retrying with business fields")
                     continue
 
                 self._logger.warning(
