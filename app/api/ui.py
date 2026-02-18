@@ -506,18 +506,11 @@ async def _fetch_instagram_profile(sender_id: str, access_token: str = None) -> 
     """
     try:
         async with httpx.AsyncClient() as http_client:
-            if access_token:
-                instagram_client = InstagramClient(
-                    http_client=http_client,
-                    access_token=access_token,
-                    logger_instance=logger
-                )
-            else:
-                instagram_client = InstagramClient(
-                    http_client=http_client,
-                    settings=settings,
-                    logger_instance=logger
-                )
+            instagram_client = InstagramClient(
+                http_client=http_client,
+                access_token=access_token,
+                logger_instance=logger
+            )
 
             profile = await instagram_client.get_user_profile(sender_id)
 
