@@ -138,7 +138,7 @@ const filteredConversations = computed(() => {
   // Filter conversations where the messaging_channel_id matches selected account's channel
   return store.conversations.filter(conversation => {
     // Conversations have messaging_channel_id which is the unique channel that received the message
-    return conversation.messaging_channel_id === accountsStore.selectedAccount.messaging_channel_id
+    return conversation.messaging_channel_id === accountsStore.selectedAccount.effective_channel_id
   })
 })
 
@@ -178,7 +178,7 @@ async function handleSSEMessage(data) {
         // If this is potentially the first message after OAuth linking (no channel ID yet),
         // refresh accounts from server to get the updated messaging_channel_id.
         // Backend already handles channel binding via _bind_channel_id() in webhook handler.
-        if (accountsStore.selectedAccount && !accountsStore.selectedAccount.messaging_channel_id) {
+        if (accountsStore.selectedAccount && !accountsStore.selectedAccount.effective_channel_id) {
           accountsStore.fetchAccounts().catch(err => {
             console.error('[SSE] Failed to refresh accounts:', err)
           })
