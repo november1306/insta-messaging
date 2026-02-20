@@ -205,11 +205,12 @@ async function handleSSEMessage(data) {
           // Strategy 1: Instagram ID match
           if (m.id === data.data.id) return true
 
-          // Strategy 2: Tracking ID match (optimistic message updated by API)
+          // Strategy 2: Tracking ID match (optimistic message updated by API response)
           if (data.data.tracking_message_id && (m.id === data.data.tracking_message_id || m.trackingId === data.data.tracking_message_id)) return true
 
-          // Strategy 3: Temp ID match (SSE arrived before API response)
-          if (m.tempId && data.data.tracking_message_id && m.tempId.startsWith('temp_')) return true
+          // Strategy 3 removed: tempId format "temp_<timestamp>_<random>" can never equal
+          // tracking_message_id format "msg_<hex12>", so it matched ANY pending message —
+          // a bug when multiple sends were in-flight. Strategy 4 handles the race condition.
 
           // Strategy 4: Content-based fallback (pending message with same text in last 10 seconds)
           if (m.status === 'pending' && m.text === data.data.text && m.recipientId === recipientId) {

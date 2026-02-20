@@ -175,15 +175,10 @@ export function useAuthenticatedMedia() {
    * Cleanup blob URLs when component unmounts
    */
   onUnmounted(() => {
-    blobUrls.value.forEach(url => {
-      URL.revokeObjectURL(url)
-      // Remove from cache
-      for (const [key, value] of blobUrlCache.entries()) {
-        if (value === url) {
-          blobUrlCache.delete(key)
-        }
-      }
-    })
+    // Do NOT revoke blob URLs or remove from blobUrlCache here.
+    // The module-level cache is shared across all component instances;
+    // revoking would break re-mounts that reference the same cached URL.
+    // Cache entries are kept for the lifetime of the page session.
     blobUrls.value.clear()
   })
 
