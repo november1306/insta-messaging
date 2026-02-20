@@ -265,6 +265,15 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
+  function $reset() {
+    conversations.value = []
+    messages.value = {}
+    activeConversationId.value = null
+    loading.value = false
+    error.value = null
+    currentAccount.value = null
+  }
+
   return {
     // State
     conversations,
@@ -286,6 +295,7 @@ export const useMessagesStore = defineStore('messages', () => {
     addIncomingMessage,
     updateMessageStatus,
     updateConversationForOutbound,
-    setActiveConversation
+    setActiveConversation,
+    $reset
   }
 })
