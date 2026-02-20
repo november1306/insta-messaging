@@ -109,6 +109,40 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await init_db()
 
+    # Startup recovery: mark any stuck-pending outbound messages as failed.
+    # These are CRMOutboundMessage rows created by a background send task that was
+    # interrupted by a server restart after Instagram API call but before DB commit.
+    # Without this, the UI shows ○ (pending) permanently with no way to recover.
+    try:
+        from app.db.models import CRMOutboundMessage
+        from app.db.connection import get_db_session as _get_db_session
+        from sqlalchemy import update as sa_update
+
+        async for db in _get_db_session():
+            result = await db.execute(
+                sa_update(CRMOutboundMessage)
+                .where(CRMOutboundMessage.status == "pending")
+                .values(
+                    status="failed",
+                    error_code="server_restart",
+                    error_message=(
+                        "Message delivery interrupted by server restart. "
+                        "The message may or may not have been delivered to Instagram. "
+                        "Please check manually and resend if needed."
+                    ),
+                )
+            )
+            affected = result.rowcount
+            if affected > 0:
+                logger.warning(
+                    f"Startup recovery: marked {affected} stuck-pending "
+                    f"outbound message(s) as failed (server restart during delivery)"
+                )
+            await db.commit()
+            break  # Exit async generator after first iteration
+    except Exception as e:
+        logger.error(f"Failed to run startup pending-message recovery: {e}")
+
     # Check for encrypted data with ephemeral SESSION_SECRET (development only)
     if hasattr(settings, '_using_ephemeral_secret') and settings._using_ephemeral_secret:
         try:
@@ -427,8 +461,12 @@ async def serve_outbound_media(
 
     logger.debug(f"Serving outbound media file (public): {file_path}")
 
-    # Return file for Instagram to fetch
-    return FileResponse(file_path)
+    # Outbound filenames are uuid+timestamp — immutable by construction.
+    # Cache aggressively so the browser won't re-fetch on contact switch.
+    return FileResponse(
+        file_path,
+        headers={"Cache-Control": "public, max-age=86400, immutable"}
+    )
 
 
 @app.get("/media/attachments/{attachment_id}")
