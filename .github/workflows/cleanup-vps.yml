@@ -73,6 +73,10 @@ jobs:
             find /opt -name "*.db" -type f -delete 2>/dev/null || true
             find /opt -name "*.sqlite" -type f -delete 2>/dev/null || true
 
+            # Vacuum systemd journal logs (keep last 100MB)
+            echo "Vacuuming systemd journal logs..."
+            journalctl --vacuum-size=100M || true
+
             echo ""
             echo "=========================================="
             echo "✅ Cleanup complete!"
