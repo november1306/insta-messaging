@@ -818,25 +818,30 @@ async def _bind_channel_id(db: AsyncSession, messaging_channel_id: str) -> None:
             )
             return
 
-        # No matching account - bind to first account without a channel ID
+        # Step 3: Try to match by conversations_api_id (set during sync from Conversations API)
         result = await db.execute(
-            select(Account).where(Account.messaging_channel_id.is_(None))
+            select(Account).where(
+                Account.conversations_api_id == messaging_channel_id,
+                Account.messaging_channel_id.is_(None)
+            )
         )
-        available_account = result.scalars().first()
+        conv_account = result.scalar_one_or_none()
 
-        if available_account:
-            # Bind to first available account
-            available_account.messaging_channel_id = messaging_channel_id
+        if conv_account:
+            conv_account.messaging_channel_id = messaging_channel_id
             await db.commit()
             logger.info(
-                f"✅ Bound channel ID {messaging_channel_id} to account {available_account.id} "
-                f"(@{available_account.username}) - first available account"
+                f"Bound channel ID {messaging_channel_id} to account {conv_account.id} "
+                f"(@{conv_account.username}) - matched by conversations_api_id"
             )
-        else:
-            logger.warning(
-                f"⚠️ Cannot bind channel ID {messaging_channel_id} - no available accounts. "
-                f"All accounts already have channel IDs or no accounts exist."
-            )
+            return
+
+        # No positive match found — do NOT blindly assign to avoid cross-account contamination
+        logger.warning(
+            f"Cannot bind channel {messaging_channel_id} - no account has matching "
+            f"instagram_account_id or conversations_api_id. "
+            f"Webhook will be dropped if no account claims this channel."
+        )
 
     except Exception as e:
         # Log error but don't fail webhook processing
