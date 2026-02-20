@@ -780,11 +780,16 @@ async def _bind_channel_id(db: AsyncSession, messaging_channel_id: str) -> None:
         db: Database session
         messaging_channel_id: The entry.id from webhook (messaging channel identifier)
 
-    Note:
-        - Idempotent: Safe to call multiple times with same channel_id
-        - If channel_id already bound, does nothing
-        - If not bound, tries to bind to first account without a channel_id
-        - Logs warning if cannot bind (no available accounts)
+    Binding uses three steps in order:
+        1. Already bound (idempotency check) — return immediately
+        2. instagram_account_id match — bind if IDs are equal
+        3. conversations_api_id match — bind if set by prior sync
+
+    If no positive match is found, logs a WARNING and returns without
+    modifying any account. Never blindly assigns to avoid cross-account
+    data contamination in multi-tenant setups.
+
+    See .claude/CHANNEL_BINDING_GUIDE.md for full algorithm details.
     """
     try:
         # Check if this channel ID is already bound to an account
