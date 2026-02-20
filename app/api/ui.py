@@ -649,6 +649,7 @@ async def get_conversations(
                 func.max(MessageModel.timestamp).label('latest_timestamp')
             )
             .where(
+                MessageModel.account_id == account_id,
                 or_(
                     # Inbound to any known business channel ID
                     and_(
@@ -680,7 +681,10 @@ async def get_conversations(
                     MessageModel.timestamp == subq.c.latest_timestamp
                 )
             )
-            .where(~subq.c.contact_id.in_(business_ids))  # Exclude self-messages (any business ID)
+            .where(
+                MessageModel.account_id == account_id,
+                ~subq.c.contact_id.in_(business_ids)  # Exclude self-messages (any business ID)
+            )
             .order_by(desc(MessageModel.timestamp))
         )
 
