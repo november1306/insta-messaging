@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import apiClient from '../api/client'
+import { useMessagesStore } from './messages'
+import { useAccountsStore } from './accounts'
 
 export const useSessionStore = defineStore('session', () => {
   // State
@@ -132,6 +134,8 @@ export const useSessionStore = defineStore('session', () => {
 
   function logout() {
     clearSession()
+    useMessagesStore().$reset()
+    useAccountsStore().$reset()
     // Router will handle redirect to login via navigation guard
     return true
   }
