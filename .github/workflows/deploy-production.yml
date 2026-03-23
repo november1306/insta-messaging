@@ -65,7 +65,7 @@ jobs:
             DATABASE_URL=sqlite+aiosqlite:////opt/insta-messaging/data/production.db
 
             # Public Base URL (required for outbound media attachments and OAuth redirects)
-            # Set PUBLIC_BASE_URL secret to just the domain (e.g., abuh.com.ua)
+            # Set PUBLIC_BASE_URL secret to just the domain (e.g., api.router.abuh.com.ua)
             # Frontend URL is derived automatically: PUBLIC_BASE_URL + "/chat/"
             PUBLIC_BASE_URL=https://${{ secrets.PUBLIC_BASE_URL || '185.156.43.172' }}
 
@@ -283,7 +283,7 @@ jobs:
             DATABASE_URL=sqlite+aiosqlite:////opt/insta-messaging/data/production.db
 
             # Public Base URL (required for outbound media attachments and OAuth redirects)
-            # Set PUBLIC_BASE_URL secret to just the domain (e.g., abuh.com.ua)
+            # Set PUBLIC_BASE_URL secret to just the domain (e.g., api.router.abuh.com.ua)
             # Frontend URL is derived automatically: PUBLIC_BASE_URL + "/chat/"
             PUBLIC_BASE_URL=https://${{ secrets.PUBLIC_BASE_URL || '185.156.43.172' }}
 
